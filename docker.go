@@ -49,7 +49,8 @@ func main() {
   // build image
   fmt.Println(reflect.TypeOf(df))
   imagebuilt, err := cli.ImageBuild(ctx,df,types.ImageBuildOptions{
-    Tags: []string{"test-repo:latest"} })
+    Tags: []string{"test-repo:latest"},
+    Remove: true })
   if err != nil {
     panic(err)
   }
