@@ -12,7 +12,7 @@ import (
 
   "github.com/docker/docker/client"
 	"github.com/docker/docker/api/types"
-	// "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/container"
 	// "github.com/docker/docker/pkg/stdcopy"
 )
 
@@ -67,8 +67,39 @@ func main() {
     panic(err)
   }
 
+  // create a container
+  contcreate, err := cli.ContainerCreate(ctx, &container.Config{ Image: "test-repo:latest" },
+                           &container.HostConfig{ AutoRemove: true }, //hostConfig *container.HostConfig,
+                           nil, //networkingConfig *network.NetworkingConfig,
+                           nil, //platform *specs.Platform,
+                           "test-repo-cont")
+  if err != nil {
+    panic(err)
+  }
+
+  fmt.Println(contcreate.ID)
+  fmt.Println(contcreate.Warnings)
+
+  // start container
+  errstr := cli.ContainerStart(ctx, contcreate.ID, types.ContainerStartOptions{})
+  if errstr != nil {
+    panic(errstr)
+  }
+
+  // retrieve container logs
+  logs, err := cli.ContainerLogs(ctx, contcreate.ID, types.ContainerLogsOptions{ ShowStdout: true, ShowStderr: true})
+  if err != nil {
+    panic(err)
+  }
+  numbytes, err := io.Copy(os.Stdout,logs)
+  if err != nil {
+    panic(err)
+  } else {
+    fmt.Println("number of bytes in log",numbytes)
+  }
+
   //  list containers
-  containers, err := cli.ContainerList(ctx, types.ContainerListOptions{})
+  containers, err := cli.ContainerList(ctx, types.ContainerListOptions{ All: true })
 	if err != nil {
 		panic(err)
 	}
@@ -78,38 +109,4 @@ func main() {
 	}
 
 
-
-    // reader, err := cli.ImagePull(ctx, "docker.io/library/alpine", types.ImagePullOptions{})
-    // if err != nil {
-    //     panic(err)
-    // }
-    // io.Copy(os.Stdout, reader)
-    //
-    // resp, err := cli.ContainerCreate(ctx, &container.Config{
-    //     Image: "alpine",
-    //     Cmd:   []string{"echo", "hello world"},
-    // }, nil, nil, nil, "")
-    // if err != nil {
-    //     panic(err)
-    // }
-    //
-    // if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-    //     panic(err)
-    // }
-    //
-    // statusCh, errCh := cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
-    // select {
-    // case err := <-errCh:
-    //     if err != nil {
-    //         panic(err)
-    //     }
-    // case <-statusCh:
-    // }
-    //
-    // out, err := cli.ContainerLogs(ctx, resp.ID, types.ContainerLogsOptions{ShowStdout: true})
-    // if err != nil {
-    //     panic(err)
-    // }
-    //
-    // stdcopy.StdCopy(os.Stdout, os.Stderr, out)
 }
