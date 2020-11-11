@@ -10,6 +10,9 @@ root permissions by default.
 
 ### References
 
+- https://godoc.org/
+- https://stackoverflow.com/questions/38804313/build-docker-image-from-go-code
+
 - https://docs.docker.com/engine/api/sdk/
 - https://docs.docker.com/engine/api/sdk/examples/
 

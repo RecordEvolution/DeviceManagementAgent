@@ -4,10 +4,11 @@ import (
   "fmt"
   "time"
   "reflect"
+  // "strings"
 
   "context"
-  // "io"
   "os"
+  "io"
 
   "github.com/docker/docker/client"
 	"github.com/docker/docker/api/types"
@@ -38,7 +39,7 @@ func main() {
   }
 
   // creater io.Reader for Dockerfile
-  df, err := os.Open("/home/mariof/Downloads/test-repo.tar")
+  df, err := os.Open("/home/mariof/Downloads/test-repo.tar.gz")
   if err != nil {
     panic(err)
   }
@@ -47,12 +48,24 @@ func main() {
 
   // build image
   fmt.Println(reflect.TypeOf(df))
-  built, err := cli.ImageBuild(ctx,df,types.ImageBuildOptions{
-    Tags:   []string{"imagename"}})
+  imagebuilt, err := cli.ImageBuild(ctx,df,types.ImageBuildOptions{
+    Tags: []string{"test-repo:latest"} })
   if err != nil {
     panic(err)
   }
-  fmt.Println(built)
+  defer imagebuilt.Body.Close()
+  // buffrep := new(strings.Builder)
+  // buffstr, err := io.Copy(buffrep,imagebuilt.Body)
+  // fmt.Println(buffstr)
+
+  // buf := new(bytes.Buffer)
+    // buf.ReadFrom(response.Body)
+    // newStr := buf.String()
+
+  _, err = io.Copy(os.Stdout, imagebuilt.Body)
+  if err != nil {
+    panic(err)
+  }
 
   //  list containers
   containers, err := cli.ContainerList(ctx, types.ContainerListOptions{})

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # define default archive name and path
-arpa="${HOME}/Downloads/test-repo.tar.xz"
+arpa="${HOME}/Downloads/test-repo.tar.gz"
 
 echo "generating test repository ${arpa}"
 
