@@ -34,6 +34,8 @@ scriptfile=$(cat << 'EOF'
 
 echo "Hello World!"
 
+ls -lh
+
 EOF
 )
 
@@ -41,8 +43,13 @@ EOF
 echo "${dockerfile}" > ${arpafol}/Dockerfile
 echo "${scriptfile}" > ${arpafol}/start-app.sh
 
+# show contents of repository
+ls -lh ${arpafol}
+
 # generate (compressed) archive from repository
-tar -cvzf ${arpa} ${argafol}
+pushd ${arpafol}
+tar -cvzf ${arpa} *
+popd
 
 # remove respository folder
-rm -rvf ${arpa}
+rm -rvf ${arpafol}
