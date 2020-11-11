@@ -1,8 +1,10 @@
 
 ## Docker SDK for Go
 
-In order to implement a _daemon_ an IoT device that is able to manage, create,
-stop and remove _Docker containers_ we use the officially supported _Go_ SDK.
+In order to implement a _daemon_ running on an IoT device that is able to manage,
+create, stop and remove _Docker containers_ we use the officially supported _Go_
+SDK.
+
 Please remember that on a default docker setup on a Linux platform we always
 have to launch the daemon with root permissions, since the docker daemon is
 accessed via the socket `///var/run/docker.sock` which is only readable with
