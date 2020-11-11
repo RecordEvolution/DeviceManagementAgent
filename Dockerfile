@@ -9,4 +9,3 @@ RUN git clone https://github.com/darrenjs/wampcc.git
 RUN apt-get install -y libuv1 libjansson-dev
 
 CMD ["sleep","1000"]
-
