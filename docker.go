@@ -47,7 +47,8 @@ func main() {
 
   // build image
   fmt.Println(reflect.TypeOf(df))
-  built, err := cli.ImageBuild(ctx,df,types.ImageBuildOptions{})
+  built, err := cli.ImageBuild(ctx,df,types.ImageBuildOptions{
+    Tags:   []string{"imagename"}})
   if err != nil {
     panic(err)
   }

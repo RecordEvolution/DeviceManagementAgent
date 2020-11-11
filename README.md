@@ -16,8 +16,6 @@ root permissions by default.
 - https://godoc.org/github.com/docker/docker/client
 - https://github.com/docker/go-docker
 - https://docs.docker.com/engine/api/
-- https://docs.docker.com/engine/api/v1.40/#section/Versioning
-
 
 
 - https://github.com/moby/moby
