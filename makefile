@@ -1,5 +1,5 @@
 
-SRC := docker
+SRC := wamp
 EXE := goat
 GOC := go
 BFL := -v
