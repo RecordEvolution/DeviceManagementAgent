@@ -4,4 +4,6 @@ echo "starting to build WAMP client..."
 
 make
 
-./goat
+file ./goat-*
+
+./goat-*

@@ -9,7 +9,7 @@ BFL := -v
 # (check list of currently supported architectures by doing $ go tool dist list )
 CGO := 0
 GOS := linux
-ARC := arm64
+ARC := amd64
 ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC)
 # GOARM=5
 

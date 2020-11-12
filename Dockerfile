@@ -4,8 +4,9 @@ FROM ubuntu:latest
 RUN export DEBIAN_FRONTEND=noninteractive && \
   apt-get update && apt-get upgrade -y && \
   apt-get install -y \
-  golang make git
+  golang make git file
 
+RUN update-ca-certificates
 RUN go get github.com/gammazero/nexus/client
 
 COPY makefile ./makefile
