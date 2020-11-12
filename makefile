@@ -20,5 +20,7 @@ EXEF := $(EXE)-$(GOS)-$(ARC)
 $(EXEF) : ./$(SRC).go
 	 $(ENV) $(GOC) build -o $@ $(BFL) $<
 
+router : router.go
+	$(ENV) $(GOC) build -o $@ $(BFL) $<
 clean :
 	rm -f $(EXEF)
