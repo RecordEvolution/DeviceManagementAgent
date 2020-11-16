@@ -4,7 +4,9 @@
 SRC := client.cpp
 EXE := client
 CPP := g++
-OPT := -std=c++11 -O2 -static
+OPT := -std=c++11 -O2 #-static
+HDR := /var/tmp/wampcc_install/include/
+LIB := /var/tmp/wampcc_install/lib/
 
 # include platform name/architecture into executable
 ARC := $(shell uname -m)
@@ -13,9 +15,15 @@ EXEF := $(EXE)-$(ARC)-$(OSN)
 
 # compile
 $(EXEF) : ./$(SRC)
-	$(CPP) $(OPT) $< -o $@
+	$(CPP) $(OPT) -c $< -o client.o -I $(HDR)
+	$(CPP) $(OPT) client.o -o $@ -lwampcc -lwampcc_json -L $(LIB) -luv -L /usr/lib/
+	#$(CPP) $(OPT) $< -o $@ -I$(HDR) -l$(LIB)
 
 clean :
+	rm -f *.o
 	rm -f $(EXEF)
+
+run :
+	LD_LIBRARY_PATH=/var/tmp/wampcc_install/lib ./client-x86_64-linux
 
 # --------------------------------------------------------------------------- #
