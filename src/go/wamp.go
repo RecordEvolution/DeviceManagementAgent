@@ -16,13 +16,14 @@ import (
   "context"
   // "io/ioutil"
   "time"
+  "bufio"
+  "os"
 
   // "net/http"
   // "encoding/pem"
-
   "crypto/tls"
-  // "crypto/rsa"
   // "crypto/x509"
+  // "crypto/rsa"
 
 	"github.com/gammazero/nexus/client"
 	"github.com/gammazero/nexus/wamp"
@@ -48,26 +49,28 @@ func main() {
   // load private key and certificate
   // (see https://gist.github.com/jshap70/259a87a7146393aab5819873a193b88c)
   // privkey, err := ioutil.ReadFile("/home/mariof/Downloads/key.pem")
-  // privPem, _ := pem.Decode(privkey)
+  // privPem, _ := pem.Decode([]byte(privkey))
+  // pkey, err := x509.ParsePKCS1PrivateKey(privPem.Bytes)
   // var privPemBytes []byte
   // privPemBytes = privPem.Bytes
   // var parsedKey interface{}
   // parsedKey, err = x509.ParsePKCS1PrivateKey(privPemBytes)
 
-  // TLS configuration
-  // https://godoc.org/crypto/tls#Config
-  // https://golang.org/pkg/crypto/tls/
-  // var tlscerts []tls.Certificate
-  // tlscerts = append(tlscerts, tls.Certificate { PrivateKey: parsedKey })
-  tlscfg := tls.Config {
-    // Rand io.Reader
-    // Time func() time.Time
-    // Certificates: tlscerts
-    InsecureSkipVerify: true }
+  // certif, err := ioutil.ReadFile("/home/mariof/Downloads/cert.pem")
+  // certPem, _ := pem.Decode([]byte(certif))
+  // cert, err := x509.ParseCertificate(certPem.Bytes)
 
-  // define response duration
-  dur, _ := time.ParseDuration("0h0m10s")
+  // declare certificate struct
+  // tslcfg := tls.Certificate{
+  //     Certificate: certPem.Bytes,
+  //     PrivateKey: pkey,
+  // }
 
+  tlscert, err := tls.LoadX509KeyPair("/home/mariof/Downloads/cert.pem","/home/mariof/Downloads/key.pem")
+  if err != nil {
+    panic(err)
+  }
+  // fmt.Println(tlscert)
 
   // client configuration
   cfg := client.Config {
@@ -76,11 +79,17 @@ func main() {
 			"authid": "44-3285",
     },
     // https://crossbar.io/docs/Challenge-Response-Authentication/
-    AuthHandlers: map[string]client.AuthFunc{ "wampcra": clientAuthFunc },
+    AuthHandlers: map[string]client.AuthFunc{
+      "wampcra": clientAuthFunc,
+    },
     Debug: true,
-    ResponseTimeout: dur,
+    ResponseTimeout: 5*time.Second,
     // Serialization:
-    TlsCfg: &tlscfg }
+    TlsCfg: &tls.Config {
+      // Rand io.Reader
+      // Time func() time.Time
+      Certificates: []tls.Certificate{ tlscert },
+      InsecureSkipVerify: true } }
     // WsCfg transport.WebsocketConfig
 
   // set up WAMP client
@@ -90,6 +99,28 @@ func main() {
     panic(err)
   }
   defer clnt.Close()
+
+  // func (c *Client) Register(procedure string, fn InvocationHandler, options wamp.Dict)
+  // https://godoc.org/github.com/gammazero/nexus/client#Client.Register
+
+  // Define function that is called to perform remote procedure.
+  sum := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+      var sum int64
+      for _, arg := range inv.Arguments {
+          n, _ := wamp.AsInt64(arg)
+          sum += n
+      }
+      return client.InvokeResult{Args: wamp.List{sum}}
+  }
+
+  err = clnt.Register("sum", sum, nil)
+  if err != nil {
+    panic(err)
+  }
+
+
+  fmt.Println("...press Enter to close connection...")
+  bufio.NewReader(os.Stdin).ReadBytes('\n')
 
 }
 
