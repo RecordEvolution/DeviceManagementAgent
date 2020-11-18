@@ -4,6 +4,12 @@
 ### References
 
 - https://wamp-proto.org/_static/gen/wamp_latest.html
+- https://godoc.org/github.com/gammazero/nexus/client#ConnectNet
+- https://crossbar.io/docs/Challenge-Response-Authentication/
+
+- https://github.com/gammazero/nexus
+- https://github.com/gammazero/nexus/wiki
+- https://sourcegraph.com/github.com/gammazero/nexus@96d8c237ee8727b31fbebe0074d5cfec3f7b8a81/-/blob/aat/auth_test.go
 
 
 ## Docker SDK for Go

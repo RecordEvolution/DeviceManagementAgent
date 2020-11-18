@@ -23,3 +23,7 @@ tls.Config {
 
 and activating the - of course insecure - option `InsecureSkipVerify`. However,
 its better to avoid this and make sure the router carries a valid certificate!
+
+## References
+
+- https://golang.org/pkg/crypto/tls/
