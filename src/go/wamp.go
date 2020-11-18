@@ -25,6 +25,8 @@ import (
 )
 
 const (
+  // realm = "userapps"
+  // addr  = "ws://cb.reswarm.io:8088"
   realm = "realm1"
   addr  = "wss://cb.reswarm.io:8080"
 )
@@ -56,7 +58,7 @@ func main() {
   cfg := client.Config {
     Realm: realm,
     Debug: true }
-    // TlsCfg: &tlscfg }
+    // TlsCfg: &tlscfg
 
   // set up WAMP client
   clnt, err := client.ConnectNet(ctx, addr, cfg)
