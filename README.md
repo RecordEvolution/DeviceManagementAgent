@@ -1,4 +1,11 @@
 
+## WAMP
+
+### References
+
+- https://wamp-proto.org/_static/gen/wamp_latest.html
+
+
 ## Docker SDK for Go
 
 In order to implement a _daemon_ running on an IoT device that is able to manage,

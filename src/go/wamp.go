@@ -15,20 +15,26 @@ import (
   "fmt"
   "context"
   // "io/ioutil"
+  "time"
+
+  // "net/http"
+  // "encoding/pem"
+
+  "crypto/tls"
+  // "crypto/rsa"
+  // "crypto/x509"
 
 	"github.com/gammazero/nexus/client"
-	// "github.com/gammazero/nexus/wamp"
-  // "crypto/rsa"
-  // "crypto/tls"
-  // "crypto/x509"
-  // "encoding/pem"
+	"github.com/gammazero/nexus/wamp"
+  "github.com/gammazero/nexus/wamp/crsign"
+
 )
 
 const (
   // realm = "userapps"
   // addr  = "ws://cb.reswarm.io:8088"
   realm = "realm1"
-  addr  = "wss://cb.reswarm.io:8080"
+  routerURL = "wss://cb.reswarm.io:8080"
 )
 
 
@@ -50,21 +56,45 @@ func main() {
 
   // TLS configuration
   // https://godoc.org/crypto/tls#Config
+  // https://golang.org/pkg/crypto/tls/
   // var tlscerts []tls.Certificate
   // tlscerts = append(tlscerts, tls.Certificate { PrivateKey: parsedKey })
-  // tlscfg := tls.Config { Certificates: tlscerts }
+  tlscfg := tls.Config {
+    // Rand io.Reader
+    // Time func() time.Time
+    // Certificates: tlscerts
+    InsecureSkipVerify: true }
+
+  // define response duration
+  dur, _ := time.ParseDuration("0h0m10s")
+
 
   // client configuration
   cfg := client.Config {
-    Realm: realm,
-    Debug: true }
-    // TlsCfg: &tlscfg
+    Realm: "realm1",
+    HelloDetails: wamp.Dict{
+			"authid": "44-3285",
+    },
+    // https://crossbar.io/docs/Challenge-Response-Authentication/
+    AuthHandlers: map[string]client.AuthFunc{ "wampcra": clientAuthFunc },
+    Debug: true,
+    ResponseTimeout: dur,
+    // Serialization:
+    TlsCfg: &tlscfg }
+    // WsCfg transport.WebsocketConfig
 
   // set up WAMP client
-  clnt, err := client.ConnectNet(ctx, addr, cfg)
+  // https://godoc.org/github.com/gammazero/nexus/client#ConnectNet
+  clnt, err := client.ConnectNet(ctx,"wss://cb.reswarm.io:8080",cfg)
   if err != nil {
     panic(err)
   }
   defer clnt.Close()
 
+}
+
+func clientAuthFunc(c *wamp.Challenge) (string, wamp.Dict) {
+	// Assume that client only operates as one user and knows the key to use.
+	// password := askPassword(chStr)
+	return crsign.RespondChallenge("CZ3amCyKMxLsauC5+vGTZw==", c, nil), wamp.Dict{}
 }
