@@ -17,7 +17,7 @@ ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC)
 EXEF := $(EXE)-$(GOS)-$(ARC)
 
 # compile
-$(EXEF) : ./$(SRC).go
+$(EXEF) : ./$(SRC)
 	 $(ENV) $(GOC) build -o $@ $(BFL) $<
 
 router : router.go
