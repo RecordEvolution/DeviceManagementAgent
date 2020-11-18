@@ -43,6 +43,16 @@ async def joined(session,details) :
     print(session)
     print(details)
 
+    try:
+        session.register(is_running, u're.mgmt.' + '813e9e53-fe1f-4a27-a1bc-a97e8846a5a2' + '.is_running')
+        print("procedure registered")
+    except Exception as e:
+        print("could not register procedure: {0}".format(e))
+
+# @demo.register(u're.mgmt.' + '813e9e53-fe1f-4a27-a1bc-a97e8846a5a2' + '.is_running')
+def is_running():
+    return True
+
 # # 1. subscribe to a topic
 # @demo.subscribe(u'realm1')
 # def hello(msg):
