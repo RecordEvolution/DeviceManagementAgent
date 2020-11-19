@@ -6,9 +6,9 @@ import OpenSSL # python3 -m pip install pyopenssl service_identity
 from twisted.internet.ssl import CertificateOptions
 
 # read private key and certificate
-with open('/home/mariof/Downloads/key.pem','r') as fin :
+with open('../go/deviceagent/key.pem','r') as fin :
     key_pem = fin.read()
-with open('/home/mariof/Downloads/cert.pem','r') as fin :
+with open('../go/deviceagent/cert.pem','r') as fin :
     cert_pem = fin.read()
 
 # https://autobahn.readthedocs.io/en/latest/wamp/programming.html
