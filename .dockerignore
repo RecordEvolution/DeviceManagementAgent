@@ -2,5 +2,6 @@
 goat-*
 client-*
 deviceagent-*
+deviceagent-linux-amd64
 README*
 *.md
