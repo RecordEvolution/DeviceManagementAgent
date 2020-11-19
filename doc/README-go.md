@@ -27,4 +27,7 @@ int unless you have a specific reason to use a sized or unsigned integer type.
 
 ## References
 
+- https://golang.org/doc/effective_go.html#interfaces_and_types
+- https://golangbot.com/go-packages/
 - https://www.openmymind.net/Introduction-To-Go-Structures-Data-Instances/
+- https://verticalaxisbd.com/blog/code-splitting-go/

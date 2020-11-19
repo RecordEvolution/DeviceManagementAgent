@@ -1,4 +1,6 @@
 
-goat
+goat-*
+client-*
+deviceagent-*
 README*
 *.md

@@ -1,7 +1,7 @@
 
 # set source file, name of executable, compiler and its options
 SRC := wamp.go
-EXE := client
+EXE := deviceagent
 GOC := go
 BFL := -v
 
@@ -25,5 +25,6 @@ $(EXEF) : ./$(SRC)
 
 router : router.go
 	$(ENV) $(GOC) build -o $@ $(BFL) $<
+
 clean :
 	rm -f $(EXEF)
