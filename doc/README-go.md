@@ -21,7 +21,10 @@ float32 float64
 complex64 complex128
 ```
 
-The int, uint, and uintptr types are usually 32 bits wide on 32-bit systems and 
-64 bits wide on 64-bit systems. When you need an integer value you should use 
+The int, uint, and uintptr types are usually 32 bits wide on 32-bit systems and
+64 bits wide on 64-bit systems. When you need an integer value you should use
 int unless you have a specific reason to use a sized or unsigned integer type.
 
+## References
+
+- https://www.openmymind.net/Introduction-To-Go-Structures-Data-Instances/

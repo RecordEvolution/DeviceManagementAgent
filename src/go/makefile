@@ -1,7 +1,7 @@
 
 # set source file, name of executable, compiler and its options
 SRC := wamp.go
-EXE := goat
+EXE := client
 GOC := go
 BFL := -v
 
