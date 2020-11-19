@@ -189,6 +189,9 @@ func main() {
     panic(err)
   }
 
+	regID, _ := clnt.RegistrationID("re.mgmt." + clientid + ".is_running")
+	fmt.Println("registration ID of 'is_running' ",regID)
+
 
   fmt.Println("...press Enter to close connection...")
   bufio.NewReader(os.Stdin).ReadBytes('\n')
