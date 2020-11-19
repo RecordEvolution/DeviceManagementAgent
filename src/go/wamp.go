@@ -66,7 +66,7 @@ func main() {
   //     PrivateKey: pkey,
   // }
 
-  tlscert, err := tls.LoadX509KeyPair("/home/mariof/Downloads/cert.pem","/home/mariof/Downloads/key.pem")
+  tlscert, err := tls.LoadX509KeyPair("cert.pem","key.pem")
   if err != nil {
     panic(err)
   }
@@ -104,14 +104,14 @@ func main() {
   // https://godoc.org/github.com/gammazero/nexus/client#Client.Register
 
   // Define function that is called to perform remote procedure.
-  sum := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-      var sum int64
-      for _, arg := range inv.Arguments {
-          n, _ := wamp.AsInt64(arg)
-          sum += n
-      }
-      return client.InvokeResult{Args: wamp.List{sum}}
-  }
+  // sum := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+  //     var sum int64
+  //     for _, arg := range inv.Arguments {
+  //         n, _ := wamp.AsInt64(arg)
+  //         sum += n
+  //     }
+  //     return client.InvokeResult{Args: wamp.List{sum}}
+  // }
 
   err = clnt.Register("sum", sum, nil)
   if err != nil {
@@ -122,6 +122,15 @@ func main() {
   fmt.Println("...press Enter to close connection...")
   bufio.NewReader(os.Stdin).ReadBytes('\n')
 
+}
+
+func sum(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+    var sum int64
+    for _, arg := range inv.Arguments {
+        n, _ := wamp.AsInt64(arg)
+        sum += n
+    }
+    return client.InvokeResult{Args: wamp.List{sum}}
 }
 
 func clientAuthFunc(c *wamp.Challenge) (string, wamp.Dict) {
