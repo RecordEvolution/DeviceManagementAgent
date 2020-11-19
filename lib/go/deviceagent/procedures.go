@@ -4,6 +4,7 @@ package main
 
 import (
   "context"
+  "time"
   "github.com/gammazero/nexus/v3/client"
   "github.com/gammazero/nexus/v3/wamp"
 )
@@ -49,7 +50,9 @@ func AgentRestart(ctx context.Context, inv *wamp.Invocation) client.InvokeResult
   return client.InvokeResult{Args: wamp.List{}}
 }
 func DeviceHandshake(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-  return client.InvokeResult{Args: wamp.List{}}
+  nowis := time.Now().String()
+  deviceid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
+  return client.InvokeResult{Args: wamp.List{ nowis, deviceid }}
 }
 // FIREWALL
 func ApplyFirewall(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
