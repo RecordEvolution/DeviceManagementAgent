@@ -3,26 +3,26 @@
 package main
 
 import (
-  // "fmt"
-  // "time"
-  // "reflect"
-  // // "strings"
-  //
-  // "context"
-  // "os"
-  // "io"
-  //
-  // "github.com/docker/docker/client"
-	// "github.com/docker/docker/api/types"
-	// "github.com/docker/docker/api/types/container"
-	// "github.com/docker/docker/pkg/stdcopy"
+  "context"
+  "github.com/gammazero/nexus/v3/client"
+  "github.com/gammazero/nexus/v3/wamp"
 )
 
-func TestFunction(x int, y int) (z int) {
-  z = x + y
-  return z
+func TestFunction(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+  x, _ := wamp.AsInt64(inv.Arguments[0])
+  y, _ := wamp.AsInt64(inv.Arguments[1])
+  z := x + y
+  return client.InvokeResult{Args: wamp.List{z}}
 }
 
+func sum(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+    var sum int64
+    for _, arg := range inv.Arguments {
+        n, _ := wamp.AsInt64(arg)
+        sum += n
+    }
+    return client.InvokeResult{Args: wamp.List{sum}}
+}
 
 
 // ------------------------------------------------------------------------- //

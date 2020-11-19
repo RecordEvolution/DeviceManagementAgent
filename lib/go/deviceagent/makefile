@@ -1,5 +1,6 @@
 
 EXE := deviceagent
+DEP := main.go procedures.go
 
 CGO := 0
 GOS := linux
@@ -8,7 +9,7 @@ ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC)
 
 EXEF := $(EXE)-$(GOS)-$(ARC)
 
-$(EXEF) :
+$(EXEF) : $(DEP)
 	$(ENV) go build -o $(EXEF) .
 
 clean :
