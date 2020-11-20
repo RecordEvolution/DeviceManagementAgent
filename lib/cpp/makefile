@@ -15,8 +15,8 @@ EXEF := $(EXE)-$(ARC)-$(OSN)
 
 # compile
 $(EXEF) : ./$(SRC)
-	$(CPP) $(OPT) -c $< -o client.o -I $(HDR)
-	$(CPP) $(OPT) client.o -o $@ -lwampcc -lwampcc_json -luv -L /usr/lib/ -L $(LIB)
+	$(CPP) $(OPT) -c $< -o client.o -I $(HDR) -I /usr/local/include -I /usr/include
+	$(CPP) $(OPT) client.o -o $@ -lwampcc -lwampcc_json -luv -lpthread -lssl -L /usr/local/lib/ -L /usr/lib -L $(LIB)
 	#$(CPP) $(OPT) $< -o $@ -I$(HDR) -l$(LIB)
 
 clean :
