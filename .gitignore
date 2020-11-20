@@ -3,6 +3,8 @@
 *.so
 *.a
 
+*.log
+
 goat*
 client-*
 deviceagent-*
