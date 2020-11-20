@@ -28,23 +28,23 @@ demo = Component(
             )
         },
         "serializers": ['json'],
-        'max_retries': -1,
-        'initial_retry_delay': 1,
-        'max_retry_delay': 4,
-        'retry_delay_growth': 2,
-        'retry_delay_jitter': 0.1,
+        # 'max_retries': -1,
+        # 'initial_retry_delay': 1,
+        # 'max_retry_delay': 4,
+        # 'retry_delay_growth': 2,
+        # 'retry_delay_jitter': 0.1,
         # you can set various websocket options here if you want
-        "options": {
-            "openHandshakeTimeout": 2000,
-            "closeHandshakeTimeout": 1000,
-            "echoCloseCodeReason": True,
-            "utf8validateIncoming": False,
-            "failByDrop": False,
-            "autoPingInterval": 5 * 60,
-            "autoPingTimeout": 60 * 60, # one hour because we experience websocket ping pong problems
-            "autoPingSize": 8
-            # 'auto_reconnect': True
-        }
+        # "options": {
+        #     "openHandshakeTimeout": 2000,
+        #     "closeHandshakeTimeout": 1000,
+        #     "echoCloseCodeReason": True,
+        #     "utf8validateIncoming": False,
+        #     "failByDrop": False,
+        #     "autoPingInterval": 5 * 60,
+        #     "autoPingTimeout": 60 * 60, # one hour because we experience websocket ping pong problems
+        #     "autoPingSize": 8
+        #     # 'auto_reconnect': True
+        # }
     }],
     realm="realm1",
     authentication={
@@ -63,19 +63,31 @@ async def joined(session,details) :
 
     # https://github.com/RecordEvolution/RESWARM/blob/master/backend/api/devices/devices.ts
 
+    # try:
+    #     res = yield session.call(
+    #         u'wamp.session.add_testament',
+    #         u'reswarm.api.testament_device', [{
+    #             u'tsp': datetime.datetime.utcnow().isoformat(),
+    #             u'device_key': 3285,
+    #             u'swarm_key': 44
+    #         }],
+    #         {}
+    #     )
+    #     print('[mgmt-agent] Testament id {0}'.format(res))
+    # except Exception as e:
+    #     print('[mgmt-agent] Error adding testament: {0}'.format(e))
+
     try:
-        res = yield session.call(
-            u'wamp.session.add_testament',
-            u'reswarm.api.testament_device', [{
-                u'tsp': datetime.datetime.utcnow().isoformat(),
-                u'device_key': 3285,
-                u'swarm_key': 44
-            }],
-            {}
-        )
-        print('[mgmt-agent] Testament id {0}'.format(res))
+        devinfo = session.call(u'reswarm.devices.update_device', {
+            'swarm_key': 44,
+            'device_key': 3285,
+            'status': 'CONNECTED',
+            'boot_config_applied': True,
+            'firewall_applied': True
+        })
+        print('[mgmt-agent][info] updated device')
     except Exception as e:
-        print('[mgmt-agent] Error adding testament: {0}'.format(e))
+        print('[mgmt-agent][error] Could not update device: {0}'.format(e))
 
     try:
         session.register(is_running, u're.mgmt.' + '813e9e53-fe1f-4a27-a1bc-a97e8846a5a2' + '.is_running')
