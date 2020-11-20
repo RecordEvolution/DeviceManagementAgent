@@ -5,6 +5,8 @@
 
 *.log
 
+*.png
+
 goat*
 client-*
 deviceagent-*
