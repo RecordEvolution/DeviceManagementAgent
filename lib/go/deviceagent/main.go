@@ -63,6 +63,22 @@ func main() {
 	// use device serial number as RPC identifier
 	clientid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
 
+  // update device status
+  // ( usage of wamp.Dict in wamp.List, see example
+  // https://github.com/gammazero/nexus/blob/26ae8289edc2f67023aafd74ec20c3863ca5c7cb/aat/benchmark_rpc_test.go#L57)
+  devdict := wamp.Dict{}
+  devdict["swarm_key"] = 44
+  devdict["device_key"] = 3285
+  devdict["status"] = "CONNECTED"
+  devdict["boot_config_applied"] = true
+  devdict["firewall_applied"] = true
+  callres, err := clnt.Call(ctx,"reswarm.devices.update_device",nil,
+                            wamp.List{devdict},nil,nil)
+  if err != nil {
+    panic(err)
+  }
+  fmt.Println(callres)
+
 	// start registering procedures...
 
   // APPS
@@ -192,6 +208,11 @@ func main() {
 	regID, _ := clnt.RegistrationID("re.mgmt." + clientid + ".is_running")
 	fmt.Println("registration ID of 'is_running' ",regID)
 
+  for i := 0; i < 6; i++  {
+    conn := clnt.Connected()
+    fmt.Printf("[" + time.Now().String() + "] checking connection to router... %t\n",conn)
+    time.Sleep(time.Second)
+  }
 
   fmt.Println("...press Enter to close connection...")
   bufio.NewReader(os.Stdin).ReadBytes('\n')
