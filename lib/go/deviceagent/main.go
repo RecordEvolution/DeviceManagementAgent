@@ -6,8 +6,8 @@ import (
   "fmt"
   "context"
   "time"
-  "bufio"
-  "os"
+  // "bufio"
+  // "os"
 
   "crypto/tls"
 	"github.com/gammazero/nexus/v3/client"
@@ -208,14 +208,15 @@ func main() {
 	regID, _ := clnt.RegistrationID("re.mgmt." + clientid + ".is_running")
 	fmt.Println("registration ID of 'is_running' ",regID)
 
-  for i := 0; i < 6; i++  {
+  // for i := 0; i < 6; i++  {
+  for true {
     conn := clnt.Connected()
     fmt.Printf("[" + time.Now().String() + "] checking connection to router... %t\n",conn)
-    time.Sleep(time.Second)
+    time.Sleep(4*time.Second)
   }
 
-  fmt.Println("...press Enter to close connection...")
-  bufio.NewReader(os.Stdin).ReadBytes('\n')
+  // fmt.Println("...press Enter to close connection...")
+  // bufio.NewReader(os.Stdin).ReadBytes('\n')
 
 }
 

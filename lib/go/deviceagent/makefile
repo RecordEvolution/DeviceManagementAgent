@@ -4,7 +4,7 @@ DEP := main.go procedures.go
 
 CGO := 0
 GOS := linux
-ARC := amd64
+ARC := arm
 ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC)
 
 EXEF := $(EXE)-$(GOS)-$(ARC)
