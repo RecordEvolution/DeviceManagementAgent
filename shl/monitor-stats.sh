@@ -4,7 +4,7 @@
 
 helpmessage=$(cat << 'EOF'
   ...
-  Usage:  $ ./monitor-stats.sh --file=<file/path> --timestep=<#seconds> --intervals=<#intervals/steps> --process=<command>
+  Usage:  $ ./monitor-stats.sh --file=<file/path> --timestep=<#seconds> --intervals=<#intervals/steps> --process=<command1,command2,...>
   ...
 EOF
 )
@@ -61,12 +61,25 @@ echo "timestep:  ${dt}"
 echo "intervals: ${N}"
 echo "process:   ${pr}"
 
+# transform commata to spaces
+pr=$(echo "${pr}" | sed 's/,/ /g')
+echo "${pr}"
+for prc in ${pr}
+do
+	echo "1: ${prc}"
+done
+
 # --------------------------------------------------------------------------- #
 
-echo "#Timestamp,Time,MemTotal[kB],MemFree[kB],MemAvailable[kB],VSZ(${pr})[kB],RSS(${pr})[kB]" > "${fl}"
+# construct header
+header="#Timestamp,Time,MemTotal[kB],MemFree[kB],MemAvailable[kB]"
+for prc in ${pr}
+do
+	header=$(echo "${header},VSZ(${prc})[kB],RSS(${prc})[kB]") 
+done
+echo "${header}" > "${fl}"
 
-# ask for selection of current stats, i.a. memory, cpu load, ...
-query_stats()
+query_total()
 {
   ts=$(date +%Y-%m-%d_%H-%M-%S) #-%N)
   tm=$(date +%H:%M:%S)
@@ -74,9 +87,23 @@ query_stats()
   memtota=$(cat /proc/meminfo | grep "MemTotal" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
   memfree=$(cat /proc/meminfo | grep "MemFree" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
   memavai=$(cat /proc/meminfo | grep "MemAvailable" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
+  
+  echo "${ts},${tm},${memtota},${memfree},${memavai}"
+}
 
-  # get stats of certain process
+query_process()
+{
+  # get process name
+  pr="$1"
+  if [[ -z ${pr} ]]; then
+	  echo "query_process: missing process name" <&2
+	  exit 1
+  fi
+
+  # get stats of certain process (exclude grep process itself and process of this script)
   prstats=$(ps -o comm,vsz,rss,args | grep "${pr}" | grep -v "grep" | grep -v "$0" | head -n1)
+
+  # extract Virtual Set Size and Resident Set Size and evtl. convert to kB
   prvsz=$(echo "${prstats}" | awk '{print $2}')
   if [[ ! -z "$(echo "${prvsz}" | grep m)" ]]; then
 	  prvsz=$(echo "${prvsz}" | tr -d "m")
@@ -88,7 +115,7 @@ query_stats()
 	  prrss=$((prrss*1000))
   fi
 
-  echo "${ts},${tm},${memtota},${memfree},${memavai},${prvsz},${prrss}"
+  echo "${prvsz},${prrss}"
 }
 
 # BusyBox v1.32.0 (2020-11-10 12:33:27 UTC) multi-call binary.
@@ -139,7 +166,16 @@ do
   echo "monitoring stats... interval ${cnt}"
 
   # query stats
-  data=$(query_stats)
+  data=""
+  #data=$(query_stats)
+  data=$(echo "${data}$(query_total)")
+  for prc in ${pr}
+  do
+    #echo "querying process '${prc}'..."
+    dataproc=$(query_process ${prc})
+    # append to line
+    data=$(echo "${data},${dataproc}")
+  done
   echo "${data}" >> "${fl}"
 
   # iterate interval counter
