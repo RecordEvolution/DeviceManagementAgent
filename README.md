@@ -1,5 +1,15 @@
 
-## WAMP
+<p align="center">
+  <a href="https://record-evolution.de/reswarm">
+    <img
+      alt="reagent.svg"
+      src="assets/reagent.svg"
+      width="400"
+    />
+  </a>
+</p>
+
+# REswarm Device Management AGENT
 
 ### References
 
