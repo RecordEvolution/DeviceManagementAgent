@@ -4,6 +4,9 @@
 *.a
 
 *.log
+*.tar
+*.priv
+*.pub
 
 *.png
 
@@ -13,3 +16,5 @@ deviceagent-*
 deviceagent-linux-amd64
 
 go.sum
+
+target/
