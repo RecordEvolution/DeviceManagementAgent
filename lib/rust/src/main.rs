@@ -1,20 +1,21 @@
 #![allow(dead_code)]
+#![allow(unused_variables)]
 
-use std::error::Error;
-use std::future::Future;
-use std::pin::Pin;
-use tokio::sync::mpsc::UnboundedReceiver;
-use wamp_async::{Client, ClientConfig};
 use bollard::container::{Config, CreateContainerOptions, LogsOptions, StartContainerOptions};
 use bollard::image::BuildImageOptions;
 use bollard::models::BuildInfo;
 use bollard::Docker;
 use futures_util::stream::StreamExt;
 use futures_util::stream::TryStreamExt;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
 use oldTokio::runtime::Runtime;
+use std::collections::HashMap;
+use std::error::Error;
+use std::fs::File;
+use std::future::Future;
+use std::io::Read;
+use std::pin::Pin;
+use tokio::sync::mpsc::UnboundedReceiver;
+use wamp_async::{Client, ClientConfig, WampError};
 
 #[macro_use]
 extern crate lazy_static;
@@ -99,15 +100,15 @@ async fn create_connection(
     uri: &str,
 ) -> (
     Client<'static>,
-    Pin<Box<dyn Future<Output = std::result::Result<(), wamp_async::WampError>> + Send>>,
-    Option<
-        UnboundedReceiver<Pin<Box<dyn Future<Output = Result<(), wamp_async::WampError>> + Send>>>,
-    >,
+    Pin<Box<dyn Future<Output = std::result::Result<(), WampError>> + Send>>,
+    Option<UnboundedReceiver<Pin<Box<dyn Future<Output = Result<(), WampError>> + Send>>>>,
 ) {
-    let (client, (evt_loop, _rpc_evt_queue)) =
-        Client::connect(uri, Some(ClientConfig::default().set_ssl_verify(false)))
-            .await
-            .unwrap();
+    let (client, (evt_loop, _rpc_evt_queue)) = Client::connect(
+        uri,
+        Some(ClientConfig::default().set_ssl_verify(false)),
+    )
+    .await
+    .unwrap();
 
     (client, evt_loop, _rpc_evt_queue)
 }
