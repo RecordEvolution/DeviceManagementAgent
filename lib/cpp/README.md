@@ -1,6 +1,14 @@
 
 # WAMP Client/Router in C++
 
+## Autobahn C++
+
+### References
+
+- https://github.com/crossbario/autobahn-cpp
+- https://crossbario.github.io/autobahn-cpp-docs/
+- https://github.com/msgpack/msgpack-c
+
 ## wampcc
 
 Clone the github repository
