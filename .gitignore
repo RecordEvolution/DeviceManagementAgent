@@ -10,6 +10,8 @@
 
 *.png
 
+*.dat
+
 goat*
 client-*
 deviceagent-*

@@ -75,7 +75,7 @@ done
 header="#Timestamp,Time,MemTotal[kB],MemFree[kB],MemAvailable[kB]"
 for prc in ${pr}
 do
-	header=$(echo "${header},VSZ(${prc})[kB],RSS(${prc})[kB]") 
+	header=$(echo "${header},VSZ(${prc})[kB],RSS(${prc})[kB],CPU(%),MEM(%)")
 done
 echo "${header}" > "${fl}"
 
@@ -87,7 +87,7 @@ query_total()
   memtota=$(cat /proc/meminfo | grep "MemTotal" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
   memfree=$(cat /proc/meminfo | grep "MemFree" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
   memavai=$(cat /proc/meminfo | grep "MemAvailable" | awk -F ':' '{print $2}' | awk '{print $1}' | tr -d ' \n')
-  
+
   echo "${ts},${tm},${memtota},${memfree},${memavai}"
 }
 
@@ -100,22 +100,55 @@ query_process()
 	  exit 1
   fi
 
-  # get stats of certain process (exclude grep process itself and process of this script)
-  prstats=$(ps -o comm,vsz,rss,args | grep "${pr}" | grep -v "grep" | grep -v "$0" | head -n1)
+  # get architecture
+  arch=$(uname -m)
 
-  # extract Virtual Set Size and Resident Set Size and evtl. convert to kB
-  prvsz=$(echo "${prstats}" | awk '{print $2}')
-  if [[ ! -z "$(echo "${prvsz}" | grep m)" ]]; then
-	  prvsz=$(echo "${prvsz}" | tr -d "m")
-	  prvsz=$((prvsz*1000))
-  fi
-  prrss=$(echo "${prstats}" | awk '{print $3}')
-  if [[ ! -z "$(echo "${prrss}" | grep m)" ]]; then
-	  prrss=$(echo "${prrss}" | tr -d "m")
-	  prrss=$((prrss*1000))
+  if [[ ${arch} == "armv7l" ]]; then
+
+    # get stats of certain process (exclude grep process itself and process of this script)
+    prstats=$(ps -o comm,vsz,rss,args | grep "${pr}" | grep -v "grep" | grep -v "$0" | head -n1)
+
+    # extract Virtual Set Size and Resident Set Size and evtl. convert to kB
+
+    prvsz=$(echo "${prstats}" | awk '{print $2}')
+    if [[ ! -z "$(echo "${prvsz}" | grep m)" ]]; then
+      prvsz=$(echo "${prvsz}" | tr -d "m")
+      prvsz=$((prvsz*1000))
+    fi
+    prrss=$(echo "${prstats}" | awk '{print $3}')
+    if [[ ! -z "$(echo "${prrss}" | grep m)" ]]; then
+      prrss=$(echo "${prrss}" | tr -d "m")
+      prrss=$((prrss*1000))
+    fi
+
+    prcpu=""
+    prmem=""
+
+  elif [[ ${arch} == "x86_64" ]]; then
+
+    prstats=$(ps aux | grep "${pr}" | grep -v "grep" | grep -v "$0" | head -n1)
+
+    prvsz=$(echo "${prstats}" | awk '{print $5}')
+    if [[ ! -z "$(echo "${prvsz}" | grep m)" ]]; then
+      prvsz=$(echo "${prvsz}" | tr -d "m")
+      prvsz=$((prvsz*1000))
+    fi
+    prrss=$(echo "${prstats}" | awk '{print $6}')
+    if [[ ! -z "$(echo "${prrss}" | grep m)" ]]; then
+      prrss=$(echo "${prrss}" | tr -d "m")
+      prrss=$((prrss*1000))
+    fi
+
+    prcpu=$(echo "${prstats}" | awk '{print $3}')
+    prmem=$(echo "${prstats}" | awk '{print $4}')
+
   fi
 
-  echo "${prvsz},${prrss}"
+  if [[ -z ${prstats} ]]; then
+    echo "0,0,0,0"
+  else
+    echo "${prvsz},${prrss},${prcpu},${prmem}"
+  fi
 }
 
 # BusyBox v1.32.0 (2020-11-10 12:33:27 UTC) multi-call binary.
@@ -171,8 +204,9 @@ do
   data=$(echo "${data}$(query_total)")
   for prc in ${pr}
   do
-    #echo "querying process '${prc}'..."
+    echo "querying process '${prc}'..."
     dataproc=$(query_process ${prc})
+    # echo "${dataproc}"
     # append to line
     data=$(echo "${data},${dataproc}")
   done
