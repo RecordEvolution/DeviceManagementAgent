@@ -103,12 +103,10 @@ async fn create_connection(
     Pin<Box<dyn Future<Output = std::result::Result<(), WampError>> + Send>>,
     Option<UnboundedReceiver<Pin<Box<dyn Future<Output = Result<(), WampError>> + Send>>>>,
 ) {
-    let (client, (evt_loop, _rpc_evt_queue)) = Client::connect(
-        uri,
-        Some(ClientConfig::default().set_ssl_verify(false)),
-    )
-    .await
-    .unwrap();
+    let (client, (evt_loop, _rpc_evt_queue)) =
+        Client::connect(uri, Some(ClientConfig::default().set_ssl_verify(false)))
+            .await
+            .unwrap();
 
     (client, evt_loop, _rpc_evt_queue)
 }
@@ -190,11 +188,23 @@ lazy_static! {
     static ref DOCKER_SOCKET: Docker = Docker::connect_with_unix_defaults().unwrap();
 }
 
+async fn publish_benchmark(client: &Client<'_>) {
+    let topic = "reswarm.containers.helloworld";
+
+    let data = serde_json::json!({"test": "data"});
+
+    let args = vec![data];
+
+    let res = client.publish(topic, Some(args), None, false).await.unwrap();
+}
+
 #[tokio::main()]
 async fn main() -> Result<(), Box<dyn Error>> {
     let client = setup_crossbar("realm1").await;
 
     register_subscriptions(&client).await;
+
+    publish_benchmark(&client).await;
 
     tokio::time::sleep(std::time::Duration::from_secs(10 * 60)).await;
 
