@@ -1,0 +1,18 @@
+# --------------------------------------------------------------------------- #
+#
+#  docker build . --tag=autobahn-cpp:0.1
+#  docker run -d autobahn-cpp:0.1
+#
+# --------------------------------------------------------------------------- #
+
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+# install dependencies
+RUN apt-get update && apt-get upgrade -y && \
+  apt-get install -y \
+  make git vim file wget curl unzip \
+  build-essential autotools-dev autoconf libtool cmake \
+  zlib1g-dev libbz2-dev libssl-dev \
+  libuv-dev libjansson-dev libhttp-parser-dev

@@ -1,0 +1,18 @@
+
+INC := -I /opt/boost/include/ -I /autobahn-cpp/ -I /opt/msgpack/include/
+LIB := -l pthread -l boost_thread -l boost_program_options -l msgpackc -l crypto -l ssl
+PTH := -L /opt/boost/lib/ -L /opt/msgpack/lib/
+OPT := --std=c++11
+
+exe : wampcra.o parameters.o
+        g++ -o main $^ $(PTH) $(LIB)
+
+wampcra.o : wampcra.cpp
+        g++ -c $< $(INC)
+
+parameters.o : parameters.cpp
+        g++ -c $< $(INC)
+
+clean :
+        rm -f wampcra.o parameters.o
+        rm main
