@@ -86,6 +86,7 @@ ENV HOME /home/reagent/
 RUN mkdir -pv /home/reagent/
 COPY ./makefile ./home/reagent/makefile
 COPY ./client.cpp ./home/reagent/client.cpp
+COPY ./parameters.* ./home/reagent/
 COPY ./start.sh ./start.sh
 RUN chmod u+x ./start.sh
 
