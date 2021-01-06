@@ -24,8 +24,9 @@ ARC := $(shell uname -m)
 OSN := $(shell uname -s | sed 's/./\L&/g')
 EXEF := $(EXE)-$(ARC)-$(OSN)
 EXERF := $(EXER)-$(ARC)-$(OSN)
+EXERC := clientB-$(ARC)-$(OSN)
 
-all : $(EXEF) $(EXERF)
+all : $(EXEF) $(EXERF) $(EXERC)
 
 $(EXEF) : $(SRC).o
 	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
@@ -39,6 +40,12 @@ $(EXERF) : $(SRCR).o
 	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
 
 $(SRCR).o : $(SRCR).cpp
+	$(CPP) -c $(OPT) $< $(INC)
+
+$(EXERC) : clientB.o
+	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
+
+client-other.o : clientB.cpp
 	$(CPP) -c $(OPT) $< $(INC)
 
 clean :

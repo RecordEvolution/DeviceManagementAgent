@@ -16,6 +16,7 @@ file router-x86_64-linux
 
 cp -v client-x86_64-linux target
 cp -v router-x86_64-linux target
+cp -v clientB-x86_64-linux target
 
 popd
 

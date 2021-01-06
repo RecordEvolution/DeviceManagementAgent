@@ -50,6 +50,7 @@ ENV LD_LIBRARY_PATH /opt/wampcc/lib/
 
 RUN mkdir -pv /home/reagent && mkdir -pv /home/reagent/target
 COPY client.cpp /home/reagent
+COPY clientB.cpp /home/reagent
 COPY router.cpp /home/reagent
 COPY makefile /home/reagent
 COPY start.sh /home/reagent

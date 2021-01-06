@@ -6,7 +6,7 @@
 
 int main(int argc, char* argv[])
 {
-  std::cout<<"starting (C++)-WAMP client...\n";
+  std::cout<<"starting another (C++)-WAMP client...\n";
 
   /* Create the wampcc kernel, configured to support SSL. */
   wampcc::config conf;
@@ -16,13 +16,6 @@ int main(int argc, char* argv[])
   /* Create the TCP socket and attempt to connect. */
   std::unique_ptr<wampcc::tcp_socket> socket(new wampcc::tcp_socket(&the_kernel));
   socket->connect("127.0.0.1", 55555).wait_for(std::chrono::seconds(3));
-
-  /* Create the SSL socket, in connector mode. */
-  // wampcc::ssl_socket socket(&the_kernel);
-
-  // try to connect
-  // socket.connect("cb.reswarm.io",8080).wait_for(std::chrono::seconds(3));
-  // socket->connect("127.0.0.1", 55555).wait_for(std::chrono::seconds(3));
 
   if (!socket->is_connected())
     throw std::runtime_error("connect failed");
@@ -47,37 +40,19 @@ int main(int argc, char* argv[])
     }
   );
 
-  // session->call("math.service.add", {}, {{100, 200}, {}},
-  //                   [](wampcc::wamp_session&, wampcc::result_info result) {
-  //       if (result)
-  //         std::cout << "got result: " << result.args.args_list[0] << std::endl;
-  //     });
-
-  /* Register a procedure that can sum an array of numbers. */
-  session->provide("math.service.add", {},
-    [](wampcc::wamp_session&, wampcc::registered_info info) {
-      if (info)
-        std::cout << "procedure registered with id "
-                  << info.registration_id << std::endl;
+  session->call("math.service.add", {}, {{17, 23}, {}},
+    [](wampcc::wamp_session&, wampcc::result_info result) {
+      if (result)
+        std::cout << "got result: " << result.args.args_list[0] << std::endl;
       else
-        std::cout << "procedure registration failed, error "
-                  << info.error_uri << std::endl;
-    },
-    [](wampcc::wamp_session& ws, wampcc::invocation_info info) {
-      std::cout<<"math.service.add is called ..."<<std::endl;
-      std::cout<<"argument list: "<<info.args.args_list<<std::endl;
-      int total = 0;
-      for (auto& item : info.args.args_list)
-        if (item.is_int())
-          total += item.as_int();
-      ws.yield(info.request_id, {total});
+        std::cerr<<"math.service.add call failed"<<std::endl;
     }
   );
 
   session->closed_future().wait_for(std::chrono::seconds(10));
   session->close().wait();
 
-  std::cout<<"finishing (C++)-WAMP client...waiting idle..."<<std::endl;
+  std::cout<<"finishing another (C++)-WAMP client...waiting idle..."<<std::endl;
 
   std::promise<void> forever;
   forever.get_future().wait();
