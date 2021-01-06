@@ -18,8 +18,9 @@ int main(int argc, char* argv[])
 
   // try to connect
   // socket.connect("cb.reswarm.io",8080).wait_for(std::chrono::seconds(3));
-  // if (!socket.is_connected())
-  //   throw std::runtime_error("connect failed");
+  socket.connect("127.0.0.1",80).wait_for(std::chrono::seconds(3));
+  if (!socket.is_connected())
+    throw std::runtime_error("connect failed");
 
   /* Create the wampcc kernel. */
   // wampcc::kernel the_kernel;

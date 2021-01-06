@@ -6,7 +6,7 @@
 #  docker rm buildwampcc
 
 #  docker run -it --rm wampcc:0.1
-#  docker run -it --rm --volume $(pwd)/target:/home/reagent wampcc:0.1
+#  docker run -it --rm --volume $(pwd)/target:/home/reagent/target wampcc:0.1
 #
 # --------------------------------------------------------------------------- #
 
@@ -47,16 +47,16 @@ RUN ls -lh /opt
 ENV HOME /home/reagent
 ENV LD_LIBRARY_PATH /opt/wampcc/lib/
 
-RUN mkdir -pv /home/reagent
+RUN mkdir -pv /home/reagent && mkdir -pv /home/reagent/target
 COPY client.cpp /home/reagent
 COPY makefile /home/reagent
 COPY start.sh /home/reagent
 RUN chmod u+x /home/reagent/start.sh
 
-WORKDIR /home/reagent
-RUN make && pwd && ls -lh && file client-x86_64-linux
+# WORKDIR /home/reagent
+# RUN make && pwd && ls -lh && file client-x86_64-linux
 #&& ldd client-x86_64-linux
 
 # enter bash
 # CMD ["sleep","3600"]
-# CMD ["./start.sh"]
+CMD ["./home/reagent/start.sh"]
