@@ -3,6 +3,9 @@
 # set source file, name of executable, compiler and its options
 SRC := client
 EXE := client
+SRCR := router
+EXER := router
+
 CPP := g++
 OPT := -Wall -std=c++11 -static
 INC := -I /opt/wampcc/include/
@@ -12,13 +15,17 @@ STC := /opt/wampcc/lib/libwampcc.a \
        /opt/wampcc/lib/libwampcc_json.a \
        /usr/lib/x86_64-linux-gnu/libuv.a \
        /usr/lib/x86_64-linux-gnu/libssl.a \
-       /usr/lib/x86_64-linux-gnu/libcrypto.a
+       /usr/lib/x86_64-linux-gnu/libcrypto.a \
+			 /usr/lib/x86_64-linux-gnu/libjansson.a
 LNKSTC := -l pthread -l dl
 
 # include platform name/architecture into executable
 ARC := $(shell uname -m)
 OSN := $(shell uname -s | sed 's/./\L&/g')
 EXEF := $(EXE)-$(ARC)-$(OSN)
+EXERF := $(EXER)-$(ARC)-$(OSN)
+
+all : $(EXEF) $(EXERF)
 
 $(EXEF) : $(SRC).o
 	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
@@ -26,6 +33,12 @@ $(EXEF) : $(SRC).o
 	# $(CPP) $(OPT) $< $(LIB) $(LNK) -o $@
 
 $(SRC).o : $(SRC).cpp
+	$(CPP) -c $(OPT) $< $(INC)
+
+$(EXERF) : $(SRCR).o
+	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
+
+$(SRCR).o : $(SRCR).cpp
 	$(CPP) -c $(OPT) $< $(INC)
 
 clean :

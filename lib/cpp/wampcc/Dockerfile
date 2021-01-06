@@ -1,6 +1,7 @@
 # --------------------------------------------------------------------------- #
 #
 #  docker build . --tag=wampcc:0.1
+#
 #  docker create --name buildwampcc wampcc:0.1
 #  docker cp buildwampcc:/home/reagent/client-x86_64-linux ./
 #  docker rm buildwampcc
@@ -49,6 +50,7 @@ ENV LD_LIBRARY_PATH /opt/wampcc/lib/
 
 RUN mkdir -pv /home/reagent && mkdir -pv /home/reagent/target
 COPY client.cpp /home/reagent
+COPY router.cpp /home/reagent
 COPY makefile /home/reagent
 COPY start.sh /home/reagent
 RUN chmod u+x /home/reagent/start.sh
