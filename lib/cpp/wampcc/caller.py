@@ -6,6 +6,8 @@
 from autobahn.twisted.component import Component
 from autobahn.twisted.component import run
 from twisted.internet.defer import inlineCallbacks
+import time
+import math
 
 comp = Component(
     # transports=u"ws://localhost:8080/ws",
@@ -21,7 +23,20 @@ def joined(session, details):
 
     callinghello(session,details)
     registering(session,details)
-    callingadd(session,details)
+
+    # testTimeSeries(session,details)
+    # setup test time series
+    for i in range(0,15) :
+        callingadd(session,details,i)
+
+    # session.close()
+
+# @inlineCallbacks
+# def testTimeSeries(session, details):
+#
+#     # setup test time series
+#     for i in range(0,15) :
+#         callingadd(session,details,i)
 
 @inlineCallbacks
 def registering(session, details):
@@ -47,11 +62,11 @@ def callinghello(session, details):
 
 
 @inlineCallbacks
-def callingadd(session, details):
+def callingadd(session, details, num):
 
     try:
         # res = yield session.call(u'com.myapp.add2', 2, 3)
-        res = yield session.call(u'math.service.add', 2, 3)
+        res = yield session.call(u'math.service.add', 2, 3, num)
         print("call result: {}".format(res))
     except Exception as e:
         print("call error: {0}".format(e))
