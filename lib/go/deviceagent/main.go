@@ -37,7 +37,7 @@ func main() {
   cfg := client.Config {
     Realm: "realm1",
     HelloDetails: wamp.Dict{
-			"authid": "44-3285",
+			"authid": "44-3357",
     },
     AuthHandlers: map[string]client.AuthFunc{
       "wampcra": clientAuthFunc,
@@ -61,14 +61,14 @@ func main() {
   defer clnt.Close()
 
 	// use device serial number as RPC identifier
-	clientid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
+	clientid := "8a59203e-c938-4413-a7a9-d7c8330d0352"
 
   // update device status
   // ( usage of wamp.Dict in wamp.List, see example
   // https://github.com/gammazero/nexus/blob/26ae8289edc2f67023aafd74ec20c3863ca5c7cb/aat/benchmark_rpc_test.go#L57)
   devdict := wamp.Dict{}
   devdict["swarm_key"] = 44
-  devdict["device_key"] = 3285
+  devdict["device_key"] = 3357
   devdict["status"] = "CONNECTED"
   devdict["boot_config_applied"] = true
   devdict["firewall_applied"] = true
@@ -224,7 +224,7 @@ func main() {
 
 // dynamic CRA for client authentication
 func clientAuthFunc(c *wamp.Challenge) (string, wamp.Dict) {
-	return crsign.RespondChallenge("CZ3amCyKMxLsauC5+vGTZw==", c, nil), wamp.Dict{}
+	return crsign.RespondChallenge("tvMTXUEJBMnvV9AzknWgCw==", c, nil), wamp.Dict{}
 }
 
 // ------------------------------------------------------------------------- //
