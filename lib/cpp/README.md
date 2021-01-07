@@ -63,6 +63,8 @@ sudo make install
 
 ## References
 
+- https://wamp-proto.org/_static/gen/wamp_latest.html
+
 - https://github.com/darrenjs/wampcc
 - https://github.com/libuv/libuv.git
 - https://wiki.openssl.org/index.php/Compilation_and_Installation

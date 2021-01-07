@@ -74,8 +74,8 @@ int main(int argc, char* argv[])
     }
   );
 
-  session->closed_future().wait_for(std::chrono::seconds(10));
-  session->close().wait();
+  // session->closed_future().wait_for(std::chrono::seconds(10));
+  // session->close().wait();
 
   std::cout<<"finishing (C++)-WAMP client...waiting idle..."<<std::endl;
 

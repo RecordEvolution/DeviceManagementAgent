@@ -45,7 +45,7 @@ $(SRCR).o : $(SRCR).cpp
 $(EXERC) : clientB.o
 	$(CPP) $(OPT) $< $(STC) $(LNKSTC) -o $@
 
-client-other.o : clientB.cpp
+clientB.o : clientB.cpp
 	$(CPP) -c $(OPT) $< $(INC)
 
 clean :
