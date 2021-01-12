@@ -3,10 +3,12 @@ package main
 import (
   "fmt"
   "time"
-  "log"
   "os"
+  "io"
   "flag"
   "strconv"
+
+  "./logging"
 )
 
 func main() {
@@ -16,31 +18,55 @@ func main() {
 
   // define and parse CLI flags
   logFile := flag.String("logfile","/var/log/reagent.log",
-                         "Log file used by the Reagent to store all its log messages")
+                         "Log file used by the ReAgent to store all its log messages")
   logFlag := flag.Bool(  "logflag",true,
-                         "Reagent logs to stdout/stderr (false) or given file (true)")
+                         "ReAgent logs to stdout/stderr (false) or given file (true)")
   cfgFile := flag.String("cfgfile","device-config.reswarm",
                          "Configuration file of IoT device running on localhost")
+  logLevl := flag.String(   "loglevel","INFO",
+                         "Log level is one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
   flag.Parse()
 
   startts := time.Now()
-  fmt.Println( "["   + startts.Format(time.RFC3339Nano)  + "] starting Reagent"         +
-               " - " + "logFile: "     + (*logFile)                   +
-               " - " + "logFlag: "     + strconv.FormatBool(*logFlag) +
-               " - " + "cfgFile: "     + (*cfgFile)                      )
+  cliSummary := ( "starting ReAgent"  +
+                  " - " + "cfgFile: " + (*cfgFile)                   +
+                  " - " + "logFile: " + (*logFile)                   +
+                  " - " + "logFlag: " + strconv.FormatBool(*logFlag) +
+                  " - " + "logLevl: " + (*logLevl)                      )
+  fmt.Println("[" + startts.Format(time.RFC3339Nano) + "] " + cliSummary)
 
-  // check whether to log to stdout/stderr or given log file
+  // initialize logging target
+  var (
+    logTarget io.Writer
+  )
   if *logFlag {
-
-    //  open central log file
     logfile, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
-      log.Fatal(err)
+        panic(err)
     }
-
-    // redirect all logging to file
-    log.SetOutput(logfile)
+    defer logfile.Close()
+    logTarget = logfile
+  } else {
+    logTarget = os.Stdout
   }
 
-  log.Println("starting Reagent")
+  // create logging instance(s) with target (stdout vs. file) and log level
+  var (
+    AgentLogger *logging.DefaultLogger
+    // warnLogger *logging.DefaultLogger
+    // errorLogger *logging.DefaultLogger
+  )
+  AgentLogger = logging.NewLogger(logTarget,logging.GetLogLevel(*logLevl))
+
+  // submit first log message
+  AgentLogger.DoLog(logging.INFO,cliSummary)
+
+  // check for configuration file
+  _, err := os.Stat(*cfgFile)
+  if os.IsNotExist(err) {
+    AgentLogger.DoLog(logging.ERROR,"configuration file " + (*cfgFile) + " does not exist")
+  } else {
+    AgentLogger.DoLog(logging.INFO,"using configuration file " + (*cfgFile))
+  }
+
 }

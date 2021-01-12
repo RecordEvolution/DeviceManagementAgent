@@ -31,6 +31,9 @@ EXEF := $(EXE)-$(GOS)-$(ARC)
 
 # --------------------------------------------------------------------------- #
 
+$(EXEF) :
+	$(GOC)
+
 list-supported-architectures :
 	$(GOC) tool dist list
 
@@ -49,5 +52,8 @@ run-main : $(EXEF)
 
 clean :
 	rm -f $(EXEF)
+
+clean-all : clean
+	make -C src/logging/ clean
 
 # --------------------------------------------------------------------------- #
