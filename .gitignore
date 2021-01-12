@@ -10,6 +10,7 @@
 
 *.png
 *.txt
+*.log
 
 *.dat
 
@@ -21,3 +22,5 @@ deviceagent-linux-amd64
 go.sum
 
 target/
+
+reagent-*
