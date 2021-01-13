@@ -1,7 +1,7 @@
 
 build :
 	go build
-	
+
 init :
 	go mod init logging
 

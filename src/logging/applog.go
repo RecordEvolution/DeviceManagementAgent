@@ -1,14 +1,9 @@
 package logging
 
-import (
-  io
-  os
-)
-
-func GetBuildLogs(appid string) logs string {
-
+func GetBuildLogs(appid string) string {
+	return "id"
 }
 
-func GetAppLogs(appid string) logs string {
-
+func GetAppLogs(appid string) string {
+	return "id"
 }

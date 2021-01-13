@@ -1,2 +1,1 @@
-
-package wamp
+package wampsession
