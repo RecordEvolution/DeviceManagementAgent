@@ -31,9 +31,13 @@ EXEF := $(EXE)-$(GOS)-$(ARC)
 
 # --------------------------------------------------------------------------- #
 
-# build "main" source
 $(EXEF) : $(DIR)/$(SRC)
-	$(ENV) $(GOC) build -o $@ $(BFL) $<
+	cd $(DIR) && $(ENV) $(GOC) build -o $@ $(BFL) $(SRC) && cd -
+	mv $(DIR)/$(EXEF) ./
+
+# build "main" source
+#$(EXEF) : $(DIR)/$(SRC)
+#	$(ENV) $(GOC) build -o $@ $(BFL) $<
 
 run : $(EXEF)
 	./$< --logflag=false --logfile=reagent-test.log --cfgfile=testdevice-config.reswarm

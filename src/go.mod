@@ -1,4 +1,4 @@
-module agent
+module reagent
 
 go 1.15
 
