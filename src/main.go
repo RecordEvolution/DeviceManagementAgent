@@ -9,6 +9,8 @@ import (
   "strconv"
 
   "./logging"
+  "./container"
+//  "./wampsession"
 )
 
 func main() {

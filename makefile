@@ -31,8 +31,12 @@ EXEF := $(EXE)-$(GOS)-$(ARC)
 
 # --------------------------------------------------------------------------- #
 
-$(EXEF) :
-	$(GOC)
+# build "main" source
+$(EXEF) : $(DIR)/$(SRC)
+	$(ENV) $(GOC) build -o $@ $(BFL) $<
+
+run : $(EXEF)
+	./$< --logflag=false --logfile=reagent-test.log --cfgfile=testdevice-config.reswarm
 
 list-supported-architectures :
 	$(GOC) tool dist list
@@ -42,13 +46,6 @@ list-packages :
 
 show-build-env :
 	echo $(ENV)
-
-# build "main" source
-main : $(DIR)/$(SRC)
-	$(ENV) $(GOC) build -o $(EXEF) $(BFL) $<
-
-run-main : $(EXEF)
-	./$< --logflag=false --logfile=reagent-test.log --cfgfile=testdevice-config.reswarm
 
 clean :
 	rm -f $(EXEF)
