@@ -10,11 +10,11 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-func BuildDevApp(appName string, appKey int, tarPath string) {
+func BuildDevApp(appName string, tarPath string) {
 	ctx := context.Background()
 	client := container.GetClientInstance()
 
-	imageName := fmt.Sprintf("reswarm.registry.io/apps/dev_%d_%s", appKey, appName)
+	imageName := fmt.Sprintf("reswarm.registry.io/apps/dev_%s", appName)
 	reader, err := client.Build(ctx, tarPath, types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
 
 	if err != nil {
@@ -28,4 +28,9 @@ func BuildDevApp(appName string, appKey int, tarPath string) {
 	}
 
 	// TODO: store build logs in database
+}
+
+func RemoveDevApp(appName string) {
+	// Remove docker image
+	// Remove local files
 }
