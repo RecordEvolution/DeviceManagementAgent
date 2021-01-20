@@ -81,7 +81,7 @@ func (docker Docker) Login(ctx context.Context, username string, password string
 
 	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
 	if err != nil {
-		log.Fatalln("Docker.Login() failed to login with credentials:", username, password, "to", registryURL, err)
+		log.Println("Docker.Login() failed to login with credentials:", username, password, "to", registryURL, err)
 		return "", err
 	}
 
@@ -98,7 +98,7 @@ func (docker *Docker) Pull(ctx context.Context, imageName string) (io.ReadCloser
 	closableReader, err := docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{})
 
 	if err != nil {
-		log.Fatal("Docker.Pull() failed to image with name:", imageName, err)
+		log.Println("Docker.Pull() failed to image with name:", imageName, err)
 		return nil, err
 	}
 
@@ -119,14 +119,14 @@ func (docker Docker) Build(ctx context.Context, pathToTar string, buildOptions i
 	}
 
 	if err != nil {
-		log.Fatal("Docker.Build() failed to open tar with path:", pathToTar, err)
+		log.Println("Docker.Build() failed to open tar with path:", pathToTar, err)
 		return nil, err
 	}
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, castedOptions)
 
 	if err != nil {
-		log.Fatal("Docker.Build() failed to build docker image", err)
+		log.Println("Docker.Build() failed to build docker image", err)
 		return nil, err
 	}
 
