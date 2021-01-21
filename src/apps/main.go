@@ -10,15 +10,18 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-func BuildDevApp(appName string, tarPath string) {
+func BuildDevApp(appName string, tarPath string) error {
 	ctx := context.Background()
-	client := container.GetClientInstance()
+	client, err := container.GetClientInstance()
+	if err != nil {
+		return err
+	}
 
 	imageName := fmt.Sprintf("reswarm.registry.io/apps/dev_%s", appName)
 	reader, err := client.Build(ctx, tarPath, types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
 
 	if err != nil {
-		log.Fatalln("Failed to build app", appName, tarPath, err)
+		return err
 	}
 
 	scanner := bufio.NewScanner(reader)
@@ -28,6 +31,7 @@ func BuildDevApp(appName string, tarPath string) {
 	}
 
 	// TODO: store build logs in database
+	return nil
 }
 
 func RemoveDevApp(appName string) {
