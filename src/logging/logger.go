@@ -79,7 +79,7 @@ func NewLogger(out io.Writer, level LogLevel) *DefaultLogger {
 	return singleton
 }
 
-func getInstance() *DefaultLogger {
+func GetInstance() *DefaultLogger {
 	return singleton
 }
 
