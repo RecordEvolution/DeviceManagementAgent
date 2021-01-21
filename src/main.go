@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"reagent/fs"
+	"reagent/logging"
+	"reagent/wampsession"
 	"strconv"
 	"time"
 
-	// "reagent/container"
-	"reagent/logging"
+	"github.com/gammazero/nexus/v3/wamp"
 )
 
 func main() {
@@ -66,8 +70,30 @@ func main() {
 	_, err := os.Stat(*cfgFile)
 	if os.IsNotExist(err) {
 		AgentLogger.DoLog(logging.ERROR, "configuration file "+(*cfgFile)+" does not exist")
-	} else {
-		AgentLogger.DoLog(logging.INFO, "using configuration file "+(*cfgFile))
+		return
 	}
 
+	AgentLogger.DoLog(logging.INFO, "using configuration file "+(*cfgFile))
+
+	reswarmConfig := fs.LoadReswarmConfig(*cfgFile)
+	ctx := context.Background()
+	session := wampsession.New(&reswarmConfig)
+	defer session.Close()
+
+	payload := wamp.Dict{
+		"swarm_key":           reswarmConfig.SwarmKey,
+		"device_key":          reswarmConfig.DeviceKey,
+		"status":              "CONNECTED",
+		"boot_config_applied": true,
+		"firewall_applied":    true,
+	}
+	session.UpdateDevice(ctx, wamp.List{payload}, nil)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	select {
+	case <-sigChan:
+		AgentLogger.DoLog(logging.INFO, "Exiting")
+		return
+	}
 }
