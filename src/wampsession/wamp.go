@@ -2,62 +2,76 @@ package wampsession
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"time"
+
+	"reagent/fs"
 
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/wamp"
+	"github.com/gammazero/nexus/v3/wamp/crsign"
 )
 
-// APPS
-func IsRunning(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func WriteData(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func DockerRemoveImage(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func DockerTag(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func DockerRemoveContainer(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
+type WampSession struct {
+	client *client.Client
+	config *fs.ReswarmConfig
 }
 
-// CONFIG
-func Readme(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func Updater(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
+// New creates a new wamp session from a ReswarmConfig file
+func New(config *fs.ReswarmConfig) WampSession {
+	ctx := context.Background()
+
+	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))
+	if err != nil {
+		panic(err)
+	}
+
+	cfg := client.Config{
+		Realm: "realm1",
+		HelloDetails: wamp.Dict{
+			"authid": fmt.Sprintf("%d-%d", config.SwarmKey, config.DeviceKey),
+		},
+		AuthHandlers: map[string]client.AuthFunc{
+			"wampcra": clientAuthFunc(config.Secret),
+		},
+		Debug:           true,
+		ResponseTimeout: 5 * time.Second,
+		// Serialization:
+		TlsCfg: &tls.Config{
+			Certificates:       []tls.Certificate{tlscert},
+			InsecureSkipVerify: true},
+	}
+
+	// set up WAMP client and connect connect to websocket endpoint
+	client, err := client.ConnectNet(ctx, config.DeviceEndpointURL, cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	return WampSession{client: client, config: config}
 }
 
-// DEVICE START, STOP, UPDATE
-func AgentUpdate(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func SystemReboot(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func AgentRestart(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
-}
-func DeviceHandshake(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	nowis := time.Now().String()
-	deviceid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
-	return client.InvokeResult{Args: wamp.List{nowis, deviceid}}
+func (wampSession *WampSession) Close() error {
+	return wampSession.client.Close()
 }
 
-// FIREWALL
-func ApplyFirewall(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
+func (wampSession *WampSession) GetConfig() *fs.ReswarmConfig {
+	return wampSession.config
 }
-func UfwEnable(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
+
+func (wampSession *WampSession) UpdateDevice(ctx context.Context, args wamp.List, kwargs wamp.Dict) (*wamp.Result, error) {
+	return wampSession.client.Call(ctx, "reswarm.devices.update_device", nil, args, kwargs, nil)
 }
-func UfwStatus(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-	return client.InvokeResult{Args: wamp.List{}}
+
+func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) {
+	return func(c *wamp.Challenge) (string, wamp.Dict) {
+		return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
+	}
 }
-func UfwAllow(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-}
+
+// func DeviceHandshake(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+// 	nowis := time.Now().String()
+// 	deviceid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
+// 	return client.InvokeResult{Args: wamp.List{nowis, deviceid}}
+// }
