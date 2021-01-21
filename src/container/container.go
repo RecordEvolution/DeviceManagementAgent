@@ -42,7 +42,7 @@ func GetClientInstance() Container {
 			if err != nil {
 				panic(err)
 			}
-			containerInstance = Docker{client: client}
+			containerInstance = &Docker{client: client}
 		case LXC:
 			{
 				// TODO: implement LXC
@@ -68,7 +68,7 @@ func (docker *Docker) ListImages(ctx context.Context) ([]types.ImageSummary, err
 }
 
 // Login allows user to authenticate with a specific registry
-func (docker Docker) Login(ctx context.Context, username string, password string, registryURL string) (string, error) {
+func (docker *Docker) Login(ctx context.Context, username string, password string, registryURL string) (string, error) {
 	if registryURL == "" {
 		registryURL = defaultRegistry
 	}
@@ -106,7 +106,7 @@ func (docker *Docker) Pull(ctx context.Context, imageName string) (io.ReadCloser
 }
 
 // Build builds a Docker image using a tarfile as context
-func (docker Docker) Build(ctx context.Context, pathToTar string, buildOptions interface{}) (io.ReadCloser, error) {
+func (docker *Docker) Build(ctx context.Context, pathToTar string, buildOptions interface{}) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(pathToTar)
 
 	if buildOptions == nil {
