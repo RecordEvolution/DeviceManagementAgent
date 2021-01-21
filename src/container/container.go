@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -37,23 +38,30 @@ var containerInstance Container
 var containerType = DOCKER
 var instanceLock sync.Once
 
-// GetClientInstance ensures only one instance of a container client exists
-func GetClientInstance() Container {
+// GetClientInstance creates or gets an instance of the set container API. (Docker by default)
+func GetClientInstance() (Container, error) {
+	var initalizationError error
 	instanceLock.Do(func() {
 		switch containerType {
 		case DOCKER:
 			client, err := newDockerClient()
 			if err != nil {
-				panic(err)
+				initalizationError = err
+			} else {
+				containerInstance = &Docker{client: client}
 			}
-			containerInstance = &Docker{client: client}
 		case LXC:
 			{
-				// TODO: implement LXC
+				initalizationError = fmt.Errorf("Not yet implemented")
 			}
 		}
 	})
-	return containerInstance
+
+	if initalizationError != nil {
+		return nil, initalizationError
+	}
+
+	return containerInstance, nil
 }
 
 // SetContainerAPI sets the which api should be used (Docker, LXC). Docker by default.
@@ -66,9 +74,30 @@ func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
-// ListImages lists all images available on the current device
-func (docker *Docker) ListImages(ctx context.Context) ([]types.ImageSummary, error) {
-	return docker.client.ImageList(ctx, types.ImageListOptions{All: true})
+// ListImages lists all images available on the current device. Marshal type for Docker: types.ImageListOptions
+func (docker *Docker) ListImages(ctx context.Context, options interface{}) (string, error) {
+	var rOptions types.ImageListOptions
+	if options == nil {
+		rOptions = types.ImageListOptions{}
+	} else {
+		cOptions, ok := options.(types.ImageListOptions)
+		if !ok {
+			return "", fmt.Errorf("Excepted types.ImageListOptions{} but got %T instead", options)
+		}
+		rOptions = cOptions
+	}
+
+	imageList, err := docker.client.ImageList(ctx, rOptions)
+	if err != nil {
+		return "", err
+	}
+
+	byteArr, err := json.Marshal(&imageList)
+	if err != nil {
+		return "", err
+	}
+
+	return string(byteArr), nil
 }
 
 // Login allows user to authenticate with a specific registry

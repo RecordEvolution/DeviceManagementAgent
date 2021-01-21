@@ -17,7 +17,7 @@ type ReswarmConfig struct {
 	SwarmKey       int         `json:"swarm_key"`
 	DeviceKey      int         `json:"device_key"`
 	SwarmName      string      `json:"swarm_name"`
-	Description    interface{} `json:"description"`
+	Description    interface{} `json:"description"` // can be null --> interface{}
 	Architecture   string      `json:"architecture"`
 	SerialNumber   string      `json:"serial_number"`
 	Authentication struct {
@@ -32,6 +32,7 @@ type ReswarmConfig struct {
 	DockerMainRepository string `json:"docker_main_repository"`
 }
 
+// LoadReswarmConfig populates a ReswarmConfig struct from a given path
 func LoadReswarmConfig(path string) ReswarmConfig {
 	jsonFile, err := os.Open(path)
 	if err != nil {
