@@ -2,6 +2,7 @@ package logging
 
 import (
 	"io"
+	"sync"
 	"time"
 	// "log"
 	// "github.com/sirupsen/logrus"
@@ -56,6 +57,9 @@ type DefaultLogger struct {
 	logLvl LogLevel
 }
 
+var singleton *DefaultLogger
+var once sync.Once
+
 // NewLogger creates a new logger instance to be adjusted and used as logging tool
 func NewLogger(out io.Writer, level LogLevel) *DefaultLogger {
 
@@ -64,9 +68,19 @@ func NewLogger(out io.Writer, level LogLevel) *DefaultLogger {
 	// var defLogger = &DefaultLogger{theLogger}
 
 	// custom logger
-	var defLogger = &DefaultLogger{out, level}
+	if singleton != nil {
+		return singleton
+	}
 
-	return defLogger
+	once.Do(func() {
+		singleton = &DefaultLogger{out, level}
+	})
+
+	return singleton
+}
+
+func getInstance() *DefaultLogger {
+	return singleton
 }
 
 func (L *DefaultLogger) DoLog(logLevel LogLevel, logmessage string) {
