@@ -12,18 +12,23 @@ import (
 	"github.com/docker/docker/client"
 )
 
+// Docker container implentation using the Docker API
 type Docker struct {
 	client *client.Client
 }
 
+// Lxc container implentation using the LXC API
 type Lxc struct {
 }
 
-type ContainerType string
+// Type type of container instance that is set. (Docker, LXC, ...)
+type Type string
 
 const (
-	DOCKER ContainerType = "docker"
-	LXC    ContainerType = "lxc"
+	// DOCKER container type
+	DOCKER Type = "docker"
+	// LXC container type
+	LXC Type = "lxc"
 )
 
 const defaultRegistry = "https://index.docker.io/v1/"
@@ -32,7 +37,7 @@ var containerInstance Container
 var containerType = DOCKER
 var instanceLock sync.Once
 
-// GetClientInstance ensures only one instance of a Container Client exists
+// GetClientInstance ensures only one instance of a container client exists
 func GetClientInstance() Container {
 	instanceLock.Do(func() {
 		switch containerType {
@@ -53,7 +58,7 @@ func GetClientInstance() Container {
 
 // SetContainerAPI sets the which api should be used (Docker, LXC). Docker by default.
 // Has to be called before GetClientInstance
-func SetContainerAPI(apiType ContainerType) {
+func SetContainerAPI(apiType Type) {
 	containerType = apiType
 }
 
@@ -104,6 +109,9 @@ func (docker *Docker) Pull(ctx context.Context, imageName string) (io.ReadCloser
 // Build builds a Docker image using a tarfile as context
 func (docker *Docker) Build(ctx context.Context, pathToTar string, buildOptions interface{}) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(pathToTar)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to open .tar file: %s", err)
+	}
 
 	if buildOptions == nil {
 		buildOptions = types.ImageBuildOptions{}
@@ -112,10 +120,6 @@ func (docker *Docker) Build(ctx context.Context, pathToTar string, buildOptions 
 	castedOptions, ok := buildOptions.(types.ImageBuildOptions)
 	if !ok {
 		return nil, fmt.Errorf("Expected type types.ImageBuildOptions but got %T instead", buildOptions)
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, castedOptions)
