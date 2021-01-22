@@ -1,4 +1,4 @@
-package wampsession
+package messenger
 
 import (
 	"context"
@@ -15,11 +15,10 @@ import (
 
 type WampSession struct {
 	client *client.Client
-	config *fs.ReswarmConfig
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func New(config *fs.ReswarmConfig) WampSession {
+func NewWampMessenger(config *fs.ReswarmConfig) (*WampSession, error) {
 	ctx := context.Background()
 
 	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))
@@ -46,10 +45,10 @@ func New(config *fs.ReswarmConfig) WampSession {
 	// set up WAMP client and connect connect to websocket endpoint
 	client, err := client.ConnectNet(ctx, config.DeviceEndpointURL, cfg)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return WampSession{client: client, config: config}
+	return &WampSession{client: client}, nil
 }
 
 func (wampSession *WampSession) Publish(topic string, args []map[string]interface{}, kwargs map[string]interface{}, options map[string]interface{}) error {
