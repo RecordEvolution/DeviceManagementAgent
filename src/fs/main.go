@@ -3,7 +3,6 @@ package fs
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"os"
 )
 
@@ -33,10 +32,10 @@ type ReswarmConfig struct {
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path
-func LoadReswarmConfig(path string) ReswarmConfig {
+func LoadReswarmConfig(path string) (*ReswarmConfig, error) {
 	jsonFile, err := os.Open(path)
 	if err != nil {
-		log.Println("Failed to load file", path)
+		return nil, err
 	}
 
 	defer jsonFile.Close()
@@ -44,5 +43,5 @@ func LoadReswarmConfig(path string) ReswarmConfig {
 
 	var reswarmConfig ReswarmConfig
 	json.Unmarshal(byteValue, &reswarmConfig)
-	return reswarmConfig
+	return &reswarmConfig, nil
 }

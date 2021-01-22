@@ -71,11 +71,11 @@ func main() {
 	AgentLogger.DoLog(logging.INFO, "using configuration file "+(*cfgFile))
 
 	// Example setup:
-	// reswarmConfig := fs.LoadReswarmConfig(*cfgFile)
-	// wampSession, err := messenger.NewWampMessenger(&reswarmConfig)
+	// reswarmConfig, err := fs.LoadReswarmConfig(*cfgFile)
+	// wampSession, err := messenger.NewWampMessenger(reswarmConfig)
 	// defer wampSession.Close()
 
-	// docker, err := container.NewDocker(&reswarmConfig)
+	// docker, err := container.NewDocker(reswarmConfig)
 	// appManager := apps.New(docker, wampSession)
 
 	// appManager.BuildDevApp("testApp", "./TestApp.tar")
