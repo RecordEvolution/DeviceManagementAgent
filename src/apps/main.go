@@ -6,19 +6,24 @@ import (
 	"fmt"
 	"log"
 	"reagent/container"
+	"reagent/messenger"
 
 	"github.com/docker/docker/api/types"
 )
 
-func BuildDevApp(appName string, tarPath string) error {
-	ctx := context.Background()
-	client, err := container.GetClientInstance()
-	if err != nil {
-		return err
-	}
+type AppManager struct {
+	container container.Container
+	messenger messenger.Messenger
+}
 
+func New(c container.Container, m messenger.Messenger) AppManager {
+	return AppManager{container: c, messenger: m}
+}
+
+func (am *AppManager) BuildDevApp(appName string, tarPath string) error {
+	ctx := context.Background()
 	imageName := fmt.Sprintf("reswarm.registry.io/apps/dev_%s", appName)
-	reader, err := client.Build(ctx, tarPath, types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
+	reader, err := am.container.Build(ctx, tarPath, types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
 
 	if err != nil {
 		return err

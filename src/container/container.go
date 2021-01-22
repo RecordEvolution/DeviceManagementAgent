@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reagent/fs"
 	"strings"
-	"sync"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -18,62 +18,24 @@ import (
 // Docker container implentation using the Docker API
 type Docker struct {
 	client *client.Client
+	config *fs.ReswarmConfig
 }
 
 // Lxc container implentation using the LXC API
 type Lxc struct {
 }
 
-// Type type of container instance that is set. (Docker, LXC, ...)
-type Type string
-
-const (
-	// DOCKER container type
-	DOCKER Type = "docker"
-	// LXC container type
-	LXC Type = "lxc"
-)
-
 const defaultRegistry = "https://index.docker.io/v1/"
 
-// For now stick only with Docker as implementation
-var containerInstance *Docker
-
-// var containerType = DOCKER
-var instanceLock sync.Once
-
-// GetClientInstance creates or gets an instance of the set container API. (Docker by default)
-func GetClientInstance() (*Docker, error) {
-	var initalizationError error
-	instanceLock.Do(func() {
-		// switch containerType {
-		// case DOCKER:
-		client, err := newDockerClient()
-		if err != nil {
-			initalizationError = err
-		} else {
-			containerInstance = &Docker{client: client}
-		}
-		// case LXC:
-		// 	{
-		// 		initalizationError = fmt.Errorf("Not yet implemented")
-		// 	}
-		// }
-	})
-
-	if initalizationError != nil {
-		return nil, initalizationError
+func NewDocker(config *fs.ReswarmConfig) (*Docker, error) {
+	client, err := newDockerClient()
+	if err != nil {
+		return nil, err
 	}
-
-	return containerInstance, nil
+	return &Docker{client: client, config: config}, nil
 }
 
-// // SetContainerAPI sets the which api should be used (Docker, LXC). Docker by default.
-// // Has to be called before GetClientInstance
-// func SetContainerAPI(apiType Type) {
-// 	containerType = apiType
-// }
-
+// For now stick only with Docker as implementation
 func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
@@ -181,13 +143,13 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string) (string, 
 }
 
 // Build builds a Docker image using a tarfile as context
-func (docker *Docker) Build(ctx context.Context, pathToTar string, buildOptions types.ImageBuildOptions) (io.ReadCloser, error) {
+func (docker *Docker) Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(pathToTar)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to open .tar file: %s", err)
 	}
 
-	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, buildOptions)
+	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)
 
 	if err != nil {
 		return nil, err
