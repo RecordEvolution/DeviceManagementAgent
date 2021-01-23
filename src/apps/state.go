@@ -49,65 +49,15 @@ type TransitionPayload struct {
 	containerName string
 	accountId     int
 	registryToken string
-	// swarm_key                int
-	// app_key                  int
-	// app_name                 string
-	// release_key              int
-	// description              string
-	// new_release_key          int
-	// git_hash                 string
-	// group_key                int
-	// image_name               string
-	// new_image_name           string
-	// present_image_name       string
-	// container_name           string
-	// present_version          string
-	// newest_version           string
-	// device_key               int
-	// device_owner_account_key int
-	// current_state            string
-	// target_state             string
-	// stage                    Stage
-	// create_device_to_app     bool
-	// caller_authid            string
-	// manually_requested_state State
-	// request_update           bool
-	// version                  string
-	// account_id               int
-	// exists                   bool
-	// name                     string
-	// build_message            string
-	// release_build            bool
-	// readme                   string
 }
 
 type AppState struct {
-	Name  string `json:"name"`
-	stage Stage
-	// Groups                 interface{} `json:"groups"`
-	// Status                 string      `json:"status"`
-	AppKey  int    `json:"app_key"`
-	AppName string `json:"app_name"`
-	// SwarmKey               int         `json:"swarm_key"`
-	// DeviceKey              int         `json:"device_key"`
-	// GroupKeys              interface{} `json:"group_keys"`
-	// Description            string      `json:"description"`
-	// Environment            interface{} `json:"environment"`
-	// ReleaseKey             int         `json:"release_key"`
-	// Architecture           string      `json:"architecture"`
-	CurrentState           State
+	Name                   string `json:"name"`
+	AppKey                 int    `json:"app_key"`
+	AppName                string `json:"app_name"`
 	ManuallyRequestedState string `json:"manually_requested_state"`
-	// SerialNumber           string      `json:"serial_number"`
-	// ContainerName          string      `json:"container_name"`
-	// NewImageName           string      `json:"new_image_name"`
-	// NewestVersion          string      `json:"newest_version"`
-	// RequestUpdate          bool        `json:"request_update"`
-	// NewReleaseKey          string      `json:"new_release_key"`
-	// PresentVersion         string      `json:"present_version"`
-	// InheritFromGroup       bool        `json:"inherit_from_group"`
-	// PresentImageName       string      `json:"present_image_name"`
-	// RequestorAccountKey    int         `json:"requestor_account_key"`
-	// DeviceOwnerAccountKey  int         `json:"device_owner_account_key"`
+	CurrentState           State
+	stage                  Stage
 }
 
 func (sm *StateMachine) getTransitionFunc(prevState State, nextState State) TransitionFunc {
