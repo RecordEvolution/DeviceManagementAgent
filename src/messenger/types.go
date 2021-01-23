@@ -4,10 +4,13 @@ import (
 	"context"
 )
 
+// Dict is an alias for map[string]interface{}
+type Dict map[string]interface{}
+
 type Messenger interface {
-	Register(topic string, cb func(ctx context.Context, invocation map[string]interface{}) map[string]interface{}, options map[string]interface{}) error
-	Publish(topic string, args []map[string]interface{}, kwargs map[string]interface{}, options map[string]interface{}) error
-	Subscribe(topic string, cb func(map[string]interface{}), options map[string]interface{}) error
-	Call(ctx context.Context, topic string, args []map[string]interface{}, kwargs map[string]interface{}, options map[string]interface{}, progCb func(map[string]interface{})) (map[string]interface{}, error)
+	Register(topic string, cb func(ctx context.Context, invocation Dict) Dict, options Dict) error
+	Publish(topic string, args []Dict, kwargs Dict, options Dict) error
+	Subscribe(topic string, cb func(Dict), options Dict) error
+	Call(ctx context.Context, topic string, args []Dict, kwargs Dict, options Dict, progCb func(Dict)) (Dict, error)
 	Close() error
 }

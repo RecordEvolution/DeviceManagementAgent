@@ -51,17 +51,17 @@ func NewWampMessenger(config *fs.ReswarmConfig) (*WampSession, error) {
 	return &WampSession{client: client}, nil
 }
 
-func (wampSession *WampSession) Publish(topic string, args []map[string]interface{}, kwargs map[string]interface{}, options map[string]interface{}) error {
+func (wampSession *WampSession) Publish(topic string, args []Dict, kwargs Dict, options Dict) error {
 	var wampList []interface{}
 	for _, dict := range args {
 		wampList = append(wampList, dict)
 	}
-	return wampSession.client.Publish(topic, options, wampList, kwargs)
+	return wampSession.client.Publish(topic, wamp.Dict(options), wampList, wamp.Dict(kwargs))
 }
 
-func (wampSession *WampSession) Subscribe(topic string, cb func(map[string]interface{}), options map[string]interface{}) error {
+func (wampSession *WampSession) Subscribe(topic string, cb func(Dict), options Dict) error {
 	handler := func(event *wamp.Event) {
-		cbEventMap := map[string]interface{}{
+		cbEventMap := Dict{
 			"Subscription": event.Subscription,
 			"Publication":  event.Publication,
 			"Details":      event.Details,
@@ -71,16 +71,16 @@ func (wampSession *WampSession) Subscribe(topic string, cb func(map[string]inter
 		cb(cbEventMap)
 	}
 
-	return wampSession.client.Subscribe(topic, handler, options)
+	return wampSession.client.Subscribe(topic, handler, wamp.Dict(options))
 }
 
 func (wampSession *WampSession) Call(
 	ctx context.Context,
 	topic string,
-	args []map[string]interface{},
-	kwargs map[string]interface{},
-	options map[string]interface{},
-	progCb func(map[string]interface{})) (map[string]interface{}, error) {
+	args []Dict,
+	kwargs Dict,
+	options Dict,
+	progCb func(Dict)) (Dict, error) {
 
 	var wampList []interface{}
 	for _, dict := range args {
@@ -88,7 +88,7 @@ func (wampSession *WampSession) Call(
 	}
 
 	handler := func(result *wamp.Result) {
-		cbResultMap := map[string]interface{}{
+		cbResultMap := Dict{
 			"Request":     result.Request,
 			"Details":     result.Details,
 			"Arguments":   result.Arguments,
@@ -97,13 +97,13 @@ func (wampSession *WampSession) Call(
 		progCb(cbResultMap)
 	}
 
-	result, err := wampSession.client.Call(ctx, topic, options, wampList, kwargs, handler)
+	result, err := wampSession.client.Call(ctx, topic, wamp.Dict(options), wampList, wamp.Dict(kwargs), handler)
 
 	if err != nil {
 		return nil, err
 	}
 
-	callResultMap := map[string]interface{}{
+	callResultMap := Dict{
 		"Request":     result.Request,
 		"Details":     result.Details,
 		"Arguments":   result.Arguments,
@@ -113,10 +113,10 @@ func (wampSession *WampSession) Call(
 	return callResultMap, nil
 }
 
-func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation map[string]interface{}) map[string]interface{}, options map[string]interface{}) error {
+func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Dict) Dict, options Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
-		cbInvocationMap := map[string]interface{}{
+		cbInvocationMap := Dict{
 			"Request":      invocation.Request,
 			"Registration": invocation.Registration,
 			"Details":      invocation.Details,
@@ -125,13 +125,13 @@ func (wampSession *WampSession) Register(topic string, cb func(ctx context.Conte
 		}
 		resultMap := cb(ctx, cbInvocationMap)
 		args := resultMap["Args"].([]interface{})
-		kwargs := resultMap["Kwargs"].(map[string]interface{})
-		err := resultMap["Err"].(wamp.URI)
+		kwargs := resultMap["Kwargs"].(Dict)
+		err := resultMap["Err"].(string)
 
-		return client.InvokeResult{Args: args, Kwargs: kwargs, Err: err}
+		return client.InvokeResult{Args: args, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
 	}
 
-	err := wampSession.client.Register(topic, invocationHandler, options)
+	err := wampSession.client.Register(topic, invocationHandler, wamp.Dict(options))
 	if err != nil {
 		return err
 	}
