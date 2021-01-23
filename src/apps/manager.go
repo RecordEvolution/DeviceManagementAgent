@@ -20,10 +20,10 @@ func New(c container.Container, m messenger.Messenger) AppManager {
 	return AppManager{container: c, messenger: m}
 }
 
-func (am *AppManager) BuildDevApp(appName string, tarPath string) error {
+func (am *AppManager) BuildDevApp(appName string) error {
 	ctx := context.Background()
 	imageName := fmt.Sprintf("reswarm.registry.io/apps/dev_%s", appName)
-	reader, err := am.container.Build(ctx, tarPath, types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
+	reader, err := am.container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{imageName}, Dockerfile: "Dockerfile"})
 
 	if err != nil {
 		return err
