@@ -1,19 +1,19 @@
-CREATE TABLE "DeviceStates" (
-  id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS "DeviceStates" (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   interfaceType TEXT CHECK( interfaceType IN ('WLAN', 'ETHERNET', 'NONE') ) NOT NULL,
   deviceStatus TEXT CHECK( deviceStatus IN ('CONNECTED', 'DISCONNECTED') ) NOT NULL,
   timestamp TEXT NOT NULL
 );
 
-CREATE TABLE "DeviceStateHistory" (
-  id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS "DeviceStateHistory" (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   interfaceType TEXT CHECK( interfaceType IN ('WLAN', 'ETHERNET', 'NONE') ) NOT NULL,
   deviceStatus TEXT CHECK( deviceStatus IN ('CONNECTED', 'DISCONNECTED') ) NOT NULL,
   timestamp TEXT NOT NULL
 );
 
-CREATE TABLE "AppStates" (
-  id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS "AppStates" (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   appName TEXT NOT NULL,
   appKey INTEGER NOT NULL,
   stage TEXT CHECK( stage IN ('DEV', 'PROD') ) NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE "AppStates" (
   timestamp TEXT NOT NULL
 );
 
-CREATE TABLE "AppStateHistory" (
-  id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS "AppStateHistory" (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   appName TEXT NOT NULL,
   appKey INTEGER NOT NULL,
   stage TEXT CHECK( stage IN ('DEV', 'PROD') ) NOT NULL,
