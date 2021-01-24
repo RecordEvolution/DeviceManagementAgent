@@ -1,9 +1,12 @@
 package apps
 
 import (
+	"context"
 	"fmt"
-	"reagent/fs"
-	"reagent/messenger"
+	"reagent/container"
+	"reagent/logging"
+
+	"github.com/docker/docker/api/types"
 )
 
 // AppState states
@@ -33,18 +36,19 @@ const (
 	PROD Stage = "PROD"
 )
 
-type TransitionFunc func(TransitionPayload)
+type TransitionFunc func(TransitionPayload) error
 
 type StateMachine struct {
 	currentAppStates []App
-	appManager       AppManager
-	messenger        messenger.Messenger
-	config           fs.ReswarmConfig
+	container        container.Container
+	observer         StateObserver
+	log              logging.LogManager
 }
 
 type TransitionPayload struct {
 	stage         Stage
 	appName       string
+	appKey        int
 	imageName     string
 	containerName string
 	accountID     int
@@ -57,7 +61,7 @@ type App struct {
 	AppName                string `json:"app_name"`
 	ManuallyRequestedState string `json:"manually_requested_state"`
 	CurrentState           AppState
-	stage                  Stage
+	Stage                  Stage
 }
 
 func (sm *StateMachine) getTransitionFunc(prevState AppState, nextState AppState) TransitionFunc {
@@ -154,19 +158,25 @@ func (sm *StateMachine) getTransitionFunc(prevState AppState, nextState AppState
 
 func (sm *StateMachine) getCurrentState(appName string, stage Stage) *AppState {
 	for _, state := range sm.currentAppStates {
-		if state.AppName == appName && state.stage == stage {
+		if state.AppName == appName && state.Stage == stage {
 			return &state.CurrentState
 		}
 	}
 	return nil
 }
 
-func (sm *StateMachine) setCurrentState(appName string, stage Stage, requestedState AppState) {
+func (sm *StateMachine) setState(app *App, state AppState) {
+	app.CurrentState = state
+	sm.observer.Notify(app, state)
+}
+
+func (sm *StateMachine) getApp(appName string, appKey int, stage Stage) (*App, error) {
 	for _, state := range sm.currentAppStates {
-		if state.AppName == appName && state.stage == stage {
-			state.CurrentState = requestedState
+		if state.AppName == appName && state.Stage == stage {
+			return &state, nil
 		}
 	}
+	return nil, fmt.Errorf("App was not found")
 }
 
 func (sm *StateMachine) RequestAppState(requestedState AppState, payload TransitionPayload) {
@@ -175,18 +185,27 @@ func (sm *StateMachine) RequestAppState(requestedState AppState, payload Transit
 	transitionFunc(payload)
 }
 
-func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) {
-	logTerminalTopic := fmt.Sprintf("reswarm.logs.%s.%s", sm.config.SerialNumber, payload.containerName)
-	sm.messenger.Publish(logTerminalTopic, []messenger.Dict{{"type": "build", "chunk": "Building image on device ..."}}, nil, nil)
-	sm.setCurrentState(payload.appName, payload.stage, BUILDING) // observer observes the state and updates to database
+func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
+	app, err := sm.getApp(payload.appName, payload.appKey, payload.stage)
 
-	if payload.stage == DEV {
-		err := sm.appManager.BuildDevApp(payload.appName)
-		if err != nil {
-			sm.setCurrentState(payload.appName, payload.stage, FAILED)
-		}
-		sm.setCurrentState(payload.appName, payload.stage, PRESENT)
+	if err != nil {
+		return err
 	}
 
-	sm.messenger.Publish(logTerminalTopic, []messenger.Dict{{"type": "build", "chunk": "#################### Image built successfully ####################"}}, nil, nil)
+	if payload.stage == DEV {
+		ctx := context.Background() // TODO: store context in memory for build cancellation
+		reader, err := sm.container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.imageName}, Dockerfile: "Dockerfile"})
+		sm.log.Broadcast(payload.containerName, logging.BUILD, reader)
+
+		if err != nil {
+			return err
+		}
+
+		if err != nil {
+			sm.setState(app, FAILED)
+		}
+		sm.setState(app, PRESENT)
+	}
+
+	return nil
 }

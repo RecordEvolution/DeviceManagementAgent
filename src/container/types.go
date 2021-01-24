@@ -11,7 +11,7 @@ import (
 
 // Container generic interface for a Container API
 type Container interface {
-	Login(ctx context.Context, username string, password string, registryURL string) (string, error)
+	Login(ctx context.Context, username string, password string) (string, error)
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
 	Pull(ctx context.Context, imageName string) (io.ReadCloser, error)

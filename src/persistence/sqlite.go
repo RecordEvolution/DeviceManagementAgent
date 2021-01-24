@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"reagent/apps"
+	"reagent/system"
 	"runtime"
 	"strings"
 	"time"
@@ -37,13 +38,13 @@ func (sqlite *SQLite) Init() error {
 	return sqlite.executeFromFile(basepath + "/sql/init-script.sql")
 }
 
-func (sqlite *SQLite) UpdateAppState(appName string, appKey int, stage apps.Stage, newState apps.AppState) error {
+func (sqlite *SQLite) UpdateAppState(app apps.App, newState apps.AppState) error {
 	previousAppStatement := `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
 	selectStatement, err := sqlite.db.Prepare(previousAppStatement)
 	if err != nil {
 		return err
 	}
-	rows, err := selectStatement.Query(appKey, stage)
+	rows, err := selectStatement.Query(app.AppKey, app.Stage)
 	hasResult := rows.Next() // only get first result
 
 	if hasResult == false {
@@ -68,7 +69,7 @@ func (sqlite *SQLite) UpdateAppState(appName string, appKey int, stage apps.Stag
 	if err != nil {
 		return err
 	}
-	_, err = insertStatement.Exec(appName, appKey, stage, curState, time.Now().Format(time.RFC3339))
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Stage, curState, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -79,7 +80,7 @@ func (sqlite *SQLite) UpdateAppState(appName string, appKey int, stage apps.Stag
 	if err != nil {
 		return err
 	}
-	_, err = updateStatement.Exec(newState, appKey, stage)
+	_, err = updateStatement.Exec(newState, app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
@@ -100,15 +101,15 @@ func (sqlite *SQLite) InsertAppState(appName string, appKey int, stage apps.Stag
 	return nil
 }
 
-func (sqlite *SQLite) UpdateDeviceStatus(status DeviceStatus) error {
+func (sqlite *SQLite) UpdateDeviceStatus(status system.DeviceStatus) error {
 	return sqlite.updateDeviceState(status, "")
 }
 
-func (sqlite *SQLite) UpdateNetworkInterface(intf NetworkInterface) error {
+func (sqlite *SQLite) UpdateNetworkInterface(intf system.NetworkInterface) error {
 	return sqlite.updateDeviceState("", intf)
 }
 
-func (sqlite *SQLite) updateDeviceState(newStatus DeviceStatus, newInt NetworkInterface) error {
+func (sqlite *SQLite) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
 	prevDeviceStateSQL := `SELECT interface_type, device_status FROM DeviceStates`
 	selectStatement, err := sqlite.db.Prepare(prevDeviceStateSQL)
 	if err != nil {
@@ -180,7 +181,7 @@ func (sqlite *SQLite) updateDeviceState(newStatus DeviceStatus, newInt NetworkIn
 	return nil
 }
 
-func (sqlite *SQLite) InsertDeviceState(state DeviceStatus, intf NetworkInterface) error {
+func (sqlite *SQLite) InsertDeviceState(state system.DeviceStatus, intf system.NetworkInterface) error {
 	insertAppHistoryStatement := `INSERT INTO DeviceStates(interface_type, device_status, timestamp) VALUES (?, ?, ?)`
 	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {

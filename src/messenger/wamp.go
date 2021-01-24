@@ -15,6 +15,7 @@ import (
 
 type WampSession struct {
 	client *client.Client
+	config *fs.ReswarmConfig
 }
 
 // New creates a new wamp session from a ReswarmConfig file
@@ -23,7 +24,7 @@ func NewWampMessenger(config *fs.ReswarmConfig) (*WampSession, error) {
 
 	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	cfg := client.Config{
@@ -48,7 +49,7 @@ func NewWampMessenger(config *fs.ReswarmConfig) (*WampSession, error) {
 		return nil, err
 	}
 
-	return &WampSession{client: client}, nil
+	return &WampSession{client: client, config: config}, nil
 }
 
 func (wampSession *WampSession) Publish(topic string, args []Dict, kwargs Dict, options Dict) error {
@@ -72,6 +73,10 @@ func (wampSession *WampSession) Subscribe(topic string, cb func(Dict), options D
 	}
 
 	return wampSession.client.Subscribe(topic, handler, wamp.Dict(options))
+}
+
+func (wampSession *WampSession) GetConfig() *fs.ReswarmConfig {
+	return wampSession.config
 }
 
 func (wampSession *WampSession) Call(

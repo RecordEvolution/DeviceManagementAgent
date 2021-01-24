@@ -25,8 +25,6 @@ type Docker struct {
 type Lxc struct {
 }
 
-const defaultRegistry = "https://index.docker.io/v1/"
-
 func NewDocker(config *fs.ReswarmConfig) (*Docker, error) {
 	client, err := newDockerClient()
 	if err != nil {
@@ -67,15 +65,11 @@ func (docker *Docker) ListImages(ctx context.Context, options interface{}) (stri
 }
 
 // Login allows user to authenticate with a specific registry
-func (docker *Docker) Login(ctx context.Context, username string, password string, registryURL string) (string, error) {
-	if registryURL == "" {
-		registryURL = defaultRegistry
-	}
-
+func (docker *Docker) Login(ctx context.Context, username string, password string) (string, error) {
 	authConfig := types.AuthConfig{
 		Username:      username,
 		Password:      password,
-		ServerAddress: registryURL,
+		ServerAddress: docker.config.DockerRegistryURL,
 	}
 
 	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
@@ -88,6 +82,10 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 	}
 
 	return authOkBody.Status, nil
+}
+
+func (docker *Docker) GetConfig() *fs.ReswarmConfig {
+	return docker.config
 }
 
 // Pull pulls a container image from a registry
