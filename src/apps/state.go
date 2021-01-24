@@ -7,23 +7,23 @@ import (
 )
 
 // AppState states
-type AppState int
+type AppState string
 
 const (
-	PRESENT AppState = iota
-	REMOVED
-	UNINSTALLED
-	FAILED
-	BUILDING
-	TRANSFERRED
-	TRANSFERRING
-	PUBLISHING
-	DOWNLOADING
-	STARTING
-	STOPPING
-	UPDATING
-	DELETING
-	RUNNING
+	PRESENT      AppState = "PRESENT"
+	REMOVED      AppState = "REMOVED"
+	UNINSTALLED  AppState = "UNINSTALLED"
+	FAILED       AppState = "FAILED"
+	BUILDING     AppState = "BUILDING"
+	TRANSFERRED  AppState = "TRANSFERRED"
+	TRANSFERRING AppState = "TRANSFERRING"
+	PUBLISHING   AppState = "PUBLISHING"
+	DOWNLOADING  AppState = "DOWNLOADING"
+	STARTING     AppState = "STARTING"
+	STOPPING     AppState = "STOPPING"
+	UPDATING     AppState = "UPDATING"
+	DELETING     AppState = "DELETING"
+	RUNNING      AppState = "RUNNING"
 )
 
 type Stage int
@@ -47,7 +47,7 @@ type TransitionPayload struct {
 	appName       string
 	imageName     string
 	containerName string
-	accountId     int
+	accountID     int
 	registryToken string
 }
 

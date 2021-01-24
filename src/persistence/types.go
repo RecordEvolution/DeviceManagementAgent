@@ -2,24 +2,23 @@ package persistence
 
 import "reagent/apps"
 
-type DeviceState int
-type NetworkState int
-type NetworkInterface int
+type DeviceState string
+type NetworkInterface string
 
 const (
-	CONNECTED DeviceState = iota
-	DISCONNECTED
+	CONNECTED    DeviceState = "CONNECTED"
+	DISCONNECTED DeviceState = "DISCONNECTED"
 )
 
 const (
-	WLAN NetworkInterface = iota
-	ETHERNET
-	NONE
+	WLAN     NetworkInterface = "WLAN"
+	ETHERNET NetworkInterface = "ETHERNET"
+	NONE     NetworkInterface = "NONE"
 )
 
 type StateStorer interface {
 	Init() // responsible for creating tables etc.
-	PersistAppState(appName string, appKey int, stage apps.Stage, curState apps.AppState, reqState apps.AppState)
-	PersistDeviceState(curState DeviceState, reqState DeviceState, curInt NetworkInterface, reqInt NetworkInterface)
+	PersistAppState(appName string, appKey int, stage apps.Stage, curState apps.AppState, reqState apps.AppState) error
+	PersistDeviceState(curState DeviceState, reqState DeviceState, curInt NetworkInterface, reqInt NetworkInterface) error
 	Close()
 }
