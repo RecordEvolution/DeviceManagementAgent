@@ -6,11 +6,11 @@ import (
 	"reagent/messenger"
 )
 
-// State states
-type State int
+// AppState states
+type AppState int
 
 const (
-	PRESENT State = iota
+	PRESENT AppState = iota
 	REMOVED
 	UNINSTALLED
 	FAILED
@@ -36,10 +36,10 @@ const (
 type TransitionFunc func(TransitionPayload)
 
 type StateMachine struct {
-	states     []AppState
-	appManager AppManager
-	messenger  messenger.Messenger
-	config     fs.ReswarmConfig
+	currentAppStates []App
+	appManager       AppManager
+	messenger        messenger.Messenger
+	config           fs.ReswarmConfig
 }
 
 type TransitionPayload struct {
@@ -51,17 +51,17 @@ type TransitionPayload struct {
 	registryToken string
 }
 
-type AppState struct {
+type App struct {
 	Name                   string `json:"name"`
 	AppKey                 int    `json:"app_key"`
 	AppName                string `json:"app_name"`
 	ManuallyRequestedState string `json:"manually_requested_state"`
-	CurrentState           State
+	CurrentState           AppState
 	stage                  Stage
 }
 
-func (sm *StateMachine) getTransitionFunc(prevState State, nextState State) TransitionFunc {
-	var stateTransitionMap = map[State]map[State]TransitionFunc{
+func (sm *StateMachine) getTransitionFunc(prevState AppState, nextState AppState) TransitionFunc {
+	var stateTransitionMap = map[AppState]map[AppState]TransitionFunc{
 		REMOVED: {
 			PRESENT:     nil,
 			RUNNING:     nil,
@@ -152,8 +152,8 @@ func (sm *StateMachine) getTransitionFunc(prevState State, nextState State) Tran
 	return stateTransitionMap[prevState][nextState]
 }
 
-func (sm *StateMachine) getCurrentState(appName string, stage Stage) *State {
-	for _, state := range sm.states {
+func (sm *StateMachine) getCurrentState(appName string, stage Stage) *AppState {
+	for _, state := range sm.currentAppStates {
 		if state.AppName == appName && state.stage == stage {
 			return &state.CurrentState
 		}
@@ -161,15 +161,15 @@ func (sm *StateMachine) getCurrentState(appName string, stage Stage) *State {
 	return nil
 }
 
-func (sm *StateMachine) setCurrentState(appName string, stage Stage, requestedState State) {
-	for _, state := range sm.states {
+func (sm *StateMachine) setCurrentState(appName string, stage Stage, requestedState AppState) {
+	for _, state := range sm.currentAppStates {
 		if state.AppName == appName && state.stage == stage {
 			state.CurrentState = requestedState
 		}
 	}
 }
 
-func (sm *StateMachine) RequestAppState(requestedState State, payload TransitionPayload) {
+func (sm *StateMachine) RequestAppState(requestedState AppState, payload TransitionPayload) {
 	currentState := sm.getCurrentState(payload.appName, payload.stage)
 	transitionFunc := sm.getTransitionFunc(*currentState, requestedState)
 	transitionFunc(payload)
