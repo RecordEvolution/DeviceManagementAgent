@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS "DeviceStates" (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id INTEGER PRIMARY KEY CHECK (id = 1) DEFAULT 1,
   interface_type TEXT CHECK( interface_type IN ('WLAN', 'ETHERNET', 'NONE') ) NOT NULL,
   device_status TEXT CHECK( device_status IN ('CONNECTED', 'DISCONNECTED') ) NOT NULL,
   timestamp TEXT NOT NULL
@@ -29,3 +29,6 @@ CREATE TABLE IF NOT EXISTS "AppStateHistory" (
   state TEXT CHECK( state IN ('PRESENT', 'REMOVED', 'UNINSTALLED', 'FAILED', 'BUILDING', 'TRANSFERRED', 'TRANSFERRING', 'PUBLISHING', 'DOWNLOADING', 'STARTING', 'STOPPING', 'UPDATING', 'DELETING', 'RUNNING') ) NOT NULL,
   timestamp TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS app_states_unique ON AppStates(app_name, app_key, stage);
+CREATE UNIQUE INDEX IF NOT EXISTS app_states_history_unique ON AppStateHistory(app_name, app_key, stage);

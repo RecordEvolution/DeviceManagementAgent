@@ -26,11 +26,11 @@ const (
 	RUNNING      AppState = "RUNNING"
 )
 
-type Stage int
+type Stage string
 
 const (
-	DEV Stage = iota
-	PROD
+	DEV  Stage = "DEV"
+	PROD Stage = "PROD"
 )
 
 type TransitionFunc func(TransitionPayload)
