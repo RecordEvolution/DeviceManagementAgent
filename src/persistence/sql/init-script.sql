@@ -32,3 +32,5 @@ CREATE TABLE IF NOT EXISTS "AppStateHistory" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS app_states_unique ON AppStates(app_name, app_key, stage);
 CREATE UNIQUE INDEX IF NOT EXISTS app_states_history_unique ON AppStateHistory(app_name, app_key, stage);
+
+INSERT OR IGNORE INTO DeviceStates(interface_type, device_status, timestamp) VALUES ('NONE', 'DISCONNECTED', strftime('%s','now'));
