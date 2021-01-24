@@ -87,13 +87,13 @@ func (sqlite *SQLite) UpdateAppState(app apps.App, newState apps.AppState) error
 	return nil
 }
 
-func (sqlite *SQLite) InsertAppState(appName string, appKey int, stage apps.Stage, curState apps.AppState) error {
+func (sqlite *SQLite) InsertAppState(app *apps.App) error {
 	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
 	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
-	_, err = insertStatement.Exec(appName, appKey, stage, curState, time.Now().Format(time.RFC3339))
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Stage, app.CurrentState, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -175,19 +175,6 @@ func (sqlite *SQLite) updateDeviceState(newStatus system.DeviceStatus, newInt sy
 		return err
 	}
 	_, err = updateStatement.Exec(newestStatus, newestInterface)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sqlite *SQLite) InsertDeviceState(state system.DeviceStatus, intf system.NetworkInterface) error {
-	insertAppHistoryStatement := `INSERT INTO DeviceStates(interface_type, device_status, timestamp) VALUES (?, ?, ?)`
-	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
-	if err != nil {
-		return err
-	}
-	_, err = insertStatement.Exec(intf, state, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
