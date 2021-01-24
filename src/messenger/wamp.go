@@ -118,7 +118,7 @@ func (wampSession *WampSession) Call(
 	return callResultMap, nil
 }
 
-func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Dict) Dict, options Dict) error {
+func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Dict) InvokeResult, options Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Dict{
@@ -129,9 +129,16 @@ func (wampSession *WampSession) Register(topic string, cb func(ctx context.Conte
 			"ArgumentsKw":  invocation.ArgumentsKw,
 		}
 		resultMap := cb(ctx, cbInvocationMap)
-		args := resultMap["Args"].([]interface{})
-		kwargs := resultMap["Kwargs"].(Dict)
-		err := resultMap["Err"].(string)
+
+		// see https://github.com/golang/go/wiki/InterfaceSlice
+		arrayOfDict := resultMap.Args
+		args := make([]interface{}, len(arrayOfDict))
+		for i, dict := range arrayOfDict {
+			args[i] = dict
+		}
+
+		kwargs := resultMap.Kwargs
+		err := resultMap.Err
 
 		return client.InvokeResult{Args: args, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
 	}
