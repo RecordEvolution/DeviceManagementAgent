@@ -46,6 +46,7 @@ type StateMachine struct {
 }
 
 type TransitionPayload struct {
+	RequestedState      AppState
 	Stage               Stage
 	AppName             string
 	AppKey              uint64
@@ -186,9 +187,9 @@ func (sm *StateMachine) AddAppState(app App) {
 	sm.currentAppStates = append(sm.currentAppStates, app)
 }
 
-func (sm *StateMachine) RequestAppState(payload TransitionPayload, requestedState AppState) error {
+func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	currentState := sm.getCurrentState(payload.AppName, payload.Stage)
-	transitionFunc := sm.getTransitionFunc(*currentState, requestedState)
+	transitionFunc := sm.getTransitionFunc(*currentState, payload.RequestedState)
 	return transitionFunc(payload)
 }
 
