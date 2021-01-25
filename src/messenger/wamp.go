@@ -60,14 +60,14 @@ func (wampSession *WampSession) Publish(topic string, args []Dict, kwargs Dict, 
 	return wampSession.client.Publish(topic, wamp.Dict(options), wampList, wamp.Dict(kwargs))
 }
 
-func (wampSession *WampSession) Subscribe(topic string, cb func(Dict), options Dict) error {
+func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options Dict) error {
 	handler := func(event *wamp.Event) {
-		cbEventMap := Dict{
-			"Subscription": event.Subscription,
-			"Publication":  event.Publication,
-			"Details":      event.Details,
-			"Arguments":    event.Arguments,
-			"ArgumentsKw":  event.ArgumentsKw,
+		cbEventMap := Result{
+			Subscription: uint64(event.Subscription),
+			Publication:  uint64(event.Publication),
+			Details:      Dict(event.Details),
+			Arguments:    []interface{}(event.Arguments),
+			ArgumentsKw:  Dict(event.ArgumentsKw),
 		}
 		cb(cbEventMap)
 	}
@@ -85,7 +85,7 @@ func (wampSession *WampSession) Call(
 	args []Dict,
 	kwargs Dict,
 	options Dict,
-	progCb func(Dict)) (Dict, error) {
+	progCb func(Result)) (Result, error) {
 
 	var wampList []interface{}
 	for _, dict := range args {
@@ -93,11 +93,11 @@ func (wampSession *WampSession) Call(
 	}
 
 	handler := func(result *wamp.Result) {
-		cbResultMap := Dict{
-			"Request":     result.Request,
-			"Details":     result.Details,
-			"Arguments":   result.Arguments,
-			"ArgumentsKw": result.ArgumentsKw,
+		cbResultMap := Result{
+			Request:     uint64(result.Request),
+			Details:     Dict(result.Details),
+			Arguments:   []interface{}(result.Arguments),
+			ArgumentsKw: Dict(result.ArgumentsKw),
 		}
 		progCb(cbResultMap)
 	}
@@ -105,42 +105,34 @@ func (wampSession *WampSession) Call(
 	result, err := wampSession.client.Call(ctx, topic, wamp.Dict(options), wampList, wamp.Dict(kwargs), handler)
 
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
-	callResultMap := Dict{
-		"Request":     result.Request,
-		"Details":     result.Details,
-		"Arguments":   result.Arguments,
-		"ArgumentsKw": result.ArgumentsKw,
+	callResultMap := Result{
+		Request:     uint64(result.Request),
+		Details:     Dict(result.Details),
+		Arguments:   []interface{}(result.Arguments),
+		ArgumentsKw: Dict(result.ArgumentsKw),
 	}
 
 	return callResultMap, nil
 }
 
-func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Dict) InvokeResult, options Dict) error {
+func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Result) InvokeResult, options Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
-		cbInvocationMap := Dict{
-			"Request":      invocation.Request,
-			"Registration": invocation.Registration,
-			"Details":      invocation.Details,
-			"Arguments":    invocation.Arguments,
-			"ArgumentsKw":  invocation.ArgumentsKw,
+		cbInvocationMap := Result{
+			Request:      uint64(invocation.Request),
+			Registration: uint64(invocation.Registration),
+			Details:      Dict(invocation.Details),
+			Arguments:    invocation.Arguments,
+			ArgumentsKw:  Dict(invocation.ArgumentsKw),
 		}
 		resultMap := cb(ctx, cbInvocationMap)
-
-		// see https://github.com/golang/go/wiki/InterfaceSlice
-		arrayOfDict := resultMap.Args
-		args := make([]interface{}, len(arrayOfDict))
-		for i, dict := range arrayOfDict {
-			args[i] = dict
-		}
-
-		kwargs := resultMap.Kwargs
+		kwargs := resultMap.ArgumentsKw
 		err := resultMap.Err
 
-		return client.InvokeResult{Args: args, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
+		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
 	}
 
 	err := wampSession.client.Register(topic, invocationHandler, wamp.Dict(options))
