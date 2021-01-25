@@ -45,14 +45,14 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	config := ex.Messenger.GetConfig()
 	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
 	imageName := fmt.Sprintf("%s_%s_%d_%s", stage, arch, appKey, appName)
-	fullImageName := fmt.Sprintf("%s/%s/%s", config.DockerRegistryURL, config.DockerMainRepository, imageName)
+	fullImageName := fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName)
 	transitionPayload := apps.TransitionPayload{
 		Stage:         apps.Stage(stage.(string)),
 		AppName:       appName.(string),
 		AppKey:        appKey.(uint64),
 		ContainerName: strings.ToLower(containerName),
 		ImageName:     imageName,
-		FullImageName: fullImageName,
+		FullImageName: strings.ToLower(fullImageName),
 		AccountID:     callerAuthID,
 	}
 

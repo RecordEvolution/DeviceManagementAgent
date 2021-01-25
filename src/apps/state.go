@@ -202,7 +202,7 @@ func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
 	if payload.Stage == DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
 
-		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{}, Dockerfile: "Dockerfile"})
+		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.FullImageName}, Dockerfile: "Dockerfile"})
 		if err != nil {
 			return err
 		}
