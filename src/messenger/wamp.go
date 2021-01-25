@@ -19,7 +19,7 @@ type WampSession struct {
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWampMessenger(config *fs.ReswarmConfig) (*WampSession, error) {
+func NewWamp(config *fs.ReswarmConfig) (*WampSession, error) {
 	ctx := context.Background()
 
 	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))

@@ -21,10 +21,6 @@ type Docker struct {
 	config *fs.ReswarmConfig
 }
 
-// Lxc container implentation using the LXC API
-type Lxc struct {
-}
-
 func NewDocker(config *fs.ReswarmConfig) (*Docker, error) {
 	client, err := newDockerClient()
 	if err != nil {

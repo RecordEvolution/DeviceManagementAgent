@@ -40,19 +40,21 @@ type TransitionFunc func(TransitionPayload) error
 
 type StateMachine struct {
 	currentAppStates []App
-	container        container.Container
-	observer         StateObserver
-	log              logging.LogManager
+	Container        container.Container
+	StateObserver    StateObserver
+	LogManager       logging.LogManager
 }
 
 type TransitionPayload struct {
-	stage         Stage
-	appName       string
-	appKey        int
-	imageName     string
-	containerName string
-	accountID     int
-	registryToken string
+	Stage               Stage
+	AppName             string
+	AppKey              uint64
+	ImageName           string
+	FullImageName       string
+	RepositoryImageName string
+	ContainerName       string
+	AccountID           int
+	RegisteryToken      string
 }
 
 type App struct {
@@ -157,6 +159,7 @@ func (sm *StateMachine) getTransitionFunc(prevState AppState, nextState AppState
 }
 
 func (sm *StateMachine) getCurrentState(appName string, stage Stage) *AppState {
+	fmt.Println(sm.currentAppStates)
 	for _, state := range sm.currentAppStates {
 		if state.AppName == appName && state.Stage == stage {
 			return &state.CurrentState
@@ -166,11 +169,11 @@ func (sm *StateMachine) getCurrentState(appName string, stage Stage) *AppState {
 }
 
 func (sm *StateMachine) setState(app *App, state AppState) {
+	sm.StateObserver.Notify(app, state)
 	app.CurrentState = state
-	sm.observer.Notify(app, state)
 }
 
-func (sm *StateMachine) getApp(appName string, appKey int, stage Stage) (*App, error) {
+func (sm *StateMachine) getApp(appName string, appKey uint64, stage Stage) (*App, error) {
 	for _, state := range sm.currentAppStates {
 		if state.AppName == appName && state.Stage == stage {
 			return &state, nil
@@ -179,32 +182,36 @@ func (sm *StateMachine) getApp(appName string, appKey int, stage Stage) (*App, e
 	return nil, fmt.Errorf("App was not found")
 }
 
-func (sm *StateMachine) RequestAppState(requestedState AppState, payload TransitionPayload) {
-	currentState := sm.getCurrentState(payload.appName, payload.stage)
+func (sm *StateMachine) AddAppState(app App) {
+	sm.currentAppStates = append(sm.currentAppStates, app)
+}
+
+func (sm *StateMachine) RequestAppState(payload TransitionPayload, requestedState AppState) error {
+	currentState := sm.getCurrentState(payload.AppName, payload.Stage)
 	transitionFunc := sm.getTransitionFunc(*currentState, requestedState)
-	transitionFunc(payload)
+	return transitionFunc(payload)
 }
 
 func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
-	app, err := sm.getApp(payload.appName, payload.appKey, payload.stage)
+	app, err := sm.getApp(payload.AppName, payload.AppKey, payload.Stage)
 
 	if err != nil {
 		return err
 	}
 
-	if payload.stage == DEV {
+	if payload.Stage == DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
-		reader, err := sm.container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.imageName}, Dockerfile: "Dockerfile"})
-		sm.log.Broadcast(payload.containerName, logging.BUILD, reader)
 
+		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{}, Dockerfile: "Dockerfile"})
 		if err != nil {
 			return err
 		}
-
+		sm.LogManager.Broadcast(payload.ContainerName, logging.BUILD, reader)
 		if err != nil {
 			sm.setState(app, FAILED)
+		} else {
+			sm.setState(app, PRESENT)
 		}
-		sm.setState(app, PRESENT)
 	}
 
 	return nil

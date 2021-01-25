@@ -38,7 +38,7 @@ func (sqlite *SQLite) Init() error {
 	return sqlite.executeFromFile(basepath + "/sql/init-script.sql")
 }
 
-func (sqlite *SQLite) UpdateAppState(app apps.App, newState apps.AppState) error {
+func (sqlite *SQLite) UpdateAppState(app *apps.App, newState apps.AppState) error {
 	previousAppStatement := `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
 	selectStatement, err := sqlite.db.Prepare(previousAppStatement)
 	if err != nil {
@@ -48,6 +48,7 @@ func (sqlite *SQLite) UpdateAppState(app apps.App, newState apps.AppState) error
 	hasResult := rows.Next() // only get first result
 
 	if hasResult == false {
+		rows.Close()
 		return fmt.Errorf("No app state to update")
 	}
 
@@ -55,6 +56,7 @@ func (sqlite *SQLite) UpdateAppState(app apps.App, newState apps.AppState) error
 	rows.Scan(&curState)
 
 	if curState == string(newState) {
+		rows.Close()
 		return fmt.Errorf("The current state is already %s", newState)
 	}
 

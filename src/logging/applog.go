@@ -17,7 +17,7 @@ func GetAppLogs(appid string) string {
 }
 
 type LogManager struct {
-	messenger messenger.Messenger
+	Messenger messenger.Messenger
 }
 
 type LogType string
@@ -30,16 +30,19 @@ const (
 )
 
 func (lm *LogManager) Broadcast(containerName string, logType LogType, reader io.ReadCloser) {
-	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.messenger.GetConfig().SerialNumber, containerName)
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().SerialNumber, containerName)
 
 	scanner := bufio.NewScanner(reader)
 	builder := strings.Builder{}
+	fmt.Println()
+	fmt.Println()
 	for scanner.Scan() {
 		chunk := scanner.Text()
+		fmt.Println(chunk)
 		builder.WriteString(chunk)
 		args := []messenger.Dict{{"type": "build", "chunk": chunk}}
-		lm.messenger.Publish(topic, args, nil, nil)
+		lm.Messenger.Publish(topic, args, nil, nil)
 	}
 
-	// TODO: store build logs in db
+	// TODO: store logs in db
 }
