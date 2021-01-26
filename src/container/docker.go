@@ -36,7 +36,7 @@ func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
-func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]common.Dict, error) {
+func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]ListContainerResult, error) {
 	listOptions := types.ContainerListOptions{}
 
 	if options != nil {
@@ -88,23 +88,16 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 		return nil, err
 	}
 
-	listOfDict := make([]common.Dict, 0)
+	listOfDict := make([]ListContainerResult, 0)
 	for _, cont := range cList {
-		dict := common.Dict{
-			"id":              cont.ID,
-			"names":           cont.Names,
-			"imageID":         cont.ImageID,
-			"command":         cont.Command,
-			"created":         cont.Created,
-			"ports":           cont.Ports,
-			"sizeRw":          cont.SizeRw,
-			"sizeRootFs":      cont.SizeRootFs,
-			"labels":          cont.Labels,
-			"state":           cont.State,
-			"status":          cont.Status,
-			"hostConfig":      cont.HostConfig,
-			"networkSettings": cont.NetworkSettings,
-			"mounts":          cont.Mounts,
+		dict := ListContainerResult{
+			ID:      cont.ID,
+			Names:   cont.Names,
+			ImageID: cont.ImageID,
+			Command: cont.Command,
+			Labels:  cont.Labels,
+			State:   cont.State,
+			Status:  cont.Status,
 		}
 		listOfDict = append(listOfDict, dict)
 	}

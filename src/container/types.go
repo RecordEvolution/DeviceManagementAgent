@@ -10,6 +10,17 @@ import (
 	"github.com/docker/docker/api/types/network"
 )
 
+// ListContainerResult generic result for the container method ListContainers
+type ListContainerResult struct {
+	ID      string
+	Names   []string
+	ImageID string
+	Labels  map[string]string
+	Status  string
+	State   string
+	Command string
+}
+
 // Container generic interface for a Container API
 type Container interface {
 	Login(ctx context.Context, username string, password string) (string, error)
@@ -20,5 +31,5 @@ type Container interface {
 	Run(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) error
 	RemoveImage(ctx context.Context, imageID string) (string, error)
 	ListImages(ctx context.Context, options interface{}) (string, error)
-	ListContainers(ctx context.Context, options common.Dict) ([]common.Dict, error)
+	ListContainers(ctx context.Context, options common.Dict) ([]ListContainerResult, error)
 }
