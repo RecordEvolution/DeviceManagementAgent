@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"io"
+	"reagent/api/common"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -19,4 +20,5 @@ type Container interface {
 	Run(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) error
 	RemoveImage(ctx context.Context, imageID string) (string, error)
 	ListImages(ctx context.Context, options interface{}) (string, error)
+	ListContainers(ctx context.Context, options common.Dict) ([]common.Dict, error)
 }

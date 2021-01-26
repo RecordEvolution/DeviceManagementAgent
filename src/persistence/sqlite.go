@@ -89,6 +89,27 @@ func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) 
 	return nil
 }
 
+func (sqlite *SQLite) GetLocalAppStates() ([]PersistentAppState, error) {
+	selectAppStatesStatement := `SELECT * FROM AppStates`
+	rows, err := sqlite.db.Query(selectAppStatesStatement)
+
+	if err != nil {
+		return nil, err
+	}
+
+	pAppState := []PersistentAppState{}
+	for rows.Next() {
+		s := PersistentAppState{}
+		err = rows.Scan(&s.ID, &s.AppName, &s.AppName, &s.AppKey, &s.Stage, &s.State, &s.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+		pAppState = append(pAppState, s)
+	}
+
+	return pAppState, nil
+}
+
 func (sqlite *SQLite) InsertAppState(app *common.App) error {
 	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
 	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.

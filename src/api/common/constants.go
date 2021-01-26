@@ -2,6 +2,7 @@ package common
 
 // AppState states
 type AppState string
+type Stage string
 
 const (
 	PRESENT      AppState = "PRESENT"
@@ -15,12 +16,11 @@ const (
 	DOWNLOADING  AppState = "DOWNLOADING"
 	STARTING     AppState = "STARTING"
 	STOPPING     AppState = "STOPPING"
+	STOPPED      AppState = "STOPPED"
 	UPDATING     AppState = "UPDATING"
 	DELETING     AppState = "DELETING"
 	RUNNING      AppState = "RUNNING"
 )
-
-type Stage string
 
 const (
 	DEV  Stage = "DEV"

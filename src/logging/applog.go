@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"reagent/api/common"
 	"reagent/messenger"
 	"strings"
 )
@@ -41,7 +42,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		fmt.Println(chunk)
 		builder.WriteString(chunk)
 
-		args := []messenger.Dict{{"type": "build", "chunk": chunk}}
+		args := []common.Dict{{"type": "build", "chunk": chunk}}
 
 		err := lm.Messenger.Publish(topic, args, nil, nil)
 		if err != nil {
@@ -55,7 +56,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 
 func (lm *LogManager) Write(containerName string, logType LogType, text string) error {
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().SerialNumber, containerName)
-	args := []messenger.Dict{{"type": "build", "chunk": text}}
+	args := []common.Dict{{"type": "build", "chunk": text}}
 	err := lm.Messenger.Publish(topic, args, nil, nil)
 	if err != nil {
 		return err

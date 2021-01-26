@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reagent/api/common"
 	"reagent/fs"
 	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
@@ -32,6 +34,82 @@ func NewDocker(config *fs.ReswarmConfig) (*Docker, error) {
 // For now stick only with Docker as implementation
 func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+}
+
+func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]common.Dict, error) {
+	listOptions := types.ContainerListOptions{}
+
+	if options != nil {
+		quietKw := options["quiet"]
+		allKw := options["all"]
+		sizeKw := options["size"]
+		latestKw := options["latest"]
+		sinceKw := options["since"]
+		beforeKw := options["before"]
+		limitKw := options["limit"]
+		filtersKw := options["filters"]
+
+		quiet, ok := quietKw.(bool)
+		if ok {
+			listOptions.Quiet = quiet
+		}
+		all, ok := allKw.(bool)
+		if ok {
+			listOptions.All = all
+		}
+		size, ok := sizeKw.(bool)
+		if ok {
+			listOptions.Size = size
+		}
+		latest, ok := latestKw.(bool)
+		if ok {
+			listOptions.Latest = latest
+		}
+		since, ok := sinceKw.(string)
+		if ok {
+			listOptions.Since = since
+		}
+		before, ok := beforeKw.(string)
+		if ok {
+			listOptions.Before = before
+		}
+		limit, ok := limitKw.(int)
+		if ok {
+			listOptions.Limit = limit
+		}
+		filters, ok := filtersKw.(filters.Args)
+		if ok {
+			listOptions.Filters = filters
+		}
+	}
+
+	cList, err := docker.client.ContainerList(ctx, listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	listOfDict := make([]common.Dict, 0)
+	for _, cont := range cList {
+		dict := common.Dict{
+			"id":              cont.ID,
+			"names":           cont.Names,
+			"imageID":         cont.ImageID,
+			"command":         cont.Command,
+			"created":         cont.Created,
+			"ports":           cont.Ports,
+			"sizeRw":          cont.SizeRw,
+			"sizeRootFs":      cont.SizeRootFs,
+			"labels":          cont.Labels,
+			"state":           cont.State,
+			"status":          cont.Status,
+			"hostConfig":      cont.HostConfig,
+			"networkSettings": cont.NetworkSettings,
+			"mounts":          cont.Mounts,
+		}
+		listOfDict = append(listOfDict, dict)
+	}
+
+	return listOfDict, nil
 }
 
 // ListImages lists all images available on the host.

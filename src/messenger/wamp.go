@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"reagent/api/common"
 	"reagent/fs"
 
 	"github.com/gammazero/nexus/v3/client"
@@ -52,7 +53,7 @@ func NewWamp(config *fs.ReswarmConfig) (*WampSession, error) {
 	return &WampSession{client: client, config: config}, nil
 }
 
-func (wampSession *WampSession) Publish(topic string, args []Dict, kwargs Dict, options Dict) error {
+func (wampSession *WampSession) Publish(topic string, args []common.Dict, kwargs common.Dict, options common.Dict) error {
 	var wampList []interface{}
 	for _, dict := range args {
 		wampList = append(wampList, dict)
@@ -60,14 +61,14 @@ func (wampSession *WampSession) Publish(topic string, args []Dict, kwargs Dict, 
 	return wampSession.client.Publish(topic, wamp.Dict(options), wampList, wamp.Dict(kwargs))
 }
 
-func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options Dict) error {
+func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options common.Dict) error {
 	handler := func(event *wamp.Event) {
 		cbEventMap := Result{
 			Subscription: uint64(event.Subscription),
 			Publication:  uint64(event.Publication),
-			Details:      Dict(event.Details),
+			Details:      common.Dict(event.Details),
 			Arguments:    []interface{}(event.Arguments),
-			ArgumentsKw:  Dict(event.ArgumentsKw),
+			ArgumentsKw:  common.Dict(event.ArgumentsKw),
 		}
 		cb(cbEventMap)
 	}
@@ -82,9 +83,9 @@ func (wampSession *WampSession) GetConfig() *fs.ReswarmConfig {
 func (wampSession *WampSession) Call(
 	ctx context.Context,
 	topic string,
-	args []Dict,
-	kwargs Dict,
-	options Dict,
+	args []common.Dict,
+	kwargs common.Dict,
+	options common.Dict,
 	progCb func(Result)) (Result, error) {
 
 	var wampList []interface{}
@@ -95,9 +96,9 @@ func (wampSession *WampSession) Call(
 	handler := func(result *wamp.Result) {
 		cbResultMap := Result{
 			Request:     uint64(result.Request),
-			Details:     Dict(result.Details),
+			Details:     common.Dict(result.Details),
 			Arguments:   []interface{}(result.Arguments),
-			ArgumentsKw: Dict(result.ArgumentsKw),
+			ArgumentsKw: common.Dict(result.ArgumentsKw),
 		}
 		progCb(cbResultMap)
 	}
@@ -110,23 +111,23 @@ func (wampSession *WampSession) Call(
 
 	callResultMap := Result{
 		Request:     uint64(result.Request),
-		Details:     Dict(result.Details),
+		Details:     common.Dict(result.Details),
 		Arguments:   []interface{}(result.Arguments),
-		ArgumentsKw: Dict(result.ArgumentsKw),
+		ArgumentsKw: common.Dict(result.ArgumentsKw),
 	}
 
 	return callResultMap, nil
 }
 
-func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Result) InvokeResult, options Dict) error {
+func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Result{
 			Request:      uint64(invocation.Request),
 			Registration: uint64(invocation.Registration),
-			Details:      Dict(invocation.Details),
+			Details:      common.Dict(invocation.Details),
 			Arguments:    invocation.Arguments,
-			ArgumentsKw:  Dict(invocation.ArgumentsKw),
+			ArgumentsKw:  common.Dict(invocation.ArgumentsKw),
 		}
 		resultMap := cb(ctx, cbInvocationMap)
 		kwargs := resultMap.ArgumentsKw
