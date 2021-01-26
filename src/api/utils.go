@@ -1,11 +1,11 @@
-package apps
+package api
 
 import (
 	"fmt"
 	"reagent/api/common"
+	"reagent/apps"
 	"reagent/config"
 	"reagent/messenger"
-	"regexp"
 	"strings"
 )
 
@@ -33,35 +33,35 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 	if appKeyKw != nil {
 		appKey, ok = appKeyKw.(uint64)
 		if !ok {
-			return TransitionPayload{}, fmt.Errorf("Failed to parse app_key")
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse app_key")
 		}
 	}
 
 	if appNameKw != nil {
 		appName, ok = appNameKw.(string)
 		if !ok {
-			return TransitionPayload{}, fmt.Errorf("Failed to parse appName")
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse appName")
 		}
 	}
 
 	if stageKw != nil {
 		stage, ok = stageKw.(string)
 		if !ok {
-			return TransitionPayload{}, fmt.Errorf("Failed to parse stage")
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse stage")
 		}
 	}
 
 	if archKw != nil {
 		arch, ok = archKw.(string)
 		if !ok {
-			return TransitionPayload{}, fmt.Errorf("Failed to parse arch")
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse arch")
 		}
 	}
 
 	if requestedStateKw != nil {
 		requestedState, ok = requestedStateKw.(string)
 		if !ok {
-			return TransitionPayload{}, fmt.Errorf("Failed to parse requested_state")
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse requested_state")
 		}
 	}
 
@@ -71,14 +71,14 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 
 	callerAuthID, ok := callerAuthIDString.(string)
 	if !ok {
-		return TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
+		return apps.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
 	}
 
 	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
 	imageName := fmt.Sprintf("%s_%s_%d_%s", stage, arch, appKey, appName)
 	fullImageName := fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName)
 
-	return TransitionPayload{
+	return apps.TransitionPayload{
 		Stage:          common.Stage(stage),
 		RequestedState: common.AppState(requestedState),
 		AppName:        appName,
@@ -88,9 +88,4 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 		FullImageName:  strings.ToLower(fullImageName),
 		AccountID:      callerAuthID,
 	}, nil
-}
-
-func ParseExitCodeFromStatus(status string) string {
-	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
-	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }

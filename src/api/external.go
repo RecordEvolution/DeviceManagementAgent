@@ -55,7 +55,7 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 
 func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
 	config := ex.Messenger.GetConfig()
-	transitionPayload, err := apps.ResponseToTransitionPayload(config, response)
+	transitionPayload, err := ResponseToTransitionPayload(config, response)
 	if err != nil {
 		return messenger.InvokeResult{Err: err.Error()}
 	}

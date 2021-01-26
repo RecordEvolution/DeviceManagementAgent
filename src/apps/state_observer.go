@@ -8,6 +8,7 @@ import (
 	"reagent/container"
 	"reagent/messenger"
 	"reagent/persistence"
+	"regexp"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ func (su *StateObserver) containerStateToAppState(containerState string, status 
 		return common.RUNNING, nil
 	case "exited":
 		{
-			exitCode := ParseExitCodeFromStatus(status)
+			exitCode := parseExitCodeFromStatus(status)
 			if exitCode == "0" {
 				return common.PRESENT, nil
 			}
@@ -177,4 +178,9 @@ func (su *StateObserver) setActualAppOnDeviceState(app *common.App, stateToSet c
 	}
 
 	return nil
+}
+
+func parseExitCodeFromStatus(status string) string {
+	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
+	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }
