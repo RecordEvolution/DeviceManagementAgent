@@ -134,9 +134,14 @@ func (sm *StateMachine) getCurrentState(appName string, stage common.Stage) (*co
 	return nil, fmt.Errorf("Could not locate app state in memory")
 }
 
-func (sm *StateMachine) setState(app *common.App, state common.AppState) {
-	sm.StateObserver.Notify(app, state)
+func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
+	err := sm.StateObserver.Notify(app, state)
+	if err != nil {
+		return err
+	}
+
 	app.CurrentState = state
+	return nil
 }
 
 func (sm *StateMachine) getApp(appName string, appKey uint64, stage common.Stage) (*common.App, error) {
@@ -157,11 +162,11 @@ func (sm *StateMachine) PopulateAppStates(apps []common.App) {
 }
 
 func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
-	fmt.Println("payload", payload)
 	currentState, err := sm.getCurrentState(payload.AppName, payload.Stage)
 	if err != nil {
-		panic(err)
+		return err
 	}
+
 	transitionFunc := sm.getTransitionFunc(*currentState, payload.RequestedState)
 	return transitionFunc(payload)
 }
@@ -169,7 +174,11 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
 	app, err := sm.getApp(payload.AppName, payload.AppKey, payload.Stage)
 
-	sm.setState(app, common.BUILDING)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.BUILDING)
 
 	if err != nil {
 		return err
@@ -184,7 +193,7 @@ func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
 			return err
 		}
 
-		sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
+		err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
 		if err != nil {
 			sm.setState(app, common.FAILED)
 		} else {

@@ -29,7 +29,7 @@ const (
 	RUNNING LogType = "RUNNING"
 )
 
-func (lm *LogManager) Stream(containerName string, logType LogType, reader io.ReadCloser) {
+func (lm *LogManager) Stream(containerName string, logType LogType, reader io.ReadCloser) error {
 	serialNumber := lm.Messenger.GetConfig().SerialNumber
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 	fmt.Println(serialNumber, topic)
@@ -40,11 +40,17 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		chunk := scanner.Text()
 		fmt.Println(chunk)
 		builder.WriteString(chunk)
+
 		args := []messenger.Dict{{"type": "build", "chunk": chunk}}
-		lm.Messenger.Publish(topic, args, nil, nil)
+
+		err := lm.Messenger.Publish(topic, args, nil, nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	// TODO: store logs in db
+	return nil
 }
 
 func (lm *LogManager) Write(containerName string, logType LogType, text string) error {

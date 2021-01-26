@@ -5,18 +5,21 @@ import (
 )
 
 type StateObserver struct {
-	StateStorer  StateStorer
-	StateUpdater StateSyncer
+	StateStorer StateStorer
+	StateSyncer StateSyncer
 }
 
-func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) {
+func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) error {
 	// doublecheck if state is actually achievable and set the state in the database
 	err := so.StateStorer.UpdateAppState(app, achievedState)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	err = so.StateUpdater.Sync(app, achievedState)
+
+	err = so.StateSyncer.Sync(app, achievedState)
 	if err != nil {
-		panic(err)
+		return err
 	}
+
+	return nil
 }
