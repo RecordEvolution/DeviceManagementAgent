@@ -3,7 +3,7 @@ package apps
 import (
 	"fmt"
 	"reagent/api/common"
-	"reagent/fs"
+	"reagent/config"
 	"reagent/messenger"
 	"regexp"
 	"strconv"
@@ -12,7 +12,7 @@ import (
 
 // ResponseToTransitionPayload parses a Messenger response to a generic TransitionPayload struct.
 // Values that were not provided will be nil.
-func ResponseToTransitionPayload(config *fs.ReswarmConfig, result messenger.Result) (TransitionPayload, error) {
+func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.Result) (TransitionPayload, error) {
 	kwargs := result.ArgumentsKw
 	details := result.Details
 

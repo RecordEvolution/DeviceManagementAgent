@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 	"reagent/api/common"
-	"reagent/fs"
+	"reagent/config"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -20,10 +20,10 @@ import (
 // Docker container implentation using the Docker API
 type Docker struct {
 	client *client.Client
-	config *fs.ReswarmConfig
+	config *config.ReswarmConfig
 }
 
-func NewDocker(config *fs.ReswarmConfig) (*Docker, error) {
+func NewDocker(config *config.ReswarmConfig) (*Docker, error) {
 	client, err := newDockerClient()
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 	return authOkBody.Status, nil
 }
 
-func (docker *Docker) GetConfig() *fs.ReswarmConfig {
+func (docker *Docker) GetConfig() *config.ReswarmConfig {
 	return docker.config
 }
 

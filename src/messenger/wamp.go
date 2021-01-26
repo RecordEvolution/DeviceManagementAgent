@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"reagent/api/common"
-	"reagent/fs"
+	"reagent/config"
 
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/wamp"
@@ -16,11 +16,11 @@ import (
 
 type WampSession struct {
 	client *client.Client
-	config *fs.ReswarmConfig
+	config *config.ReswarmConfig
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config *fs.ReswarmConfig) (*WampSession, error) {
+func NewWamp(config *config.ReswarmConfig) (*WampSession, error) {
 	ctx := context.Background()
 
 	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))
@@ -76,7 +76,7 @@ func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options
 	return wampSession.client.Subscribe(topic, handler, wamp.Dict(options))
 }
 
-func (wampSession *WampSession) GetConfig() *fs.ReswarmConfig {
+func (wampSession *WampSession) GetConfig() *config.ReswarmConfig {
 	return wampSession.config
 }
 

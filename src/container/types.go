@@ -11,7 +11,7 @@ import (
 )
 
 // ListContainerResult generic result for the container method ListContainers
-type ListContainerResult struct {
+type ListContainerResult struct { // More fields can be added if needed, needs to be as generic as possible in case we want to use other container implementations
 	ID      string
 	Names   []string
 	ImageID string
