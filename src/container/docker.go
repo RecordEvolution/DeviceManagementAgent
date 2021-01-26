@@ -2,7 +2,6 @@ package container
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -36,7 +35,10 @@ func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
-func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]ListContainerResult, error) {
+// TODO: simplifiy option parsing
+//
+// ListContainers lists containers on the host
+func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error) {
 	listOptions := types.ContainerListOptions{}
 
 	if options != nil {
@@ -88,9 +90,9 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 		return nil, err
 	}
 
-	listOfDict := make([]ListContainerResult, 0)
+	listOfDict := make([]ContainerResult, 0)
 	for _, cont := range cList {
-		dict := ListContainerResult{
+		dict := ContainerResult{
 			ID:      cont.ID,
 			Names:   cont.Names,
 			ImageID: cont.ImageID,
@@ -106,33 +108,41 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 }
 
 // ListImages lists all images available on the host.
-func (docker *Docker) ListImages(ctx context.Context, options interface{}) (string, error) {
-	var rOptions types.ImageListOptions
-	if options == nil {
-		rOptions = types.ImageListOptions{}
-	} else {
-		cOptions, ok := options.(types.ImageListOptions)
+func (docker *Docker) ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error) {
+	allKw := options["all"]
+
+	rOptions := types.ImageListOptions{}
+
+	if allKw != nil {
+		all, ok := allKw.(bool)
 		if !ok {
-			return "", fmt.Errorf("Excepted types.ImageListOptions{} but got %T instead", options)
+			return nil, fmt.Errorf("Invalid type for 'all' option")
 		}
-		rOptions = cOptions
+		rOptions.All = all
 	}
 
 	imageList, err := docker.client.ImageList(ctx, rOptions)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	byteArr, err := json.Marshal(&imageList)
-	if err != nil {
-		return "", err
+	imageResults := make([]ImageResult, 0)
+	for _, image := range imageList {
+		imageResult := ImageResult{
+			Containers: image.Containers,
+			ID:         image.ID,
+			Labels:     image.Labels,
+			Size:       image.Size,
+			RepoTags:   image.RepoTags,
+		}
+		imageResults = append(imageResults, imageResult)
 	}
 
-	return string(byteArr), nil
+	return imageResults, nil
 }
 
 // Login allows user to authenticate with a specific registry
-func (docker *Docker) Login(ctx context.Context, username string, password string) (string, error) {
+func (docker *Docker) Login(ctx context.Context, username string, password string) error {
 	authConfig := types.AuthConfig{
 		Username:      username,
 		Password:      password,
@@ -141,14 +151,14 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 
 	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	if !strings.Contains(authOkBody.Status, "Login Succeeded") {
-		return "", fmt.Errorf("Login failed with status: %s", authOkBody.Status)
+		return fmt.Errorf("Login failed with status: %s", authOkBody.Status)
 	}
 
-	return authOkBody.Status, nil
+	return nil
 }
 
 func (docker *Docker) GetConfig() *config.ReswarmConfig {
@@ -174,6 +184,8 @@ func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadClo
 	return stats.Body, nil
 }
 
+// TODO: make more generic
+//
 // Run creates and starts a specific container
 func (docker *Docker) Run(ctx context.Context,
 	cConfig container.Config,
@@ -194,19 +206,37 @@ func (docker *Docker) Run(ctx context.Context,
 }
 
 // RemoveImage removes an image from the host
-func (docker *Docker) RemoveImage(ctx context.Context, imageID string) (string, error) {
-	response, err := docker.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{Force: true, PruneChildren: true})
-	if err != nil {
-		return "", err
+func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error {
+	forceKw := options["force"]
+	pruneChildrenKw := options["pruneChildren"]
+
+	rOptions := types.ImageRemoveOptions{}
+	if forceKw != nil {
+		force, ok := forceKw.(bool)
+		if !ok {
+			return fmt.Errorf("Invalid type for 'force' option")
+		}
+		rOptions.Force = force
 	}
 
-	byteArr, err := json.Marshal(&response)
-	if err != nil {
-		return "", err
+	if pruneChildrenKw != nil {
+		pruneChildren, ok := pruneChildrenKw.(bool)
+		if !ok {
+			return fmt.Errorf("Invalid type for 'pruneChilderen' option")
+		}
+		rOptions.PruneChildren = pruneChildren
 	}
-	return string(byteArr), nil
+
+	_, err := docker.client.ImageRemove(ctx, imageID, rOptions)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
+// TODO: make more generic
+//
 // Build builds a Docker image using a tarfile as context
 func (docker *Docker) Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(pathToTar)
