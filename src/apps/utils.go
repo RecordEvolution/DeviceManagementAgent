@@ -6,7 +6,6 @@ import (
 	"reagent/config"
 	"reagent/messenger"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -67,9 +66,12 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 	}
 
 	callerAuthIDString := details["caller_authid"]
-	callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
-	if err != nil {
-		return TransitionPayload{}, err
+
+	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
+
+	callerAuthID, ok := callerAuthIDString.(string)
+	if !ok {
+		return TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
 	}
 
 	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)

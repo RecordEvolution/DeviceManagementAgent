@@ -28,7 +28,7 @@ type TransitionPayload struct {
 	FullImageName       string
 	RepositoryImageName string
 	ContainerName       string
-	AccountID           int
+	AccountID           string
 	RegisteryToken      string
 }
 
