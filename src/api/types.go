@@ -1,11 +1,5 @@
 package api
 
-import "context"
-
-type BackendAPI interface {
-	GetRequestedAppStates(ctx context.Context, deviceKey int) ([]AppStateResponse, error)
-}
-
 type AppStateResponse struct {
 	Name                   string      `json:"name"`
 	Stage                  string      `json:"stage"`
