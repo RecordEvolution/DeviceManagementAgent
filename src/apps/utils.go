@@ -5,6 +5,7 @@ import (
 	"reagent/api/common"
 	"reagent/fs"
 	"reagent/messenger"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -85,4 +86,9 @@ func ResponseToTransitionPayload(config *fs.ReswarmConfig, result messenger.Resu
 		FullImageName:  strings.ToLower(fullImageName),
 		AccountID:      callerAuthID,
 	}, nil
+}
+
+func ParseExitCodeFromStatus(status string) string {
+	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
+	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }

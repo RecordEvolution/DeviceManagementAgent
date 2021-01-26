@@ -32,12 +32,18 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 	return nil
 }
 
-func (su *StateObserver) containerStatetoCommonState(containerState string) (common.AppState, error) {
+func (su *StateObserver) containerStateToAppState(containerState string, status string) (common.AppState, error) {
 	switch containerState {
 	case "running":
 		return common.RUNNING, nil
 	case "exited":
-		return common.STOPPED, nil
+		{
+			exitCode := ParseExitCodeFromStatus(status)
+			if exitCode == "0" {
+				return common.PRESENT, nil
+			}
+			return common.FAILED, nil
+		}
 	case "paused": // state shouldn't occur
 		return common.PRESENT, nil
 	case "restarting":
@@ -46,6 +52,41 @@ func (su *StateObserver) containerStatetoCommonState(containerState string) (com
 		return common.FAILED, nil
 	}
 	return common.FAILED, fmt.Errorf("Invalid state")
+}
+
+func (su *StateObserver) UpdateRemoteAppStates() error {
+	remoteAppStates, err := su.getAllAppStates()
+	if err != nil {
+		return err
+	}
+	localAppStates, err := su.Storer.GetLocalAppStates()
+	if err != nil {
+		return err
+	}
+
+	for _, localAppState := range localAppStates {
+		for _, remoteAppState := range remoteAppStates {
+			if remoteAppState.AppKey == localAppState.AppKey &&
+				common.Stage(remoteAppState.Stage) == localAppState.Stage &&
+				common.AppState(remoteAppState.CurrentState) != localAppState.State {
+				app := common.App{
+					AppName:                localAppState.AppName,
+					Name:                   localAppState.AppName,
+					AppKey:                 localAppState.AppKey,
+					CurrentState:           localAppState.State,
+					ManuallyRequestedState: localAppState.State,
+					Stage:                  localAppState.Stage,
+					RequestUpdate:          false,
+				}
+				err := su.setActualAppOnDeviceState(&app, localAppState.State)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (su *StateObserver) UpdateLocalAppStates() error {
@@ -57,24 +98,16 @@ func (su *StateObserver) UpdateLocalAppStates() error {
 		return err
 	}
 	for _, container := range containers {
+		if container.Labels["real"] != "true" {
+			continue
+		}
+
 		for _, localState := range localStates {
-			curContainerName := strings.ToLower(fmt.Sprintf("%s_%d_%s", localState.Stage, localState.AppKey, localState.AppName))
-
-			containerStateKw := container["state"] // running, exited, created, paused, restarting, dead
-			containerState, ok := containerStateKw.(string)
-			if !ok {
-				return fmt.Errorf("Invalid state payload")
-			}
-
-			containerNamesKw := container["names"]
-			containerNames, ok := containerNamesKw.([]string)
-			if !ok {
-				return fmt.Errorf("Invalid names payload")
-			}
+			localStateContainerName := strings.ToLower(fmt.Sprintf("%s_%d_%s", localState.Stage, localState.AppKey, localState.AppName))
 
 			found := false
-			for _, containerName := range containerNames {
-				if curContainerName == containerName {
+			for _, containerName := range container.Names {
+				if localStateContainerName == containerName {
 					found = true
 				}
 			}
@@ -83,15 +116,15 @@ func (su *StateObserver) UpdateLocalAppStates() error {
 				continue
 			}
 
-			dbState := localState.State
-			commonState, err := su.containerStatetoCommonState(containerState)
+			databaseAppState := localState.State
+			containerAppState, err := su.containerStateToAppState(container.State, container.Status)
 			if err != nil {
 				return err
 			}
 
-			if dbState != commonState {
+			if databaseAppState != containerAppState {
 				app := common.App{AppKey: localState.AppKey, Stage: localState.Stage}
-				su.Storer.UpdateAppState(&app, commonState)
+				su.Storer.UpdateAppState(&app, containerAppState)
 			}
 		}
 	}
