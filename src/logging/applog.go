@@ -29,13 +29,13 @@ const (
 	RUNNING LogType = "RUNNING"
 )
 
-func (lm *LogManager) Broadcast(containerName string, logType LogType, reader io.ReadCloser) {
-	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().SerialNumber, containerName)
+func (lm *LogManager) Stream(containerName string, logType LogType, reader io.ReadCloser) {
+	serialNumber := lm.Messenger.GetConfig().SerialNumber
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
+	fmt.Println(serialNumber, topic)
 
 	scanner := bufio.NewScanner(reader)
 	builder := strings.Builder{}
-	fmt.Println()
-	fmt.Println()
 	for scanner.Scan() {
 		chunk := scanner.Text()
 		fmt.Println(chunk)
@@ -45,4 +45,14 @@ func (lm *LogManager) Broadcast(containerName string, logType LogType, reader io
 	}
 
 	// TODO: store logs in db
+}
+
+func (lm *LogManager) Write(containerName string, logType LogType, text string) error {
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().SerialNumber, containerName)
+	args := []messenger.Dict{{"type": "build", "chunk": text}}
+	err := lm.Messenger.Publish(topic, args, nil, nil)
+	if err != nil {
+		return err
+	}
+	return nil
 }

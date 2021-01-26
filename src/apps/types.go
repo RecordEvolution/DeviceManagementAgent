@@ -1,11 +1,14 @@
 package apps
 
-import "reagent/system"
+import (
+	"reagent/api/common"
+	"reagent/system"
+)
 
 type StateStorer interface {
 	Init() error // responsible for creating tables etc.
-	UpdateAppState(app *App, newState AppState) error
-	InsertAppState(app *App) error
+	UpdateAppState(app *common.App, newState common.AppState) error
+	InsertAppState(app *common.App) error
 	UpdateDeviceStatus(system.DeviceStatus) error
 	UpdateNetworkInterface(system.NetworkInterface) error
 	Close() error

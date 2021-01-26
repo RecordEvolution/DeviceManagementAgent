@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
-	"reagent/apps"
+	"reagent/api/common"
 	"reagent/system"
 	"runtime"
 	"strings"
@@ -38,7 +38,7 @@ func (sqlite *SQLite) Init() error {
 	return sqlite.executeFromFile(basepath + "/sql/init-script.sql")
 }
 
-func (sqlite *SQLite) UpdateAppState(app *apps.App, newState apps.AppState) error {
+func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) error {
 	previousAppStatement := `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
 	selectStatement, err := sqlite.db.Prepare(previousAppStatement)
 	if err != nil {
@@ -89,7 +89,7 @@ func (sqlite *SQLite) UpdateAppState(app *apps.App, newState apps.AppState) erro
 	return nil
 }
 
-func (sqlite *SQLite) InsertAppState(app *apps.App) error {
+func (sqlite *SQLite) InsertAppState(app *common.App) error {
 	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
 	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
