@@ -44,7 +44,9 @@ func parseExitCodeFromStatus(status string) string {
 	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }
 
-func (su *StateUpdater) UpdateLocalAppStates() error {
+// UpdateAppStates will evaluate all local container states and compare that with states stored in the database.
+// Invalid states are corrected in the local and remote database.
+func (su *StateUpdater) UpdateAppStates() error {
 	ctx := context.Background()
 	containers, err := su.StateMachine.Container.ListContainers(ctx, nil)
 	localStates, err := su.StateStorer.GetLocalAppStates()
@@ -87,21 +89,51 @@ func (su *StateUpdater) UpdateLocalAppStates() error {
 	return nil
 }
 
-func (su *StateUpdater) getAllAppStates() ([]common.AppStateResponse, error) {
+func (su *StateUpdater) LoadRemoteAppStates() error {
+	remoteAppStates, err := su.getAllAppStates()
+	if err != nil {
+		return nil
+	}
+
+	su.StateMachine.PopulateState(remoteAppStates)
+	return nil
+}
+
+// TODO: move to seperate interal api layer
+func (su *StateUpdater) getAllAppStates() ([]common.App, error) {
 	ctx := context.Background()
 	deviceKey := su.Messenger.GetConfig().DeviceKey
 	args := []common.Dict{{"device_key": deviceKey}}
 	result, err := su.Messenger.Call(ctx, common.TopicGetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
-		return []common.AppStateResponse{}, err
+		return []common.App{}, err
 	}
 	byteArr, err := json.Marshal(result)
 	if err != nil {
-		return []common.AppStateResponse{}, err
+		return []common.App{}, err
 	}
 
 	appStateResponse := make([]common.AppStateResponse, 0)
 	json.Unmarshal(byteArr, &appStateResponse)
 
-	return appStateResponse, nil
+	appStates := make([]common.App, 0)
+	for _, appState := range appStateResponse {
+		app := common.App{
+			Name:                   appState.Name,
+			AppKey:                 appState.AppKey,
+			AppName:                appState.AppName,
+			ManuallyRequestedState: common.AppState(appState.ManuallyRequestedState),
+			CurrentState:           common.AppState(appState.CurrentState),
+			Stage:                  common.Stage(appState.Stage),
+		}
+
+		requestUpdateKw := appState.RequestUpdate
+		if requestUpdate, ok := requestUpdateKw.(bool); ok {
+			app.RequestUpdate = requestUpdate
+		}
+
+		appStates = append(appStates, app)
+	}
+
+	return appStates, nil
 }

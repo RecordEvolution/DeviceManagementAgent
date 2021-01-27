@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"fmt"
 	"reagent/api/common"
 	"reagent/container"
 	"reagent/logging"
@@ -125,14 +124,8 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	return stateTransitionMap[prevState][nextState]
 }
 
-func (sm *StateMachine) getCurrentState(appName string, stage common.Stage) (*common.AppState, error) {
-	fmt.Println(sm.appStates)
-	for _, state := range sm.appStates {
-		if state.AppName == appName && state.Stage == stage {
-			return &state.CurrentState, nil
-		}
-	}
-	return nil, fmt.Errorf("Could not locate app state in memory")
+func (sm *StateMachine) PopulateState(apps []common.App) {
+	sm.appStates = apps
 }
 
 func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
@@ -155,13 +148,6 @@ func (sm *StateMachine) getApp(AppName string, stage common.Stage) *common.App {
 }
 
 func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
-	currentState, err := sm.getCurrentState(payload.AppName, payload.Stage)
-	if err != nil {
-		return err
-	}
-
-	transitionFunc := sm.getTransitionFunc(*currentState, payload.RequestedState)
-
 	app := sm.getApp(payload.AppName, payload.Stage)
 
 	// if app was not found in memory, will create a new entry from payload
@@ -181,11 +167,14 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 		sm.setState(app, common.REMOVED)
 	}
 
-	err = transitionFunc(payload, app)
+	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+
+	err := transitionFunc(payload, app)
 
 	// If anything goes wrong with the transition function
 	// we should set the state change to FAILED
-	// This will in turn update the in memory state and the database state
+	// This will in turn update the in memory state and the local database state
+	// which will in turn update the remote database as well
 	if err != nil {
 		extraErr := sm.setState(app, common.FAILED)
 		if extraErr != nil {
