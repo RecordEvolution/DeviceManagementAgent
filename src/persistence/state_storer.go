@@ -1,11 +1,13 @@
 package persistence
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"reagent/api/common"
+	"reagent/messenger"
 	"reagent/system"
 	"runtime"
 	"strings"
@@ -14,50 +16,105 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type SQLite struct {
-	db *sql.DB
+type AppStateStorer struct {
+	Messenger messenger.Messenger
+	db        *sql.DB
 }
 
-const databaseFileName = "reagent.db"
-
-func NewSQLiteDb() (*SQLite, error) {
-	db, err := sql.Open("sqlite3", "./reagent.db")
+func NewSQLiteDb() (*AppStateStorer, error) {
+	const databaseFileName = "reagent.db"
+	db, err := sql.Open("sqlite3", "./"+databaseFileName)
 	if err != nil {
 		return nil, err
 	}
-	return &SQLite{db: db}, nil
+	return &AppStateStorer{db: db}, nil
 }
 
-func (sqlite *SQLite) Close() error {
+func (sqlite *AppStateStorer) Close() error {
 	return sqlite.db.Close()
 }
 
-func (sqlite *SQLite) Init() error {
+func (sqlite *AppStateStorer) Init() error {
 	_, b, _, _ := runtime.Caller(0)
 	basepath := filepath.Dir(b)
 	return sqlite.executeFromFile(basepath + "/sql/init-script.sql")
 }
 
-func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) error {
+func (sqlite *AppStateStorer) setActualAppOnDeviceState(app *common.App, stateToSet common.AppState) error {
+	ctx := context.Background()
+	config := sqlite.Messenger.GetConfig()
+	payload := []common.Dict{{
+		"app_key":                  app.AppKey,
+		"device_key":               config.DeviceKey,
+		"swarm_key":                config.SwarmKey,
+		"stage":                    app.Stage,
+		"state":                    stateToSet,
+		"request_update":           app.RequestUpdate,
+		"manually_requested_state": app.ManuallyRequestedState,
+	}}
+
+	// See containers.ts
+	if stateToSet == common.BUILDING {
+		payload[0]["version"] = "latest"
+	}
+
+	// args := []messenger.Dict{payload}
+
+	_, err := sqlite.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateAppState updates the app state in the local database and remote database
+func (sqlite *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
+	err := sqlite.updateAppState(app, newState)
+	if err != nil {
+		return err
+	}
+	err = sqlite.setActualAppOnDeviceState(app, newState)
+	if err != nil {
+		// Silently fail, it's okay if a remote sync is done while the device is offline.
+		// Will resync once the device is online again
+		// The messaging protocol should not fail with a valid internet connection
+		fmt.Printf("Failed to sync app state %s for %+v with remote database", newState, app)
+	}
+	return nil
+}
+
+func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppState) error {
 	previousAppStatement := `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
-	selectStatement, err := sqlite.db.Prepare(previousAppStatement)
+	selectStatement, err := ast.db.Prepare(previousAppStatement)
 	if err != nil {
 		return err
 	}
 	rows, err := selectStatement.Query(app.AppKey, app.Stage)
-	hasResult := rows.Next() // only get first result
+	hasResult := rows.Next() // only get first result since there should only be one
 
 	if hasResult == false {
-		rows.Close()
-		return fmt.Errorf("No app state to update")
+		err := rows.Close()
+		if err != nil {
+			return err
+		}
+
+		return ast.insertAppState(app)
 	}
 
 	var curState string
 	rows.Scan(&curState)
 
 	if curState == string(newState) {
-		rows.Close()
-		return fmt.Errorf("The current state is already %s", newState)
+		err := rows.Close()
+		if err != nil {
+			return err
+		}
+
+		// Silently do nothing if state is already the same
+		// Not sure if we should throw an error?
+		fmt.Printf("The current state is already %s", newState)
+		return nil
 	}
 
 	err = rows.Close()
@@ -67,7 +124,7 @@ func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) 
 
 	// First add new entry in history
 	insertAppHistoryStatement := `INSERT INTO AppStateHistory(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
-	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -78,7 +135,7 @@ func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) 
 
 	// Update current state
 	updateAppStatement := `UPDATE AppStates SET state = ? WHERE app_key = ? AND stage = ?`
-	updateStatement, err := sqlite.db.Prepare(updateAppStatement) // Prepare statement.
+	updateStatement, err := ast.db.Prepare(updateAppStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -89,7 +146,7 @@ func (sqlite *SQLite) UpdateAppState(app *common.App, newState common.AppState) 
 	return nil
 }
 
-func (sqlite *SQLite) GetLocalAppStates() ([]PersistentAppState, error) {
+func (sqlite *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
 	selectAppStatesStatement := `SELECT * FROM AppStates`
 	rows, err := sqlite.db.Query(selectAppStatesStatement)
 
@@ -110,7 +167,7 @@ func (sqlite *SQLite) GetLocalAppStates() ([]PersistentAppState, error) {
 	return pAppState, nil
 }
 
-func (sqlite *SQLite) InsertAppState(app *common.App) error {
+func (sqlite *AppStateStorer) insertAppState(app *common.App) error {
 	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
 	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
@@ -124,15 +181,15 @@ func (sqlite *SQLite) InsertAppState(app *common.App) error {
 	return nil
 }
 
-func (sqlite *SQLite) UpdateDeviceStatus(status system.DeviceStatus) error {
+func (sqlite *AppStateStorer) UpdateDeviceStatus(status system.DeviceStatus) error {
 	return sqlite.updateDeviceState(status, "")
 }
 
-func (sqlite *SQLite) UpdateNetworkInterface(intf system.NetworkInterface) error {
+func (sqlite *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) error {
 	return sqlite.updateDeviceState("", intf)
 }
 
-func (sqlite *SQLite) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
+func (sqlite *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
 	prevDeviceStateSQL := `SELECT interface_type, device_status FROM DeviceStates`
 	selectStatement, err := sqlite.db.Prepare(prevDeviceStateSQL)
 	if err != nil {
@@ -204,7 +261,7 @@ func (sqlite *SQLite) updateDeviceState(newStatus system.DeviceStatus, newInt sy
 	return nil
 }
 
-func (sqlite *SQLite) executeFromFile(filePath string) error {
+func (sqlite *AppStateStorer) executeFromFile(filePath string) error {
 	file, err := ioutil.ReadFile(filePath)
 
 	if err != nil {

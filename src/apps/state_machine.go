@@ -10,7 +10,7 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-type TransitionFunc func(TransitionPayload) error
+type TransitionFunc func(transitionPayload TransitionPayload, app *common.App) error
 
 type StateMachine struct {
 	StateObserver StateObserver
@@ -19,6 +19,7 @@ type StateMachine struct {
 	appStates     []common.App
 }
 
+// TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
 	RequestedState      common.AppState
 	Stage               common.Stage
@@ -135,30 +136,22 @@ func (sm *StateMachine) getCurrentState(appName string, stage common.Stage) (*co
 }
 
 func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
+	app.CurrentState = state
 	err := sm.StateObserver.Notify(app, state)
 	if err != nil {
 		return err
 	}
 
-	app.CurrentState = state
 	return nil
 }
 
-func (sm *StateMachine) getApp(appName string, appKey uint64, stage common.Stage) (*common.App, error) {
+func (sm *StateMachine) getApp(AppName string, stage common.Stage) *common.App {
 	for _, state := range sm.appStates {
-		if state.AppName == appName && state.Stage == stage {
-			return &state, nil
+		if state.AppName == state.AppName && state.Stage == stage {
+			return &state
 		}
 	}
-	return nil, fmt.Errorf("App was not found")
-}
-
-func (sm *StateMachine) AddAppState(app common.App) {
-	sm.appStates = append(sm.appStates, app)
-}
-
-func (sm *StateMachine) PopulateAppStates(apps []common.App) {
-	sm.appStates = apps
+	return nil
 }
 
 func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
@@ -168,17 +161,44 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	}
 
 	transitionFunc := sm.getTransitionFunc(*currentState, payload.RequestedState)
-	return transitionFunc(payload)
-}
 
-func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
-	app, err := sm.getApp(payload.AppName, payload.AppKey, payload.Stage)
+	app := sm.getApp(payload.AppName, payload.Stage)
 
+	// if app was not found in memory, will create a new entry from payload
+	if app == nil {
+		app = &common.App{
+			Name:                   payload.AppName,
+			AppKey:                 int(payload.AppKey),
+			AppName:                payload.AppName,
+			ManuallyRequestedState: payload.RequestedState,
+			Stage:                  payload.Stage,
+			RequestUpdate:          false,
+		}
+		sm.appStates = append(sm.appStates, *app)
+
+		// Set the state of the newly added app to REMOVED
+		// If app does not exist in database, it will be added
+		sm.setState(app, common.REMOVED)
+	}
+
+	err = transitionFunc(payload, app)
+
+	// If anything goes wrong with the transition function
+	// we should set the state change to FAILED
+	// This will in turn update the in memory state and the database state
 	if err != nil {
+		extraErr := sm.setState(app, common.FAILED)
+		if extraErr != nil {
+			return extraErr
+		}
 		return err
 	}
 
-	err = sm.setState(app, common.BUILDING)
+	return nil
+}
+
+func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload, app *common.App) error {
+	err := sm.setState(app, common.BUILDING)
 
 	if err != nil {
 		return err
@@ -195,11 +215,11 @@ func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload) error {
 
 		err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
 		if err != nil {
-			sm.setState(app, common.FAILED)
-		} else {
-			sm.setState(app, common.PRESENT)
-			sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
+			return err
 		}
+
+		sm.setState(app, common.PRESENT)
+		sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
 	}
 
 	return nil
