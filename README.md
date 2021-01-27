@@ -20,10 +20,10 @@ running in containers on the device and retrieve their result and logs.
 
 ## Overview
 
-*[Introduction](#introduction)
-*[Usage](#usage)
-*[Build](#build)
-*[Implementation](#implementation)
+* [Introduction](#introduction)
+* [Usage](#usage)
+* [Build](#build)
+* [Implementation](#implementation)
 
 ## Introduction
 
