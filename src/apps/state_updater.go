@@ -97,7 +97,7 @@ func (su *StateUpdater) UpdateCurrentAppStatesToRemoteDb() error {
 			}
 
 			if databaseAppState != containerAppState {
-				app := common.App{AppKey: localState.AppKey, Stage: localState.Stage}
+				app := common.App{AppKey: uint64(localState.AppKey), Stage: localState.Stage}
 				su.StateStorer.UpdateAppState(&app, containerAppState)
 			}
 		}
@@ -115,28 +115,23 @@ func (su *StateUpdater) getAllAppStates() ([]common.App, error) {
 	if err != nil {
 		return []common.App{}, err
 	}
-	byteArr, err := json.Marshal(result)
+	byteArr, err := json.Marshal(result.Arguments[0])
 	if err != nil {
 		return []common.App{}, err
 	}
 
-	appStateResponse := make([]common.AppStateResponse, 0)
-	json.Unmarshal(byteArr, &appStateResponse)
+	deviceSyncStateResponse := make([]common.DeviceSyncResponse, 0)
+	json.Unmarshal(byteArr, &deviceSyncStateResponse)
 
 	appStates := make([]common.App, 0)
-	for _, appState := range appStateResponse {
+	for _, deviceSyncState := range deviceSyncStateResponse {
 		app := common.App{
-			Name:                   appState.Name,
-			AppKey:                 appState.AppKey,
-			AppName:                appState.AppName,
-			ManuallyRequestedState: common.AppState(appState.ManuallyRequestedState),
-			CurrentState:           common.AppState(appState.CurrentState),
-			Stage:                  common.Stage(appState.Stage),
-		}
-
-		requestUpdateKw := appState.RequestUpdate
-		if requestUpdate, ok := requestUpdateKw.(bool); ok {
-			app.RequestUpdate = requestUpdate
+			Name:                   deviceSyncState.Name,
+			AppKey:                 deviceSyncState.AppKey,
+			ManuallyRequestedState: common.AppState(deviceSyncState.ManuallyRequestedState),
+			CurrentState:           common.AppState(deviceSyncState.CurrentState),
+			Stage:                  common.Stage(deviceSyncState.Stage),
+			RequestUpdate:          deviceSyncState.RequestUpdate,
 		}
 
 		appStates = append(appStates, app)

@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"reagent/api/common"
 	"reagent/config"
+	"strings"
 )
 
 func AppStateToTransitionPayload(config *config.ReswarmConfig, app common.App) TransitionPayload {
 	containerName := fmt.Sprintf("%s_%d_%s", app.Stage, app.AppKey, app.AppName)
-	imageName := fmt.Sprintf("%s_%s_%d_%s", app.Stage, config.Architecture, app.AppKey, app.AppName)
-	repositoryImageName := fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName)
+	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", app.Stage, config.Architecture, app.AppKey, app.AppName))
+	repositoryImageName := strings.ToLower(fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
 	payload := TransitionPayload{
 		RequestedState:      app.ManuallyRequestedState,
@@ -18,6 +19,7 @@ func AppStateToTransitionPayload(config *config.ReswarmConfig, app common.App) T
 		AppKey:              uint64(app.AppKey),
 		ImageName:           imageName,
 		RepositoryImageName: repositoryImageName,
+		CurrentState:        app.CurrentState,
 		ContainerName:       containerName,
 	}
 

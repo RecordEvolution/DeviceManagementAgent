@@ -4,12 +4,35 @@ type Dict map[string]interface{}
 
 type App struct {
 	Name                   string
-	AppKey                 int
+	AppKey                 uint64
 	AppName                string
 	ManuallyRequestedState AppState
 	CurrentState           AppState
 	Stage                  Stage
 	RequestUpdate          bool
+}
+
+type DeviceSyncResponse struct {
+	DeviceKey              int         `json:"device_key"`
+	SwarmKey               int         `json:"swarm_key"`
+	AccountKey             int         `json:"account_key"`
+	SerialNumber           string      `json:"serial_number"`
+	Name                   string      `json:"name"`
+	Status                 string      `json:"status"`
+	Architecture           string      `json:"architecture"`
+	Address                string      `json:"address"`
+	ReleaseKey             int         `json:"release_key"`
+	CurrentState           string      `json:"current_state"`
+	Stage                  string      `json:"stage"`
+	ContainerName          string      `json:"container_name"`
+	RequestUpdate          bool        `json:"request_update"`
+	ManuallyRequestedState string      `json:"manually_requested_state"`
+	InheritFromGroup       interface{} `json:"inherit_from_group"`
+	RequestorAccountKey    int         `json:"requestor_account_key"`
+	PresentVersion         string      `json:"present_version"`
+	PresentImageName       string      `json:"present_image_name"`
+	Description            string      `json:"description"`
+	AppKey                 uint64      `json:"app_key"`
 }
 
 type AppStateResponse struct {

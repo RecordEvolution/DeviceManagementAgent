@@ -2,13 +2,11 @@ package apps
 
 import (
 	"reagent/api/common"
-	"reagent/messenger"
 	"reagent/persistence"
 )
 
 type StateObserver struct {
 	StateStorer persistence.StateStorer
-	Messenger   messenger.Messenger
 }
 
 // Notify verifies a changed state in the StateMachine and stores it in the database

@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"fmt"
 	"reagent/api/common"
 	"reagent/container"
 	"reagent/logging"
@@ -21,6 +22,7 @@ type StateMachine struct {
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
 	RequestedState      common.AppState
+	CurrentState        common.AppState
 	Stage               common.Stage
 	AppName             string
 	AppKey              uint64
@@ -137,9 +139,9 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	return nil
 }
 
-func (sm *StateMachine) getApp(AppName string, stage common.Stage) *common.App {
+func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	for _, state := range sm.appStates {
-		if state.AppName == state.AppName && state.Stage == stage {
+		if state.AppKey == appKey && state.Stage == stage {
 			return &state
 		}
 	}
@@ -147,7 +149,7 @@ func (sm *StateMachine) getApp(AppName string, stage common.Stage) *common.App {
 }
 
 func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
-	app := sm.getApp(payload.AppName, payload.Stage)
+	app := sm.getApp(payload.AppKey, payload.Stage)
 
 	// If appState is already up to date we should do nothing
 	if app != nil && app.CurrentState == payload.RequestedState {
@@ -158,20 +160,37 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	if app == nil {
 		app = &common.App{
 			Name:                   payload.AppName,
-			AppKey:                 int(payload.AppKey),
+			AppKey:                 payload.AppKey,
 			AppName:                payload.AppName,
+			CurrentState:           payload.CurrentState,
 			ManuallyRequestedState: payload.RequestedState,
 			Stage:                  payload.Stage,
 			RequestUpdate:          false,
 		}
 		sm.appStates = append(sm.appStates, *app)
 
-		// Set the state of the newly added app to REMOVED
+		// It is possible that there is already a current app state
+		// if we receive a sync request from the remote database
+		// in that case, take that one
+		currentState := app.CurrentState
+		if currentState == "" {
+			// Set the state of the newly added app to REMOVED
+			app.CurrentState = common.REMOVED
+		}
+
+		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
+
 		// If app does not exist in database, it will be added
-		sm.setState(app, common.REMOVED)
+		// + remote app state will be updated
+		sm.setState(app, app.CurrentState)
 	}
 
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+
+	if transitionFunc == nil {
+		fmt.Printf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+		return fmt.Errorf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+	}
 
 	err := transitionFunc(payload, app)
 

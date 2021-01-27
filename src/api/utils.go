@@ -19,11 +19,13 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 	appNameKw := kwargs["app_name"]
 	stageKw := kwargs["stage"]
 	requestedStateKw := kwargs["requested_state"]
+	currentStateKw := kwargs["current_state"]
 
 	var appKey uint64
 	var appName string
 	var stage string
 	var requestedState string
+	var currentState string
 
 	var ok bool
 
@@ -56,6 +58,13 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 		}
 	}
 
+	if currentStateKw != nil {
+		currentState, ok = currentStateKw.(string)
+		if !ok {
+			return apps.TransitionPayload{}, fmt.Errorf("Failed to parse currentState")
+		}
+	}
+
 	callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -66,14 +75,15 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 	}
 
 	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
-	imageName := fmt.Sprintf("%s_%s_%d_%s", stage, config.Architecture, appKey, appName)
-	fullImageName := fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName)
+	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, config.Architecture, appKey, appName))
+	fullImageName := strings.ToLower(fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
 	return apps.TransitionPayload{
 		Stage:               common.Stage(stage),
 		RequestedState:      common.AppState(requestedState),
 		AppName:             appName,
 		AppKey:              appKey,
+		CurrentState:        common.AppState(currentState),
 		ContainerName:       strings.ToLower(containerName),
 		ImageName:           imageName,
 		RepositoryImageName: strings.ToLower(fullImageName),
