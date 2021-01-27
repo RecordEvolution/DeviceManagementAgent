@@ -25,7 +25,6 @@ type TransitionPayload struct {
 	AppName             string
 	AppKey              uint64
 	ImageName           string
-	FullImageName       string
 	RepositoryImageName string
 	ContainerName       string
 	AccountID           string
@@ -150,6 +149,11 @@ func (sm *StateMachine) getApp(AppName string, stage common.Stage) *common.App {
 func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	app := sm.getApp(payload.AppName, payload.Stage)
 
+	// If appState is already up to date we should do nothing
+	if app != nil && app.CurrentState == payload.RequestedState {
+		return nil
+	}
+
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app = &common.App{
@@ -196,7 +200,7 @@ func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload, app *common.
 	if payload.Stage == common.DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
 
-		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.FullImageName}, Dockerfile: "Dockerfile"})
+		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
 
 		if err != nil {
 			return err

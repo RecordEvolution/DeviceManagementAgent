@@ -44,9 +44,26 @@ func parseExitCodeFromStatus(status string) string {
 	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }
 
-// UpdateAppStates will evaluate all local container states and compare that with states stored in the database.
-// Invalid states are corrected in the local and remote database.
-func (su *StateUpdater) UpdateAppStates() error {
+// ExecuteStateChangeUpdatesFromRemoteDatabase executes the manually requested states from the database
+func (su *StateUpdater) ExecuteStateChangeUpdatesFromRemoteDatabase() error {
+	appStates, err := su.getAllAppStates()
+	config := su.Messenger.GetConfig()
+
+	if err != nil {
+		return err
+	}
+
+	for _, appState := range appStates {
+		payload := AppStateToTransitionPayload(config, appState)
+		su.StateMachine.RequestAppState(payload)
+	}
+
+	return nil
+}
+
+// UpdateCurrentAppStatesToRemoteDb will evaluate all local container states and compare them with the states stored in the local database.
+// Invalid states are corrected in the local database and pushed to the remote database.
+func (su *StateUpdater) UpdateCurrentAppStatesToRemoteDb() error {
 	ctx := context.Background()
 	containers, err := su.StateMachine.Container.ListContainers(ctx, nil)
 	localStates, err := su.StateStorer.GetLocalAppStates()
@@ -86,16 +103,6 @@ func (su *StateUpdater) UpdateAppStates() error {
 		}
 	}
 
-	return nil
-}
-
-func (su *StateUpdater) LoadRemoteAppStates() error {
-	remoteAppStates, err := su.getAllAppStates()
-	if err != nil {
-		return nil
-	}
-
-	su.StateMachine.PopulateState(remoteAppStates)
 	return nil
 }
 
