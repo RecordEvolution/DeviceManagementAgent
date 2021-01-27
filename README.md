@@ -18,9 +18,39 @@ In particular, the daemon enables the
 to authenticate and securely connect to an IoT device in order to control apps
 running in containers on the device and retrieve their result and logs.
 
+## Overview
+
+*[Introduction](#introduction)
+*[Usage](#usage)
+*[Build](#build)
+*[Implementation](#implementation)
+
 ## Introduction
 
 ## Usage
+
+The _Reagent_ is provided as a statically linked binary and accepts various
+CLI parameters to configure it when launched. To show a list of the parameters
+it accepts do `./reagent-<platform>-<arch> --help` resulting in
+
+```Shell
+Usage of ./reagent-linux-amd64:
+  -cfgfile string
+    	Configuration file of IoT device running on localhost (default "device-config.reswarm")
+  -logfile string
+    	Log file used by the ReAgent to store all its log messages (default "/var/log/reagent.log")
+  -logflag
+    	ReAgent logs to stdout/stderr (false) or given file (true) (default true)
+  -loglevel string
+    	Log level is one of DEBUG, INFO, WARNING, ERROR, CRITICAL (default "INFO")
+```
+
+The `cfgfile` provides the path and filename to a locally available configuration
+file for the IoT device the Reagent is managing and running on. This configuration
+comprises the device's _identity_, _hostname_, _authentication details_ at the
+_Reswarm backend instance_ the Reagent is supposed to connect and i.a. the
+endpoint URL itself. The remaining parameters control the system-level _logging_
+of the Reagent.
 
 ## Build
 
