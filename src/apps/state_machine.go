@@ -113,10 +113,6 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	return stateTransitionMap[prevState][nextState]
 }
 
-func (sm *StateMachine) PopulateState(apps []common.App) {
-	sm.appStates = apps
-}
-
 func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	app.CurrentState = state
 	err := sm.StateObserver.Notify(app, state)
@@ -154,8 +150,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database
 		// in that case, take that one
-		currentState := app.CurrentState
-		if currentState == "" {
+		if payload.CurrentState == "" {
 			// Set the state of the newly added app to REMOVED
 			app.CurrentState = common.REMOVED
 		}
@@ -186,6 +181,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	// we should set the state change to FAILED
 	// This will in turn update the in memory state and the local database state
 	// which will in turn update the remote database as well
+	// TODO: introduce concurrent error handling
 	if err != nil {
 		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
 		fmt.Printf("An error occured during transition from %s to %s using %s\n", app.CurrentState, payload.RequestedState, funcName)
@@ -234,7 +230,7 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *common.App) error {
 	config := sm.Container.GetConfig()
 	if payload.Stage == common.DEV {
-		return fmt.Errorf("an dev stage app is not available on the registry")
+		return fmt.Errorf("a dev stage app is not available on the registry")
 	}
 
 	err := sm.setState(app, common.DOWNLOADING)
