@@ -44,26 +44,48 @@ func parseExitCodeFromStatus(status string) string {
 	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }
 
-// ExecuteStateChangeUpdatesFromRemoteDatabase executes the manually requested states from the database
-func (su *StateUpdater) ExecuteStateChangeUpdatesFromRemoteDatabase() error {
-	appStates, err := su.getAllAppStates()
-	config := su.Messenger.GetConfig()
+func (su *StateUpdater) DeviceSync(fetchRemote bool) error {
+	if fetchRemote {
+		err := su.UpdateLocalRequestedStates()
+		if err != nil {
+			return err
+		}
+	}
 
+	payloads, err := su.StateStorer.GetLocalRequestedStates()
 	if err != nil {
 		return err
 	}
 
-	for _, appState := range appStates {
-		payload := AppStateToTransitionPayload(config, appState)
-		su.StateMachine.RequestAppState(payload)
+	for _, payload := range payloads {
+		err = su.StateMachine.RequestAppState(payload)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-// UpdateCurrentAppStatesToRemoteDb will evaluate all local container states and compare them with the states stored in the local database.
+// UpdateLocalRequestedStates will call the remote database to update all its locally stored requested app states
+func (su *StateUpdater) UpdateLocalRequestedStates() error {
+	appStateChanges, err := su.getRemoteRequestedAppStates()
+
+	if err != nil {
+		return err
+	}
+
+	err = su.StateStorer.BulkUpsertRequestedStateChanges(appStateChanges)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateRemoteAppStates will evaluate all (current) app states and compare them with the (current) states stored in the local database.
 // Invalid states are corrected in the local database and pushed to the remote database.
-func (su *StateUpdater) UpdateCurrentAppStatesToRemoteDb() error {
+func (su *StateUpdater) UpdateRemoteAppStates() error {
 	ctx := context.Background()
 	containers, err := su.StateMachine.Container.ListContainers(ctx, nil)
 	localStates, err := su.StateStorer.GetLocalAppStates()
@@ -107,35 +129,43 @@ func (su *StateUpdater) UpdateCurrentAppStatesToRemoteDb() error {
 }
 
 // TODO: move to seperate interal api layer
-func (su *StateUpdater) getAllAppStates() ([]common.App, error) {
+func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
-	deviceKey := su.Messenger.GetConfig().DeviceKey
-	args := []common.Dict{{"device_key": deviceKey}}
+	config := su.Messenger.GetConfig()
+	args := []common.Dict{{"device_key": config.DeviceKey}}
 	result, err := su.Messenger.Call(ctx, common.TopicGetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
-		return []common.App{}, err
+		return []common.TransitionPayload{}, err
 	}
 	byteArr, err := json.Marshal(result.Arguments[0])
 	if err != nil {
-		return []common.App{}, err
+		return []common.TransitionPayload{}, err
 	}
 
 	deviceSyncStateResponse := make([]common.DeviceSyncResponse, 0)
 	json.Unmarshal(byteArr, &deviceSyncStateResponse)
 
-	appStates := make([]common.App, 0)
+	appPayloads := make([]common.TransitionPayload, 0)
 	for _, deviceSyncState := range deviceSyncStateResponse {
-		app := common.App{
-			Name:                   deviceSyncState.Name,
-			AppKey:                 deviceSyncState.AppKey,
-			ManuallyRequestedState: common.AppState(deviceSyncState.ManuallyRequestedState),
-			CurrentState:           common.AppState(deviceSyncState.CurrentState),
-			Stage:                  common.Stage(deviceSyncState.Stage),
-			RequestUpdate:          deviceSyncState.RequestUpdate,
+		appName := strings.Split(deviceSyncState.ContainerName, "_")[2]
+		imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", deviceSyncState.Stage, config.Architecture, deviceSyncState.AppKey, appName))
+		repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
+
+		payload := common.TransitionPayload{
+			AppName:             appName,
+			AppKey:              deviceSyncState.AppKey,
+			ContainerName:       deviceSyncState.ContainerName,
+			ImageName:           imageName,
+			RepositoryImageName: repositoryImageName,
+			RequestorAccountKey: deviceSyncState.RequestorAccountKey,
+			RequestedState:      common.AppState(deviceSyncState.ManuallyRequestedState),
+			CurrentState:        common.AppState(deviceSyncState.CurrentState),
+			Stage:               common.Stage(deviceSyncState.Stage),
+			RequestUpdate:       deviceSyncState.RequestUpdate,
 		}
 
-		appStates = append(appStates, app)
+		appPayloads = append(appPayloads, payload)
 	}
 
-	return appStates, nil
+	return appPayloads, nil
 }

@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -166,13 +168,32 @@ func (docker *Docker) GetConfig() *config.ReswarmConfig {
 }
 
 // Pull pulls a container image from a registry
-func (docker *Docker) Pull(ctx context.Context, imageName string) (io.ReadCloser, error) {
-	return docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{})
+func (docker *Docker) Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error) {
+	dockerAuthConfig := types.AuthConfig{
+		Username: authConfig.Username,
+		Password: authConfig.Password,
+	}
+	encodedJSON, err := json.Marshal(dockerAuthConfig)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(dockerAuthConfig)
+	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
+	return docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
 }
 
 // Push pushes a container image to a registry
-func (docker *Docker) Push(ctx context.Context, imageName string) (io.ReadCloser, error) {
-	return docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{})
+func (docker *Docker) Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error) {
+	dockerAuthConfig := types.AuthConfig{
+		Username: authConfig.Username,
+		Password: authConfig.Password,
+	}
+	encodedJSON, err := json.Marshal(dockerAuthConfig)
+	if err != nil {
+		return nil, err
+	}
+	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
+	return docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
 }
 
 // Stats gets the stats of a specific container

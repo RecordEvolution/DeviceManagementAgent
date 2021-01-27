@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-func AppStateToTransitionPayload(config *config.ReswarmConfig, app common.App) TransitionPayload {
+func AppStateToTransitionPayload(config *config.ReswarmConfig, app common.App) common.TransitionPayload {
 	containerName := fmt.Sprintf("%s_%d_%s", app.Stage, app.AppKey, app.AppName)
 	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", app.Stage, config.Architecture, app.AppKey, app.AppName))
-	repositoryImageName := strings.ToLower(fmt.Sprintf("%s/%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
+	repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
-	payload := TransitionPayload{
+	payload := common.TransitionPayload{
 		RequestedState:      app.ManuallyRequestedState,
 		Stage:               app.Stage,
 		AppName:             app.AppName,

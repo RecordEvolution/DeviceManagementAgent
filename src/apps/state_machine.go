@@ -6,11 +6,13 @@ import (
 	"reagent/api/common"
 	"reagent/container"
 	"reagent/logging"
+	"reflect"
+	"runtime"
 
 	"github.com/docker/docker/api/types"
 )
 
-type TransitionFunc func(transitionPayload TransitionPayload, app *common.App) error
+type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
 
 type StateMachine struct {
 	StateObserver StateObserver
@@ -19,24 +21,10 @@ type StateMachine struct {
 	appStates     []common.App
 }
 
-// TransitionPayload provides the data used by the StateMachine to transition between states.
-type TransitionPayload struct {
-	RequestedState      common.AppState
-	CurrentState        common.AppState
-	Stage               common.Stage
-	AppName             string
-	AppKey              uint64
-	ImageName           string
-	RepositoryImageName string
-	ContainerName       string
-	AccountID           string
-	RegisteryToken      string
-}
-
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullAppOnDevice,
 			common.RUNNING:     nil,
 			common.BUILDING:    sm.buildAppOnDevice,
 			common.PUBLISHING:  nil,
@@ -58,7 +46,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.FAILED: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullAppOnDevice,
 			common.RUNNING:     nil,
 			common.BUILDING:    nil,
 			common.PUBLISHING:  nil,
@@ -148,18 +136,12 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
+func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
-
-	// If appState is already up to date we should do nothing
-	if app != nil && app.CurrentState == payload.RequestedState {
-		return nil
-	}
 
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app = &common.App{
-			Name:                   payload.AppName,
 			AppKey:                 payload.AppKey,
 			AppName:                payload.AppName,
 			CurrentState:           payload.CurrentState,
@@ -185,11 +167,17 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 		sm.setState(app, app.CurrentState)
 	}
 
+	// If appState is already up to date we should do nothing
+	if app.CurrentState == payload.RequestedState {
+		fmt.Printf("app %s is already on latest state (%s)", app.AppName, payload.RequestedState)
+		return nil
+	}
+
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
 
 	if transitionFunc == nil {
-		fmt.Printf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
-		return fmt.Errorf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+		fmt.Printf("Not yet implemented transition from %s to %s\n", app.CurrentState, payload.RequestedState)
+		return nil
 	}
 
 	err := transitionFunc(payload, app)
@@ -199,6 +187,12 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	// This will in turn update the in memory state and the local database state
 	// which will in turn update the remote database as well
 	if err != nil {
+		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
+		fmt.Printf("An error occured during transition from %s to %s using %s\n", app.CurrentState, payload.RequestedState, funcName)
+		fmt.Println(err)
+		fmt.Println("The current app state will be set to FAILED")
+		fmt.Println()
+
 		extraErr := sm.setState(app, common.FAILED)
 		if extraErr != nil {
 			return extraErr
@@ -209,7 +203,7 @@ func (sm *StateMachine) RequestAppState(payload TransitionPayload) error {
 	return nil
 }
 
-func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload, app *common.App) error {
+func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *common.App) error {
 	err := sm.setState(app, common.BUILDING)
 
 	if err != nil {
@@ -232,6 +226,39 @@ func (sm *StateMachine) buildAppOnDevice(payload TransitionPayload, app *common.
 
 		sm.setState(app, common.PRESENT)
 		sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
+	}
+
+	return nil
+}
+
+func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *common.App) error {
+	config := sm.Container.GetConfig()
+	if payload.Stage == common.DEV {
+		return fmt.Errorf("an dev stage app is not available on the registry")
+	}
+
+	err := sm.setState(app, common.DOWNLOADING)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	// Need to authenticate to private registry to determine proper privileges to pull the app
+	authConfig := container.AuthConfig{
+		Username: payload.RegisteryToken,
+		Password: config.Secret,
+	}
+
+	fmt.Printf("Attempting to pull image: %s\n", payload.RepositoryImageName)
+	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Stream(payload.ContainerName, logging.PULL, reader)
+	if err != nil {
+		return err
 	}
 
 	return nil

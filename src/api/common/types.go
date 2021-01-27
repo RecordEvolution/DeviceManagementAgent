@@ -3,13 +3,28 @@ package common
 type Dict map[string]interface{}
 
 type App struct {
-	Name                   string
 	AppKey                 uint64
 	AppName                string
 	ManuallyRequestedState AppState
 	CurrentState           AppState
 	Stage                  Stage
 	RequestUpdate          bool
+}
+
+// common.TransitionPayload provides the data used by the StateMachine to transition between states.
+type TransitionPayload struct {
+	RequestedState      AppState
+	CurrentState        AppState
+	Stage               Stage
+	RequestorAccountKey int
+	AppName             string
+	AppKey              uint64
+	ImageName           string
+	RepositoryImageName string
+	ContainerName       string
+	AccountID           string
+	RegisteryToken      string
+	RequestUpdate       bool
 }
 
 type DeviceSyncResponse struct {

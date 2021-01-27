@@ -30,6 +30,10 @@ func NewSQLiteDb() (*AppStateStorer, error) {
 	return &AppStateStorer{db: db}, nil
 }
 
+func (ast *AppStateStorer) SetMessenger(messenger messenger.Messenger) {
+	ast.Messenger = messenger
+}
+
 func (sqlite *AppStateStorer) Close() error {
 	return sqlite.db.Close()
 }
@@ -69,17 +73,20 @@ func (sqlite *AppStateStorer) setActualAppOnDeviceState(app *common.App, stateTo
 }
 
 // UpdateAppState updates the app state in the local database and remote database
-func (sqlite *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
-	err := sqlite.updateAppState(app, newState)
+func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
+	err := ast.updateAppState(app, newState)
 	if err != nil {
 		return err
 	}
-	err = sqlite.setActualAppOnDeviceState(app, newState)
+	err = ast.setActualAppOnDeviceState(app, newState)
 	if err != nil {
-		// Silently fail, it's okay if a remote sync is done while the device is offline.
+		// Silently fail, it's okay if a 'current app state update' fails while the device is offline.
 		// Will resync once the device is online again
 		// The messaging protocol should not fail with a valid internet connection
-		fmt.Printf("Failed to sync app state %s for %+v with remote database", newState, app)
+		fmt.Printf("Failed to set remote app state to %s for app: %+v", newState, app)
+		fmt.Println()
+		fmt.Println()
+		fmt.Println("error:", err)
 	}
 	return nil
 }
@@ -146,9 +153,9 @@ func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppSt
 	return nil
 }
 
-func (sqlite *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
+func (ast *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
 	selectAppStatesStatement := `SELECT * FROM AppStates`
-	rows, err := sqlite.db.Query(selectAppStatesStatement)
+	rows, err := ast.db.Query(selectAppStatesStatement)
 
 	if err != nil {
 		return nil, err
@@ -167,9 +174,9 @@ func (sqlite *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) 
 	return pAppState, nil
 }
 
-func (sqlite *AppStateStorer) insertAppState(app *common.App) error {
+func (ast *AppStateStorer) insertAppState(app *common.App) error {
 	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
-	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -181,17 +188,107 @@ func (sqlite *AppStateStorer) insertAppState(app *common.App) error {
 	return nil
 }
 
-func (sqlite *AppStateStorer) UpdateDeviceStatus(status system.DeviceStatus) error {
-	return sqlite.updateDeviceState(status, "")
+func (ast *AppStateStorer) UpdateDeviceStatus(status system.DeviceStatus) error {
+	return ast.updateDeviceState(status, "")
 }
 
-func (sqlite *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) error {
-	return sqlite.updateDeviceState("", intf)
+func (ast *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) error {
+	return ast.updateDeviceState("", intf)
 }
 
-func (sqlite *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
+func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload, error) {
+	selectAppStatesStatement := `SELECT app_name, app_key, stage, current_state,
+	manually_requested_state, image_name, repository_image_name, requestor_account_key
+	FROM RequestedAppStates`
+	rows, err := ast.db.Query(selectAppStatesStatement)
+
+	if err != nil {
+		return nil, err
+	}
+
+	payloads := []common.TransitionPayload{}
+	for rows.Next() {
+		payload := common.TransitionPayload{}
+		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.RequestorAccountKey)
+		if err != nil {
+			return nil, err
+		}
+		payloads = append(payloads, payload)
+	}
+
+	return payloads, nil
+}
+
+func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error {
+	tx, err := ast.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	for _, payload := range payloads {
+		upsertRequestedStateChangesStatement := `
+		INSERT INTO RequestedAppStates(app_name, app_key, stage, current_state, manually_requested_state, image_name, repository_image_name, requestor_account_key, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set
+		manually_requested_state=excluded.manually_requested_state,
+		current_state=excluded.current_state
+		`
+
+		upsertStatement, err := tx.Prepare(upsertRequestedStateChangesStatement) // Prepare statement.
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		defer upsertStatement.Close()
+
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
+			payload.CurrentState, payload.RequestedState, payload.ImageName,
+			payload.RepositoryImageName, payload.RequestorAccountKey,
+			time.Now().Format(time.RFC3339),
+		)
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionPayload) error {
+	upsertRequestedStateChangesStatement := `
+	INSERT INTO RequestedAppStates(
+		app_name, app_key, stage, current_state, manually_requested_state,
+		image_name, repository_image_name, requestor_account_key, timestamp
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+	ON conflict(app_name, app_key, stage) DO UPDATE SET
+	manually_requested_state=excluded.manually_requested_state
+	current_state=excluded.current_state;
+	`
+
+	upsertStatement, err := ast.db.Prepare(upsertRequestedStateChangesStatement) // Prepare statement.
+	if err != nil {
+		return err
+	}
+	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
+		payload.CurrentState, payload.RequestedState, payload.ImageName,
+		payload.RepositoryImageName, payload.RequestorAccountKey,
+		time.Now().Format(time.RFC3339),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
 	prevDeviceStateSQL := `SELECT interface_type, device_status FROM DeviceStates`
-	selectStatement, err := sqlite.db.Prepare(prevDeviceStateSQL)
+	selectStatement, err := ast.db.Prepare(prevDeviceStateSQL)
 	if err != nil {
 		return err
 	}
@@ -223,7 +320,7 @@ func (sqlite *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, n
 
 	// Add new entry in history
 	insertAppHistoryStatement := `INSERT INTO DeviceStateHistory(interface_type, device_status, timestamp) VALUES (?, ?, ?)`
-	insertStatement, err := sqlite.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -250,7 +347,7 @@ func (sqlite *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, n
 
 	// Update current state
 	updateAppStatement := `UPDATE DeviceStates SET device_status = ?, interface_type = ?`
-	updateStatement, err := sqlite.db.Prepare(updateAppStatement) // Prepare statement.
+	updateStatement, err := ast.db.Prepare(updateAppStatement) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -261,7 +358,7 @@ func (sqlite *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, n
 	return nil
 }
 
-func (sqlite *AppStateStorer) executeFromFile(filePath string) error {
+func (ast *AppStateStorer) executeFromFile(filePath string) error {
 	file, err := ioutil.ReadFile(filePath)
 
 	if err != nil {
@@ -271,7 +368,7 @@ func (sqlite *AppStateStorer) executeFromFile(filePath string) error {
 	requests := strings.Split(string(file), ";\n")
 
 	for _, request := range requests {
-		_, err := sqlite.db.Exec(request)
+		_, err := ast.db.Exec(request)
 		if err != nil {
 			return err
 		}
