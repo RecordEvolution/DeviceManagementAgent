@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reagent/api/common"
+	"reagent/container"
 	"reagent/messenger"
 	"reagent/persistence"
 	"regexp"
@@ -12,12 +13,28 @@ import (
 )
 
 type StateUpdater struct {
-	StateMachine StateMachine
-	StateStorer  persistence.StateStorer
-	Messenger    messenger.Messenger
+	StateStorer persistence.StateStorer
+	Messenger   messenger.Messenger
+	Container   container.Container
 }
 
-func (su *StateUpdater) containerStateToAppState(containerState string, status string) (common.AppState, error) {
+// UpdateLocalRequestedStates will call the remote database to update all its locally stored requested app states
+func (sc *StateUpdater) UpdateLocalRequestedStates() error {
+	appStateChanges, err := sc.getRemoteRequestedAppStates()
+
+	if err != nil {
+		return err
+	}
+
+	err = sc.StateStorer.BulkUpsertRequestedStateChanges(appStateChanges)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (sc *StateUpdater) containerStateToAppState(containerState string, status string) (common.AppState, error) {
 	switch containerState {
 	case "running":
 		return common.RUNNING, nil
@@ -44,56 +61,11 @@ func parseExitCodeFromStatus(status string) string {
 	return strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 }
 
-func (su *StateUpdater) DeviceSync(fetchRemote bool) error {
-	if fetchRemote {
-		err := su.UpdateLocalRequestedStates()
-		if err != nil {
-			return err
-		}
-	}
-
-	payloads, err := su.StateStorer.GetLocalRequestedStates()
-	if err != nil {
-		return err
-	}
-
-	for _, payload := range payloads {
-		token, err := su.getRegistryToken(payload.RequestorAccountKey)
-		if err != nil {
-			return err
-		}
-
-		payload.RegisteryToken = token
-		err = su.StateMachine.RequestAppState(payload)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// UpdateLocalRequestedStates will call the remote database to update all its locally stored requested app states
-func (su *StateUpdater) UpdateLocalRequestedStates() error {
-	appStateChanges, err := su.getRemoteRequestedAppStates()
-
-	if err != nil {
-		return err
-	}
-
-	err = su.StateStorer.BulkUpsertRequestedStateChanges(appStateChanges)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // UpdateRemoteAppStates will evaluate all (current) app states and compare them with the (current) states stored in the local database.
 // Invalid states are corrected in the local database and pushed to the remote database.
 func (su *StateUpdater) UpdateRemoteAppStates() error {
 	ctx := context.Background()
-	containers, err := su.StateMachine.Container.ListContainers(ctx, nil)
+	containers, err := su.Container.ListContainers(ctx, nil)
 	localStates, err := su.StateStorer.GetLocalAppStates()
 
 	if err != nil {
@@ -126,7 +98,7 @@ func (su *StateUpdater) UpdateRemoteAppStates() error {
 
 			if databaseAppState != containerAppState {
 				app := common.App{AppKey: uint64(localState.AppKey), Stage: localState.Stage}
-				su.StateStorer.UpdateAppState(&app, containerAppState)
+				su.UpdateRemoteAppState(&app, containerAppState)
 			}
 		}
 	}
@@ -134,29 +106,72 @@ func (su *StateUpdater) UpdateRemoteAppStates() error {
 	return nil
 }
 
-func (su *StateUpdater) getRegistryToken(callerID int) (string, error) {
-	ctx := context.Background()
-	args := []common.Dict{{"callerID": callerID}}
-	resp, err := su.Messenger.Call(ctx, common.TopicGetRegistryToken, args, nil, nil, nil)
+func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.TransitionPayload, error) {
+	if fetchRemote {
+		err := sc.UpdateLocalRequestedStates()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	payloads, err := sc.StateStorer.GetLocalRequestedStates()
+	for _, payload := range payloads {
+		token, err := sc.getRegistryToken(payload.RequestorAccountKey)
+		if err != nil {
+			return nil, err
+		}
+
+		payload.RegisteryToken = token
+	}
+
 	if err != nil {
-		return "", err
-	}
-	registryTokenArg := resp.Arguments[0]
-	registryToken, ok := registryTokenArg.(string)
-
-	if !ok {
-		return "", fmt.Errorf("Invalid registry_token payload")
+		return nil, err
 	}
 
-	return registryToken, nil
+	return payloads, nil
+}
+
+func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
+	err := sc.UpdateRemoteAppState(app, stateToSet)
+	if err != nil {
+		return err
+	}
+
+	return sc.StateStorer.UpdateLocalAppState(app, stateToSet)
+}
+
+func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.AppState) error {
+	ctx := context.Background()
+	config := sc.Messenger.GetConfig()
+	payload := []common.Dict{{
+		"app_key":                  app.AppKey,
+		"device_key":               config.ReswarmConfig.DeviceKey,
+		"swarm_key":                config.ReswarmConfig.SwarmKey,
+		"stage":                    app.Stage,
+		"state":                    stateToSet,
+		"request_update":           app.RequestUpdate,
+		"manually_requested_state": app.ManuallyRequestedState,
+	}}
+
+	// See containers.ts
+	if stateToSet == common.BUILDING {
+		payload[0]["version"] = "latest"
+	}
+
+	_, err := sc.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // TODO: move to seperate interal api layer
-func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayload, error) {
+func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
-	config := su.Messenger.GetConfig()
+	config := sc.Messenger.GetConfig()
 	args := []common.Dict{{"device_key": config.ReswarmConfig.DeviceKey}}
-	result, err := su.Messenger.Call(ctx, common.TopicGetRequestedAppStates, args, nil, nil, nil)
+	result, err := sc.Messenger.Call(ctx, common.TopicGetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
 		return []common.TransitionPayload{}, err
 	}
@@ -192,4 +207,21 @@ func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	}
 
 	return appPayloads, nil
+}
+
+func (sc *StateUpdater) getRegistryToken(callerID int) (string, error) {
+	ctx := context.Background()
+	args := []common.Dict{{"callerID": callerID}}
+	resp, err := sc.Messenger.Call(ctx, common.TopicGetRegistryToken, args, nil, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	registryTokenArg := resp.Arguments[0]
+	registryToken, ok := registryTokenArg.(string)
+
+	if !ok {
+		return "", fmt.Errorf("Invalid registry_token payload")
+	}
+
+	return registryToken, nil
 }

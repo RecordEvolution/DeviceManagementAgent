@@ -1,13 +1,11 @@
 package persistence
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"reagent/api/common"
-	"reagent/messenger"
 	"reagent/system"
 	"runtime"
 	"strings"
@@ -17,8 +15,7 @@ import (
 )
 
 type AppStateStorer struct {
-	Messenger messenger.Messenger
-	db        *sql.DB
+	db *sql.DB
 }
 
 func NewSQLiteDb() (*AppStateStorer, error) {
@@ -40,52 +37,26 @@ func (sqlite *AppStateStorer) Init() error {
 	return sqlite.executeFromFile(basepath + "/init-script.sql")
 }
 
-func (sqlite *AppStateStorer) updateRemoteAppState(app *common.App, stateToSet common.AppState) error {
-	ctx := context.Background()
-	config := sqlite.Messenger.GetConfig()
-	payload := []common.Dict{{
-		"app_key":                  app.AppKey,
-		"device_key":               config.ReswarmConfig.DeviceKey,
-		"swarm_key":                config.ReswarmConfig.SwarmKey,
-		"stage":                    app.Stage,
-		"state":                    stateToSet,
-		"request_update":           app.RequestUpdate,
-		"manually_requested_state": app.ManuallyRequestedState,
-	}}
+// // UpdateAppState updates the current app state in the local database and remote database
+// func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
+// 	err := ast.updateLocalAppState(app, newState)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	err = ast.updateRemoteAppState(app, newState)
+// 	if err != nil {
+// 		// Silently fail, it's okay if a 'current app state update' fails while the device is offline.
+// 		// Will resync once the device is online again
+// 		// The messaging protocol should not fail with a valid internet connection
+// 		fmt.Printf("Failed to set remote app state to %s for app: %+v", newState, app)
+// 		fmt.Println()
+// 		fmt.Println()
+// 		fmt.Println("error:", err)
+// 	}
+// 	return nil
+// }
 
-	// See containers.ts
-	if stateToSet == common.BUILDING {
-		payload[0]["version"] = "latest"
-	}
-
-	_, err := sqlite.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// UpdateAppState updates the current app state in the local database and remote database
-func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
-	err := ast.updateLocalAppState(app, newState)
-	if err != nil {
-		return err
-	}
-	err = ast.updateRemoteAppState(app, newState)
-	if err != nil {
-		// Silently fail, it's okay if a 'current app state update' fails while the device is offline.
-		// Will resync once the device is online again
-		// The messaging protocol should not fail with a valid internet connection
-		fmt.Printf("Failed to set remote app state to %s for app: %+v", newState, app)
-		fmt.Println()
-		fmt.Println()
-		fmt.Println("error:", err)
-	}
-	return nil
-}
-
-func (ast *AppStateStorer) updateLocalAppState(app *common.App, newState common.AppState) error {
+func (ast *AppStateStorer) UpdateLocalAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	if err != nil {
 		return err
