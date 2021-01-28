@@ -163,7 +163,7 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 	return nil
 }
 
-func (docker *Docker) GetConfig() *config.Config {
+func (docker *Docker) GetConfig() config.Config {
 	return docker.config
 }
 

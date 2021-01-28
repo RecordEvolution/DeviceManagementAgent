@@ -69,7 +69,7 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 
 // RegisterAll registers all the RPCs/Subscriptions exposed by the reagent
 func (ex *External) RegisterAll() {
-	serialNumber := ex.Messenger.GetConfig().SerialNumber
+	serialNumber := ex.Messenger.GetConfig().ReswarmConfig.SerialNumber
 	topicHandlerMap := ex.getTopicHandlerMap()
 	for topic, handler := range topicHandlerMap {
 		// will register all topics, e.g.: re.mgmt.request_app_state

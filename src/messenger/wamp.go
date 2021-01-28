@@ -78,7 +78,7 @@ func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options
 	return wampSession.client.Subscribe(topic, handler, wamp.Dict(options))
 }
 
-func (wampSession *WampSession) GetConfig() *config.ReswarmConfig {
+func (wampSession *WampSession) GetConfig() config.Config {
 	return wampSession.config
 }
 

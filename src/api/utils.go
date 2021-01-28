@@ -10,7 +10,7 @@ import (
 
 // ResponseTocommon.TransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.
 // Values that were not provided will be nil.
-func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.Result) (common.TransitionPayload, error) {
+func ResponseToTransitionPayload(config config.Config, result messenger.Result) (common.TransitionPayload, error) {
 	kwargs := result.ArgumentsKw
 	details := result.Details
 
@@ -83,8 +83,8 @@ func ResponseToTransitionPayload(config *config.ReswarmConfig, result messenger.
 	}
 
 	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
-	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, config.Architecture, appKey, appName))
-	fullImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
+	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, config.ReswarmConfig.Architecture, appKey, appName))
+	fullImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, imageName))
 
 	return common.TransitionPayload{
 		Stage:               common.Stage(stage),

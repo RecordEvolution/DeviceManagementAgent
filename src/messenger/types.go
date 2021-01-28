@@ -30,6 +30,6 @@ type Messenger interface {
 	Publish(topic string, args []common.Dict, kwargs common.Dict, options common.Dict) error
 	Subscribe(topic string, cb func(Result), options common.Dict) error
 	Call(ctx context.Context, topic string, args []common.Dict, kwargs common.Dict, options common.Dict, progCb func(Result)) (Result, error)
-	GetConfig() *config.Config
+	GetConfig() config.Config
 	Close() error
 }

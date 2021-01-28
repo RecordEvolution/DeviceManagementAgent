@@ -45,8 +45,8 @@ func (sqlite *AppStateStorer) updateRemoteAppState(app *common.App, stateToSet c
 	config := sqlite.Messenger.GetConfig()
 	payload := []common.Dict{{
 		"app_key":                  app.AppKey,
-		"device_key":               config.DeviceKey,
-		"swarm_key":                config.SwarmKey,
+		"device_key":               config.ReswarmConfig.DeviceKey,
+		"swarm_key":                config.ReswarmConfig.SwarmKey,
 		"stage":                    app.Stage,
 		"state":                    stateToSet,
 		"request_update":           app.RequestUpdate,
