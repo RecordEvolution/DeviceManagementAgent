@@ -155,10 +155,9 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 			app.CurrentState = common.REMOVED
 		}
 
-		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
-
 		// If app does not exist in database, it will be added
 		// + remote app state will be updated
+		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
 		sm.setState(app, app.CurrentState)
 	}
 

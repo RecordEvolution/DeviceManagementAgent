@@ -41,10 +41,10 @@ func (sqlite *AppStateStorer) Close() error {
 func (sqlite *AppStateStorer) Init() error {
 	_, b, _, _ := runtime.Caller(0)
 	basepath := filepath.Dir(b)
-	return sqlite.executeFromFile(basepath + "/sql/init-script.sql")
+	return sqlite.executeFromFile(basepath + "/init-script.sql")
 }
 
-func (sqlite *AppStateStorer) setActualAppOnDeviceState(app *common.App, stateToSet common.AppState) error {
+func (sqlite *AppStateStorer) updateRemoteAppState(app *common.App, stateToSet common.AppState) error {
 	ctx := context.Background()
 	config := sqlite.Messenger.GetConfig()
 	payload := []common.Dict{{
@@ -62,8 +62,6 @@ func (sqlite *AppStateStorer) setActualAppOnDeviceState(app *common.App, stateTo
 		payload[0]["version"] = "latest"
 	}
 
-	// args := []messenger.Dict{payload}
-
 	_, err := sqlite.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
 	if err != nil {
 		return err
@@ -72,13 +70,13 @@ func (sqlite *AppStateStorer) setActualAppOnDeviceState(app *common.App, stateTo
 	return nil
 }
 
-// UpdateAppState updates the app state in the local database and remote database
+// UpdateAppState updates the current app state in the local database and remote database
 func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
-	err := ast.updateAppState(app, newState)
+	err := ast.updateLocalAppState(app, newState)
 	if err != nil {
 		return err
 	}
-	err = ast.setActualAppOnDeviceState(app, newState)
+	err = ast.updateRemoteAppState(app, newState)
 	if err != nil {
 		// Silently fail, it's okay if a 'current app state update' fails while the device is offline.
 		// Will resync once the device is online again
@@ -91,9 +89,8 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	return nil
 }
 
-func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppState) error {
-	previousAppStatement := `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
-	selectStatement, err := ast.db.Prepare(previousAppStatement)
+func (ast *AppStateStorer) updateLocalAppState(app *common.App, newState common.AppState) error {
+	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	if err != nil {
 		return err
 	}
@@ -119,7 +116,6 @@ func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppSt
 		}
 
 		// Silently do nothing if state is already the same
-		// Not sure if we should throw an error?
 		fmt.Printf("The current state is already %s", newState)
 		return nil
 	}
@@ -130,8 +126,7 @@ func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppSt
 	}
 
 	// First add new entry in history
-	insertAppHistoryStatement := `INSERT INTO AppStateHistory(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
-	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(QueryInsertAppStateHistoryEntry) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -141,8 +136,7 @@ func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppSt
 	}
 
 	// Update current state
-	updateAppStatement := `UPDATE AppStates SET state = ? WHERE app_key = ? AND stage = ?`
-	updateStatement, err := ast.db.Prepare(updateAppStatement) // Prepare statement.
+	updateStatement, err := ast.db.Prepare(QueryUpdateAppStateByAppKeyAndStage) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -154,8 +148,7 @@ func (ast *AppStateStorer) updateAppState(app *common.App, newState common.AppSt
 }
 
 func (ast *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
-	selectAppStatesStatement := `SELECT * FROM AppStates`
-	rows, err := ast.db.Query(selectAppStatesStatement)
+	rows, err := ast.db.Query(QuerySelectAllAppStates)
 
 	if err != nil {
 		return nil, err
@@ -175,8 +168,7 @@ func (ast *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
 }
 
 func (ast *AppStateStorer) insertAppState(app *common.App) error {
-	insertAppHistoryStatement := `INSERT INTO AppStates(app_name, app_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?)`
-	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(QueryInsertAppStateEntry) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -197,10 +189,7 @@ func (ast *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) 
 }
 
 func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload, error) {
-	selectAppStatesStatement := `SELECT app_name, app_key, stage, container_name, current_state,
-	manually_requested_state, image_name, repository_image_name, requestor_account_key
-	FROM RequestedAppStates`
-	rows, err := ast.db.Query(selectAppStatesStatement)
+	rows, err := ast.db.Query(QuerySelectAllRequestedStates)
 
 	if err != nil {
 		return nil, err
@@ -226,14 +215,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 	}
 
 	for _, payload := range payloads {
-		upsertRequestedStateChangesStatement := `
-		INSERT INTO RequestedAppStates(app_name, app_key, stage, container_name, current_state, manually_requested_state, image_name, repository_image_name, requestor_account_key, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set
-		manually_requested_state=excluded.manually_requested_state,
-		current_state=excluded.current_state
-		`
-
-		upsertStatement, err := tx.Prepare(upsertRequestedStateChangesStatement) // Prepare statement.
+		upsertStatement, err := tx.Prepare(QueryUpsertRequestedStateEntry) // Prepare statement.
 
 		if err != nil {
 			tx.Rollback()
@@ -258,18 +240,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 }
 
 func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionPayload) error {
-	upsertRequestedStateChangesStatement := `
-	INSERT INTO RequestedAppStates(
-		app_name, app_key, stage, current_state, manually_requested_state,
-		image_name, repository_image_name, requestor_account_key, timestamp
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-	ON conflict(app_name, app_key, stage) DO UPDATE SET
-	manually_requested_state=excluded.manually_requested_state
-	current_state=excluded.current_state;
-	`
-
-	upsertStatement, err := ast.db.Prepare(upsertRequestedStateChangesStatement) // Prepare statement.
+	upsertStatement, err := ast.db.Prepare(QueryUpsertRequestedStateEntry) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -287,8 +258,7 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 }
 
 func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
-	prevDeviceStateSQL := `SELECT interface_type, device_status FROM DeviceStates`
-	selectStatement, err := ast.db.Prepare(prevDeviceStateSQL)
+	selectStatement, err := ast.db.Prepare(QuerySelectAllDeviceState)
 	if err != nil {
 		return err
 	}
@@ -319,8 +289,7 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 	}
 
 	// Add new entry in history
-	insertAppHistoryStatement := `INSERT INTO DeviceStateHistory(interface_type, device_status, timestamp) VALUES (?, ?, ?)`
-	insertStatement, err := ast.db.Prepare(insertAppHistoryStatement) // Prepare statement.
+	insertStatement, err := ast.db.Prepare(QueryInsertDeviceStateHistoryEntry) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -346,8 +315,7 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 	}
 
 	// Update current state
-	updateAppStatement := `UPDATE DeviceStates SET device_status = ?, interface_type = ?`
-	updateStatement, err := ast.db.Prepare(updateAppStatement) // Prepare statement.
+	updateStatement, err := ast.db.Prepare(QueryUpdateDeviceState) // Prepare statement.
 	if err != nil {
 		return err
 	}
