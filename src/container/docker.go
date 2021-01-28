@@ -21,10 +21,10 @@ import (
 // Docker container implentation using the Docker API
 type Docker struct {
 	client *client.Client
-	config *config.ReswarmConfig
+	config config.Config
 }
 
-func NewDocker(config *config.ReswarmConfig) (*Docker, error) {
+func NewDocker(config config.Config) (*Docker, error) {
 	client, err := newDockerClient()
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 	authConfig := types.AuthConfig{
 		Username:      username,
 		Password:      password,
-		ServerAddress: docker.config.DockerRegistryURL,
+		ServerAddress: docker.config.ReswarmConfig.DockerRegistryURL,
 	}
 
 	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
@@ -163,7 +163,7 @@ func (docker *Docker) Login(ctx context.Context, username string, password strin
 	return nil
 }
 
-func (docker *Docker) GetConfig() *config.ReswarmConfig {
+func (docker *Docker) GetConfig() *config.Config {
 	return docker.config
 }
 

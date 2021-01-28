@@ -31,6 +31,15 @@ type ReswarmConfig struct {
 	DockerMainRepository string `json:"docker_main_repository"`
 }
 
+type CommandLineArguments struct {
+	AppBuildsDirectory string
+}
+
+type Config struct {
+	ReswarmConfig        *ReswarmConfig
+	CommandLineArguments *CommandLineArguments
+}
+
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path
 func LoadReswarmConfig(path string) (*ReswarmConfig, error) {
 	jsonFile, err := os.Open(path)

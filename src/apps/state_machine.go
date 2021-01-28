@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reagent/api/common"
 	"reagent/container"
+	"reagent/filesystem"
 	"reagent/logging"
 	"reflect"
 	"runtime"
@@ -208,7 +209,16 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 	if payload.Stage == common.DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
 
-		reader, err := sm.Container.Build(ctx, "./TestApp.tar", types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
+		filePath := sm.Container.GetConfig().CommandLineArguments.AppBuildsDirectory
+		fileName := payload.AppName + ".tar"
+
+		exists, _ := filesystem.FileExists(filePath + "/" + fileName)
+		if !exists {
+			sm.setState(app, common.FAILED)
+			return fmt.Errorf("build files do not exist for %s", payload.AppName)
+		}
+
+		reader, err := sm.Container.Build(ctx, fileName, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
 
 		if err != nil {
 			return err
@@ -242,7 +252,7 @@ func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *c
 	// Need to authenticate to private registry to determine proper privileges to pull the app
 	authConfig := container.AuthConfig{
 		Username: payload.RegisteryToken,
-		Password: config.Secret,
+		Password: config.ReswarmConfig.Secret,
 	}
 
 	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)

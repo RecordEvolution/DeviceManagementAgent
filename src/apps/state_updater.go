@@ -155,7 +155,7 @@ func (su *StateUpdater) getRegistryToken(callerID int) (string, error) {
 func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
 	config := su.Messenger.GetConfig()
-	args := []common.Dict{{"device_key": config.DeviceKey}}
+	args := []common.Dict{{"device_key": config.ReswarmConfig.DeviceKey}}
 	result, err := su.Messenger.Call(ctx, common.TopicGetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
 		return []common.TransitionPayload{}, err
@@ -171,8 +171,8 @@ func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	appPayloads := make([]common.TransitionPayload, 0)
 	for _, deviceSyncState := range deviceSyncStateResponse {
 		appName := strings.Split(deviceSyncState.ContainerName, "_")[2]
-		imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", deviceSyncState.Stage, config.Architecture, deviceSyncState.AppKey, appName))
-		presentImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, deviceSyncState.PresentImageName))
+		imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", deviceSyncState.Stage, config.ReswarmConfig.Architecture, deviceSyncState.AppKey, appName))
+		presentImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, deviceSyncState.PresentImageName))
 		//repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
 		payload := common.TransitionPayload{

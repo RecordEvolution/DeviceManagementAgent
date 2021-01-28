@@ -16,14 +16,15 @@ import (
 
 type WampSession struct {
 	client *client.Client
-	config *config.ReswarmConfig
+	config config.Config
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config *config.ReswarmConfig) (*WampSession, error) {
+func NewWamp(config config.Config) (*WampSession, error) {
 	ctx := context.Background()
+	reswarmConfig := config.ReswarmConfig
 
-	tlscert, err := tls.X509KeyPair([]byte(config.Authentication.Certificate), []byte(config.Authentication.Key))
+	tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
 	if err != nil {
 		return nil, err
 	}
@@ -31,21 +32,22 @@ func NewWamp(config *config.ReswarmConfig) (*WampSession, error) {
 	cfg := client.Config{
 		Realm: "realm1",
 		HelloDetails: wamp.Dict{
-			"authid": fmt.Sprintf("%d-%d", config.SwarmKey, config.DeviceKey),
+			"authid": fmt.Sprintf("%d-%d", reswarmConfig.SwarmKey, reswarmConfig.DeviceKey),
 		},
 		AuthHandlers: map[string]client.AuthFunc{
-			"wampcra": clientAuthFunc(config.Secret),
+			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
 		Debug:           true,
 		ResponseTimeout: 5 * time.Second,
 		// Serialization:
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
-			InsecureSkipVerify: true},
+			InsecureSkipVerify: true,
+		},
 	}
 
 	// set up WAMP client and connect connect to websocket endpoint
-	client, err := client.ConnectNet(ctx, config.DeviceEndpointURL, cfg)
+	client, err := client.ConnectNet(ctx, reswarmConfig.DeviceEndpointURL, cfg)
 	if err != nil {
 		return nil, err
 	}

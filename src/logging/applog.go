@@ -31,7 +31,7 @@ const (
 )
 
 func (lm *LogManager) Stream(containerName string, logType LogType, reader io.ReadCloser) error {
-	serialNumber := lm.Messenger.GetConfig().SerialNumber
+	serialNumber := lm.Messenger.GetConfig().ReswarmConfig.SerialNumber
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 	fmt.Println(serialNumber, topic)
 
@@ -55,7 +55,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 }
 
 func (lm *LogManager) Write(containerName string, logType LogType, text string) error {
-	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().SerialNumber, containerName)
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
 	args := []common.Dict{{"type": "build", "chunk": text}}
 	err := lm.Messenger.Publish(topic, args, nil, nil)
 	if err != nil {

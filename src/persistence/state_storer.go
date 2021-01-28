@@ -30,10 +30,6 @@ func NewSQLiteDb() (*AppStateStorer, error) {
 	return &AppStateStorer{db: db}, nil
 }
 
-func (ast *AppStateStorer) SetMessenger(messenger messenger.Messenger) {
-	ast.Messenger = messenger
-}
-
 func (sqlite *AppStateStorer) Close() error {
 	return sqlite.db.Close()
 }
