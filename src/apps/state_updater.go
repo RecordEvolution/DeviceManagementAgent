@@ -115,13 +115,13 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 	}
 
 	payloads, err := sc.StateStorer.GetLocalRequestedStates()
-	for _, payload := range payloads {
+	for i, payload := range payloads {
 		token, err := sc.getRegistryToken(payload.RequestorAccountKey)
 		if err != nil {
 			return nil, err
 		}
 
-		payload.RegisteryToken = token
+		payloads[i].RegisteryToken = token
 	}
 
 	if err != nil {
