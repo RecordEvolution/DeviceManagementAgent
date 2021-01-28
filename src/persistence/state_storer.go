@@ -197,7 +197,7 @@ func (ast *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) 
 }
 
 func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload, error) {
-	selectAppStatesStatement := `SELECT app_name, app_key, stage, current_state,
+	selectAppStatesStatement := `SELECT app_name, app_key, stage, container_name, current_state,
 	manually_requested_state, image_name, repository_image_name, requestor_account_key
 	FROM RequestedAppStates`
 	rows, err := ast.db.Query(selectAppStatesStatement)
@@ -209,7 +209,7 @@ func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload
 	payloads := []common.TransitionPayload{}
 	for rows.Next() {
 		payload := common.TransitionPayload{}
-		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.RequestorAccountKey)
+		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.ContainerName, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.RequestorAccountKey)
 		if err != nil {
 			return nil, err
 		}
@@ -227,8 +227,8 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 	for _, payload := range payloads {
 		upsertRequestedStateChangesStatement := `
-		INSERT INTO RequestedAppStates(app_name, app_key, stage, current_state, manually_requested_state, image_name, repository_image_name, requestor_account_key, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set
+		INSERT INTO RequestedAppStates(app_name, app_key, stage, container_name, current_state, manually_requested_state, image_name, repository_image_name, requestor_account_key, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set
 		manually_requested_state=excluded.manually_requested_state,
 		current_state=excluded.current_state
 		`
@@ -242,7 +242,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
-		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.ContainerName,
 			payload.CurrentState, payload.RequestedState, payload.ImageName,
 			payload.RepositoryImageName, payload.RequestorAccountKey,
 			time.Now().Format(time.RFC3339),

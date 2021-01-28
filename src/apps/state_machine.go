@@ -164,7 +164,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 
 	// If appState is already up to date we should do nothing
 	if app.CurrentState == payload.RequestedState {
-		fmt.Printf("app %s is already on latest state (%s)", app.AppName, payload.RequestedState)
+		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
 		return nil
 	}
 
@@ -246,8 +246,11 @@ func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *c
 		Password: config.Secret,
 	}
 
-	fmt.Printf("Attempting to pull image: %s\n", payload.RepositoryImageName)
 	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
+	if err != nil {
+		return err
+	}
+	err = sm.setState(app, common.PRESENT)
 	if err != nil {
 		return err
 	}

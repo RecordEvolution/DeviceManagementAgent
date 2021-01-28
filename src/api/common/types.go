@@ -20,6 +20,8 @@ type TransitionPayload struct {
 	AppName             string
 	AppKey              uint64
 	ImageName           string
+	NewImageName        string
+	PresentImageName    string
 	RepositoryImageName string
 	ContainerName       string
 	AccountID           string

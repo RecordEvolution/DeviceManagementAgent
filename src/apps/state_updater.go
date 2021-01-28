@@ -58,6 +58,12 @@ func (su *StateUpdater) DeviceSync(fetchRemote bool) error {
 	}
 
 	for _, payload := range payloads {
+		token, err := su.getRegistryToken(payload.RequestorAccountKey)
+		if err != nil {
+			return err
+		}
+
+		payload.RegisteryToken = token
 		err = su.StateMachine.RequestAppState(payload)
 		if err != nil {
 			return err
@@ -128,6 +134,23 @@ func (su *StateUpdater) UpdateRemoteAppStates() error {
 	return nil
 }
 
+func (su *StateUpdater) getRegistryToken(callerID int) (string, error) {
+	ctx := context.Background()
+	args := []common.Dict{{"callerID": callerID}}
+	resp, err := su.Messenger.Call(ctx, common.TopicGetRegistryToken, args, nil, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	registryTokenArg := resp.Arguments[0]
+	registryToken, ok := registryTokenArg.(string)
+
+	if !ok {
+		return "", fmt.Errorf("Invalid registry_token payload")
+	}
+
+	return registryToken, nil
+}
+
 // TODO: move to seperate interal api layer
 func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
@@ -149,14 +172,15 @@ func (su *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	for _, deviceSyncState := range deviceSyncStateResponse {
 		appName := strings.Split(deviceSyncState.ContainerName, "_")[2]
 		imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", deviceSyncState.Stage, config.Architecture, deviceSyncState.AppKey, appName))
-		repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
+		presentImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, deviceSyncState.PresentImageName))
+		//repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
 		payload := common.TransitionPayload{
 			AppName:             appName,
 			AppKey:              deviceSyncState.AppKey,
 			ContainerName:       deviceSyncState.ContainerName,
 			ImageName:           imageName,
-			RepositoryImageName: repositoryImageName,
+			RepositoryImageName: presentImageName,
 			RequestorAccountKey: deviceSyncState.RequestorAccountKey,
 			RequestedState:      common.AppState(deviceSyncState.ManuallyRequestedState),
 			CurrentState:        common.AppState(deviceSyncState.CurrentState),

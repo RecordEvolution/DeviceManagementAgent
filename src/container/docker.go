@@ -177,7 +177,6 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, authConfig Aut
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(dockerAuthConfig)
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 	return docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
 }
