@@ -7,6 +7,8 @@ import (
 	"reagent/apps"
 	"reagent/filesystem"
 	"reagent/messenger"
+
+	"github.com/gammazero/nexus/v3/wamp"
 )
 
 type External struct {
@@ -43,11 +45,15 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 		return messenger.InvokeResult{Err: fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)}
 	}
 
-	filePath := "/reswarm_app_builds" // TODO: load from generalized config
+	filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
 	err := filesystem.Write(name, filePath, chunk)
 
 	if err != nil {
-		return messenger.InvokeResult{Err: err.Error()}
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
 	}
 
 	return messenger.InvokeResult{}
@@ -57,11 +63,19 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	config := ex.Messenger.GetConfig()
 	transitionPayload, err := ResponseToTransitionPayload(config, response)
 	if err != nil {
-		return messenger.InvokeResult{Err: err.Error()}
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
 	}
 	err = ex.StateMachine.RequestAppState(transitionPayload)
 	if err != nil {
-		return messenger.InvokeResult{Err: err.Error()}
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
 	}
 
 	return messenger.InvokeResult{} // Return empty result

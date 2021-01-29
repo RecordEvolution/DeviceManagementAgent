@@ -149,14 +149,11 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 		"swarm_key":                config.ReswarmConfig.SwarmKey,
 		"stage":                    app.Stage,
 		"state":                    stateToSet,
+		"device_to_app_key":        app.DeviceToAppKey,
+		"requestor_account_key":    app.RequestorAccountKey,
 		"request_update":           app.RequestUpdate,
 		"manually_requested_state": app.ManuallyRequestedState,
 	}}
-
-	// See containers.ts
-	if stateToSet == common.BUILDING {
-		payload[0]["version"] = "latest"
-	}
 
 	_, err := sc.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
 	if err != nil {
@@ -196,7 +193,8 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 			ContainerName:       deviceSyncState.ContainerName,
 			ImageName:           imageName,
 			RepositoryImageName: presentImageName,
-			RequestorAccountKey: deviceSyncState.RequestorAccountKey,
+			DeviceToAppKey:      uint64(deviceSyncState.DeviceToAppKey),
+			RequestorAccountKey: uint64(deviceSyncState.RequestorAccountKey),
 			RequestedState:      common.AppState(deviceSyncState.ManuallyRequestedState),
 			CurrentState:        common.AppState(deviceSyncState.CurrentState),
 			Stage:               common.Stage(deviceSyncState.Stage),
@@ -209,7 +207,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	return appPayloads, nil
 }
 
-func (sc *StateUpdater) getRegistryToken(callerID int) (string, error) {
+func (sc *StateUpdater) getRegistryToken(callerID uint64) (string, error) {
 	ctx := context.Background()
 	args := []common.Dict{{"callerID": callerID}}
 	resp, err := sc.Messenger.Call(ctx, common.TopicGetRegistryToken, args, nil, nil, nil)

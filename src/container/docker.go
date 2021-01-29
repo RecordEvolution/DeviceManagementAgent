@@ -261,7 +261,7 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 func (docker *Docker) Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(pathToTar)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open .tar file: %s", err)
+		return nil, fmt.Errorf("Failed to open compressed build file: %s", err)
 	}
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)

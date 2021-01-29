@@ -18,10 +18,16 @@ func ResponseToTransitionPayload(config config.Config, result messenger.Result) 
 	appNameKw := kwargs["app_name"]
 	stageKw := kwargs["stage"]
 	requestedStateKw := kwargs["manually_requested_state"]
-	currentStateKw := kwargs["current_state"]
+	// releaseKeyKw := kwargs["release_key"]
+	currentStateKw := kwargs["state"]
 	registryTokenKw := kwargs["registry_token"]
+	requestorAccountKeyKw := kwargs["requestor_account_key"]
+	dtaKeyKw := kwargs["device_to_app_key"]
 
 	var appKey uint64
+	// var releaseKey uint64
+	var dtaKey uint64
+	var requestorAccountKey uint64
 	var appName string
 	var stage string
 	var requestedState string
@@ -36,6 +42,9 @@ func ResponseToTransitionPayload(config config.Config, result messenger.Result) 
 		if !ok {
 			return common.TransitionPayload{}, fmt.Errorf("Failed to parse app_key")
 		}
+		if appKey == 0 {
+			return common.TransitionPayload{}, fmt.Errorf("app_key is missing from payload")
+		}
 	}
 
 	if appNameKw != nil {
@@ -43,12 +52,18 @@ func ResponseToTransitionPayload(config config.Config, result messenger.Result) 
 		if !ok {
 			return common.TransitionPayload{}, fmt.Errorf("Failed to parse appName")
 		}
+		if appName == "" {
+			return common.TransitionPayload{}, fmt.Errorf("app_name is missing from payload")
+		}
 	}
 
 	if stageKw != nil {
 		stage, ok = stageKw.(string)
 		if !ok {
 			return common.TransitionPayload{}, fmt.Errorf("Failed to parse stage")
+		}
+		if stage == "" {
+			return common.TransitionPayload{}, fmt.Errorf("stage is missing from payload")
 		}
 	}
 
@@ -69,7 +84,28 @@ func ResponseToTransitionPayload(config config.Config, result messenger.Result) 
 	if registryTokenKw != nil {
 		registryToken, ok = registryTokenKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse registryToken")
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse registry_token")
+		}
+	}
+
+	// if releaseKeyKw != nil {
+	// 	releaseKey, ok = releaseKeyKw.(uint64)
+	// 	if !ok {
+	// 		return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
+	// 	}
+	// }
+
+	if requestorAccountKeyKw != nil {
+		requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse requestor_account_key")
+		}
+	}
+
+	if dtaKeyKw != nil {
+		dtaKey, ok = dtaKeyKw.(uint64)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse device_to_app_key")
 		}
 	}
 
@@ -94,6 +130,8 @@ func ResponseToTransitionPayload(config config.Config, result messenger.Result) 
 		CurrentState:        common.AppState(currentState),
 		ContainerName:       strings.ToLower(containerName),
 		ImageName:           imageName,
+		DeviceToAppKey:      dtaKey,
+		RequestorAccountKey: requestorAccountKey,
 		RepositoryImageName: strings.ToLower(fullImageName),
 		AccountID:           callerAuthID,
 		RegisteryToken:      registryToken,

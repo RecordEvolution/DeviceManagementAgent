@@ -32,7 +32,8 @@ type ReswarmConfig struct {
 }
 
 type CommandLineArguments struct {
-	AppBuildsDirectory string
+	AppBuildsDirectory       string
+	CompressedBuildExtension string
 }
 
 type Config struct {

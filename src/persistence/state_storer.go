@@ -83,7 +83,6 @@ func (ast *AppStateStorer) UpdateLocalAppState(app *common.App, newState common.
 		}
 
 		// Silently do nothing if state is already the same
-		fmt.Printf("The current state is already %s", newState)
 		return nil
 	}
 
@@ -165,7 +164,7 @@ func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload
 	payloads := []common.TransitionPayload{}
 	for rows.Next() {
 		payload := common.TransitionPayload{}
-		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.ContainerName, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.RequestorAccountKey)
+		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.ContainerName, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.DeviceToAppKey, &payload.RequestorAccountKey)
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +192,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.ContainerName,
 			payload.CurrentState, payload.RequestedState, payload.ImageName,
-			payload.RepositoryImageName, payload.RequestorAccountKey,
+			payload.RepositoryImageName, payload.RequestorAccountKey, payload.DeviceToAppKey,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -213,7 +212,7 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 	}
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
 		payload.CurrentState, payload.RequestedState, payload.ImageName,
-		payload.RepositoryImageName, payload.RequestorAccountKey,
+		payload.RepositoryImageName, payload.RequestorAccountKey, payload.DeviceToAppKey,
 		time.Now().Format(time.RFC3339),
 	)
 

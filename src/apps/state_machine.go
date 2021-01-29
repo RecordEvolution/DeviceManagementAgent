@@ -115,12 +115,11 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 }
 
 func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
-	app.CurrentState = state
 	err := sm.StateObserver.Notify(app, state)
 	if err != nil {
 		return err
 	}
-
+	app.CurrentState = state
 	return nil
 }
 
@@ -142,6 +141,8 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 			AppKey:                 payload.AppKey,
 			AppName:                payload.AppName,
 			CurrentState:           payload.CurrentState,
+			DeviceToAppKey:         payload.DeviceToAppKey,
+			RequestorAccountKey:    payload.RequestorAccountKey,
 			ManuallyRequestedState: payload.RequestedState,
 			Stage:                  payload.Stage,
 			RequestUpdate:          false,
@@ -200,25 +201,27 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 }
 
 func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *common.App) error {
-	err := sm.setState(app, common.BUILDING)
-
-	if err != nil {
-		return err
-	}
-
 	if payload.Stage == common.DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
 
-		filePath := sm.Container.GetConfig().CommandLineArguments.AppBuildsDirectory
-		fileName := payload.AppName + ".tar"
+		config := sm.Container.GetConfig()
+		fileDir := config.CommandLineArguments.AppBuildsDirectory
+		fileName := payload.AppName + config.CommandLineArguments.CompressedBuildExtension
+		filePath := fileDir + "/" + fileName
 
-		exists, _ := filesystem.FileExists(filePath + "/" + fileName)
+		exists, _ := filesystem.FileExists(filePath)
 		if !exists {
 			sm.setState(app, common.FAILED)
-			return fmt.Errorf("build files do not exist for %s", payload.AppName)
+			return fmt.Errorf("build files do not exist on path %s", filePath)
 		}
 
-		reader, err := sm.Container.Build(ctx, fileName, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
+		err := sm.setState(app, common.BUILDING)
+
+		if err != nil {
+			return err
+		}
+
+		reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
 
 		if err != nil {
 			return err
@@ -229,8 +232,16 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 			return err
 		}
 
-		sm.setState(app, common.PRESENT)
-		sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
+		app.ManuallyRequestedState = common.PRESENT
+		err = sm.setState(app, common.PRESENT)
+		if err != nil {
+			return err
+		}
+
+		err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
