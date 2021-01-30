@@ -2,7 +2,7 @@ package messenger
 
 import (
 	"context"
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/config"
 )
 

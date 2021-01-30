@@ -1,16 +1,43 @@
 package api
 
 import (
+	"context"
 	"fmt"
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
 	"strings"
+
+	"github.com/gammazero/nexus/v3/wamp"
 )
 
-// ResponseTocommon.TransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.
+func requestAppStateHandler(ex *External) func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+	return func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+		config := ex.Messenger.GetConfig()
+		transitionPayload, err := responseToTransitionPayload(config, response)
+		if err != nil {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"cause": err.Error()},
+				// TODO: show different URI error based on error that was returned upwards
+				Err: string(wamp.ErrInvalidArgument),
+			}
+		}
+		err = ex.StateMachine.RequestAppState(transitionPayload)
+		if err != nil {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"cause": err.Error()},
+				// TODO: show different URI error based on error that was returned upwards
+				Err: string(wamp.ErrInvalidArgument),
+			}
+		}
+
+		return messenger.InvokeResult{} // Return empty result
+	}
+}
+
+// responseToTransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.
 // Values that were not provided will be nil.
-func ResponseToTransitionPayload(config config.Config, result messenger.Result) (common.TransitionPayload, error) {
+func responseToTransitionPayload(config config.Config, result messenger.Result) (common.TransitionPayload, error) {
 	kwargs := result.ArgumentsKw
 	details := result.Details
 

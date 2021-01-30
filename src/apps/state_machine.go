@@ -3,7 +3,7 @@ package apps
 import (
 	"context"
 	"fmt"
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
 	"reagent/filesystem"
@@ -201,7 +201,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		// which will in turn update the remote database as well
 		err = sm.setState(app, common.FAILED)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Failed to set local app state to 'FAILED'", err)
 		}
 	}()
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/system"
 	"runtime"
 	"strings"

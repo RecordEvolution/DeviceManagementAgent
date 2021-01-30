@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/config"
 
 	"github.com/gammazero/nexus/v3/client"

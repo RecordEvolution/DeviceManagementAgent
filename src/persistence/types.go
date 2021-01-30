@@ -1,7 +1,7 @@
 package persistence
 
 import (
-	"reagent/api/common"
+	"reagent/common"
 	"reagent/system"
 )
 

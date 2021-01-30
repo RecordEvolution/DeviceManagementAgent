@@ -1,7 +1,7 @@
 package apps
 
 import (
-	"reagent/api/common"
+	"reagent/common"
 )
 
 type StateObserver struct {
