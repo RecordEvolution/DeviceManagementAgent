@@ -54,7 +54,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHING:  nil,
 		},
 		common.BUILDING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.stopBuildOnDevice,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.PUBLISHING:  nil,
@@ -198,6 +198,20 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return err
 	}
 
+	return nil
+}
+
+func (sm *StateMachine) stopBuildOnDevice(payload common.TransitionPayload, app *common.App) error {
+	id := sm.LogManager.GetActiveBuildId(payload.ContainerName)
+	if id != "" {
+		ctx := context.Background()
+		err := sm.Container.CancelBuild(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("No active build was found.")
 	return nil
 }
 

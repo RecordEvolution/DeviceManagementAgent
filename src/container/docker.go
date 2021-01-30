@@ -255,6 +255,10 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 	return nil
 }
 
+func (docker *Docker) CancelBuild(ctx context.Context, buildID string) error {
+	return docker.client.BuildCancel(ctx, buildID)
+}
+
 // TODO: make more generic
 //
 // Build builds a Docker image using a tarfile as context

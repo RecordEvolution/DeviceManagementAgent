@@ -21,7 +21,8 @@ func GetAppLogs(appid string) string {
 }
 
 type LogManager struct {
-	Messenger messenger.Messenger
+	Messenger         messenger.Messenger
+	buildContainerMap map[string]string
 }
 
 type LogType string
@@ -81,6 +82,10 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 			return err
 		}
 
+		if message.ID != "" {
+			lm.buildContainerMap[containerName] = message.ID
+		}
+
 		args := []common.Dict{{"type": "build", "chunk": message}}
 
 		err = lm.Messenger.Publish(topic, args, nil, nil)
@@ -105,6 +110,10 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 
 	// TODO: store logs in db
 	return nil
+}
+
+func (lm *LogManager) GetActiveBuildId(containerName string) string {
+	return lm.buildContainerMap[containerName]
 }
 
 func (lm *LogManager) Write(containerName string, logType LogType, text string) error {

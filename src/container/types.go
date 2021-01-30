@@ -40,6 +40,7 @@ type ImageResult struct {
 type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
+	CancelBuild(ctx context.Context, buildID string) error
 	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
 	Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
