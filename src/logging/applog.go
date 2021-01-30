@@ -22,7 +22,7 @@ func GetAppLogs(appid string) string {
 
 type LogManager struct {
 	Messenger         messenger.Messenger
-	buildContainerMap map[string]string
+	BuildContainerMap map[string]string
 }
 
 type LogType string
@@ -83,7 +83,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		}
 
 		if message.ID != "" {
-			lm.buildContainerMap[containerName] = message.ID
+			lm.BuildContainerMap[containerName] = message.ID
 		}
 
 		args := []common.Dict{{"type": "build", "chunk": message}}
@@ -113,7 +113,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 }
 
 func (lm *LogManager) GetActiveBuildId(containerName string) string {
-	return lm.buildContainerMap[containerName]
+	return lm.BuildContainerMap[containerName]
 }
 
 func (lm *LogManager) Write(containerName string, logType LogType, text string) error {

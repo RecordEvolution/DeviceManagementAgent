@@ -14,7 +14,7 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
+type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App, errorChannel chan error) error
 
 type StateMachine struct {
 	StateObserver StateObserver
@@ -54,7 +54,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHING:  nil,
 		},
 		common.BUILDING: {
-			common.PRESENT:     sm.stopBuildOnDevice,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.PUBLISHING:  nil,
@@ -177,26 +177,33 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return nil
 	}
 
-	err := transitionFunc(payload, app)
+	errChannel := make(chan error)
+	go transitionFunc(payload, app, errChannel)
 
-	// If anything goes wrong with the transition function
-	// we should set the state change to FAILED
-	// This will in turn update the in memory state and the local database state
-	// which will in turn update the remote database as well
-	// TODO: introduce concurrent error handling
-	if err != nil {
+	go func() {
+		err := <-errChannel
+		close(errChannel)
+
 		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
+		if err == nil {
+			fmt.Println("Successfully finished transaction function:", funcName)
+			return
+		}
+
 		fmt.Printf("An error occured during transition from %s to %s using %s\n", app.CurrentState, payload.RequestedState, funcName)
 		fmt.Println(err)
-		fmt.Println("The current app state will be set to FAILED")
 		fmt.Println()
+		fmt.Println("The current app state will be set to FAILED")
 
-		extraErr := sm.setState(app, common.FAILED)
-		if extraErr != nil {
-			return extraErr
+		// If anything goes wrong with the transition function
+		// we should set the state change to FAILED
+		// This will in turn update the in memory state and the local database state
+		// which will in turn update the remote database as well
+		err = sm.setState(app, common.FAILED)
+		if err != nil {
+			fmt.Println(err)
 		}
-		return err
-	}
+	}()
 
 	return nil
 }
@@ -215,7 +222,7 @@ func (sm *StateMachine) stopBuildOnDevice(payload common.TransitionPayload, app 
 	return nil
 }
 
-func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *common.App) error {
+func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *common.App, errorChannel chan error) error {
 	if payload.Stage == common.DEV {
 		ctx := context.Background() // TODO: store context in memory for build cancellation
 
@@ -227,18 +234,22 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 		exists, _ := filesystem.FileExists(filePath)
 		if !exists {
 			sm.setState(app, common.FAILED)
-			return fmt.Errorf("build files do not exist on path %s", filePath)
+			err := fmt.Errorf("build files do not exist on path %s", filePath)
+			errorChannel <- err
+			return err
 		}
 
 		err := sm.setState(app, common.BUILDING)
 
 		if err != nil {
+			errorChannel <- err
 			return err
 		}
 
 		reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
 
 		if err != nil {
+			errorChannel <- err
 			return err
 		}
 
@@ -249,6 +260,7 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 			if errdefs.IsBuildFailed(err) {
 				buildFailed = true
 			} else {
+				errorChannel <- err
 				return err
 			}
 		}
@@ -256,6 +268,7 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 		app.ManuallyRequestedState = common.PRESENT
 		err = sm.setState(app, common.PRESENT)
 		if err != nil {
+			errorChannel <- err
 			return err
 		}
 
@@ -266,21 +279,26 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 
 		err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
 		if err != nil {
+			errorChannel <- err
 			return err
 		}
 	}
 
+	errorChannel <- nil
 	return nil
 }
 
-func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *common.App) error {
+func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *common.App, errorChannel chan error) error {
 	config := sm.Container.GetConfig()
 	if payload.Stage == common.DEV {
-		return fmt.Errorf("a dev stage app is not available on the registry")
+		err := fmt.Errorf("a dev stage app is not available on the registry")
+		errorChannel <- err
+		return err
 	}
 
 	err := sm.setState(app, common.DOWNLOADING)
 	if err != nil {
+		errorChannel <- nil
 		return err
 	}
 
@@ -294,17 +312,21 @@ func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *c
 
 	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
 	if err != nil {
+		errorChannel <- err
 		return err
 	}
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {
+		errorChannel <- err
 		return err
 	}
 
 	err = sm.LogManager.Stream(payload.ContainerName, logging.PULL, reader)
 	if err != nil {
+		errorChannel <- err
 		return err
 	}
 
+	errorChannel <- nil
 	return nil
 }
