@@ -6,6 +6,7 @@ import (
 	"reagent/apps"
 	"reagent/common"
 	"reagent/config"
+	"reagent/logging"
 	"reagent/messenger"
 	"reagent/persistence"
 )
@@ -14,6 +15,7 @@ type External struct {
 	Messenger    messenger.Messenger
 	StateMachine apps.StateMachine
 	StateStorer  persistence.StateStorer
+	LogManager   logging.LogManager
 	Config       config.Config
 }
 
@@ -23,6 +25,8 @@ func (ex *External) getTopicHandlerMap() map[string]func(ctx context.Context, re
 	return map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult{
 		string(common.TopicRequestAppState): requestAppStateHandler(ex),
 		string(common.TopicWriteToFile):     writeToFileHandler(ex),
+		string(common.TopicHandshake):       deviceHandshakeHandler(ex),
+		string(common.TopicContainerImages):          getImagesHandler(ex),
 	}
 }
 

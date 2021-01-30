@@ -13,8 +13,7 @@ import (
 
 func requestAppStateHandler(ex *External) func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
 	return func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-		config := ex.Messenger.GetConfig()
-		transitionPayload, err := responseToTransitionPayload(config, response)
+		transitionPayload, err := responseToTransitionPayload(ex.Config, response)
 		if err != nil {
 			return messenger.InvokeResult{
 				ArgumentsKw: common.Dict{"cause": err.Error()},

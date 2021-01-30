@@ -29,11 +29,14 @@ type AuthConfig struct {
 
 // ImageResult generic result for the container method ListImages
 type ImageResult struct {
-	Containers int64
-	ID         string
-	Labels     map[string]string
-	Size       int64
-	RepoTags   []string
+	Created     int64             `json:"created,omitempty"`
+	Containers  int64             `json:"containers,omitempty"`
+	SharedSize  int64             `json:"sharedSize,omitempty"`
+	VirtualSize int64             `json:"virtualSize,omitempty"`
+	ID          string            `json:"id,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Size        int64             `json:"size,omitempty"`
+	RepoTags    []string          `json:"repoTags,omitempty"`
 }
 
 // Container generic interface for a Container API

@@ -131,11 +131,14 @@ func (docker *Docker) ListImages(ctx context.Context, options map[string]interfa
 	imageResults := make([]ImageResult, 0)
 	for _, image := range imageList {
 		imageResult := ImageResult{
-			Containers: image.Containers,
-			ID:         image.ID,
-			Labels:     image.Labels,
-			Size:       image.Size,
-			RepoTags:   image.RepoTags,
+			Created:     image.Created,
+			Containers:  image.Containers,
+			SharedSize:  image.SharedSize,
+			VirtualSize: image.VirtualSize,
+			ID:          image.ID,
+			Labels:      image.Labels,
+			Size:        image.Size,
+			RepoTags:    image.RepoTags,
 		}
 		imageResults = append(imageResults, imageResult)
 	}

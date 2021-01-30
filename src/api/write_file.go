@@ -24,12 +24,18 @@ func writeToFileHandler(ex *External) func(ctx context.Context, response messeng
 
 		name, ok := nameArg.(string)
 		if !ok {
-			return messenger.InvokeResult{Err: fmt.Sprintf("Failed to parse name argument %s", nameArg)}
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse name argument %s", nameArg)},
+				Err:         string(wamp.ErrInvalidArgument),
+			}
 		}
 
 		chunk, ok := chunkArg.(string)
 		if !ok {
-			return messenger.InvokeResult{Err: fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)}
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)},
+				Err:         string(wamp.ErrInvalidArgument),
+			}
 		}
 
 		filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
