@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reagent/api/common"
 	"reagent/container"
+	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reflect"
@@ -228,8 +229,14 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 		}
 
 		err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
+
+		buildFailed := false
 		if err != nil {
-			return err
+			if errdefs.IsBuildFailed(err) {
+				buildFailed = true
+			} else {
+				return err
+			}
 		}
 
 		app.ManuallyRequestedState = common.PRESENT
@@ -238,7 +245,12 @@ func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *
 			return err
 		}
 
-		err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, "#################### Image built successfully ####################")
+		buildResultMessage := "Image built successfully"
+		if buildFailed {
+			buildResultMessage = "Image build failed to complete"
+		}
+
+		err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
 		if err != nil {
 			return err
 		}
