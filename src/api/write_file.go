@@ -11,46 +11,44 @@ import (
 	"github.com/gammazero/nexus/v3/wamp"
 )
 
-func writeToFileHandler(ex *External) func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-	return func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-		args := response.Arguments
+func (ex *External) writeToFileHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+	args := response.Arguments
 
-		// Matches file_transfer.ts payload
-		chunkArg := args[0]
-		// appTypeArg := args[1]
-		nameArg := args[2]
-		// container_nameArg := args[3]
-		// totalArg := args[4]
+	// Matches file_transfer.ts payload
+	chunkArg := args[0]
+	// appTypeArg := args[1]
+	nameArg := args[2]
+	// container_nameArg := args[3]
+	// totalArg := args[4]
 
-		name, ok := nameArg.(string)
-		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse name argument %s", nameArg)},
-				Err:         string(wamp.ErrInvalidArgument),
-			}
+	name, ok := nameArg.(string)
+	if !ok {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse name argument %s", nameArg)},
+			Err:         string(wamp.ErrInvalidArgument),
 		}
-
-		chunk, ok := chunkArg.(string)
-		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)},
-				Err:         string(wamp.ErrInvalidArgument),
-			}
-		}
-
-		filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
-		err := write(name, filePath, chunk)
-
-		if err != nil {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": err.Error()},
-				// TODO: show different URI error based on error that was returned upwards
-				Err: string(wamp.ErrInvalidArgument),
-			}
-		}
-
-		return messenger.InvokeResult{}
 	}
+
+	chunk, ok := chunkArg.(string)
+	if !ok {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)},
+			Err:         string(wamp.ErrInvalidArgument),
+		}
+	}
+
+	filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
+	err := write(name, filePath, chunk)
+
+	if err != nil {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
+	}
+
+	return messenger.InvokeResult{}
 }
 
 // Write decodes hex encoded data chunks and writes to a file.

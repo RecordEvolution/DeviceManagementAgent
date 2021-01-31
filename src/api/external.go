@@ -23,10 +23,10 @@ const topicPrefix = "re.mgmt"
 
 func (ex *External) getTopicHandlerMap() map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
 	return map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult{
-		string(common.TopicRequestAppState): requestAppStateHandler(ex),
-		string(common.TopicWriteToFile):     writeToFileHandler(ex),
-		string(common.TopicHandshake):       deviceHandshakeHandler(ex),
-		string(common.TopicContainerImages):          getImagesHandler(ex),
+		string(common.TopicRequestAppState): ex.requestAppStateHandler,
+		string(common.TopicWriteToFile):     ex.writeToFileHandler,
+		string(common.TopicHandshake):       ex.deviceHandshakeHandler,
+		string(common.TopicContainerImages): ex.getImagesHandler,
 	}
 }
 

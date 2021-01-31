@@ -44,10 +44,17 @@ type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
+	GetContainerID(ctx context.Context, containerName string) (string, error)
+	StopContainerByID(ctx context.Context, containerName string, timeout int64) error
+	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
+	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error
+	RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error
 	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
 	Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
-	Run(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) error
+	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
+	WaitForContainer(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error)
+	StartContainer(ctx context.Context, containerID string) error
 	RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)

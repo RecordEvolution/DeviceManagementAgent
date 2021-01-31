@@ -1,39 +1,34 @@
 package apps
 
 import (
-	"context"
 	"fmt"
 	"reagent/common"
 	"reagent/container"
-	"reagent/errdefs"
-	"reagent/filesystem"
 	"reagent/logging"
 	"reflect"
 	"runtime"
-
-	"github.com/docker/docker/api/types"
 )
 
-type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App, errorChannel chan error) error
+type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App, errorChannel chan error)
 
 type StateMachine struct {
 	StateObserver StateObserver
 	LogManager    logging.LogManager
 	Container     container.Container
-	appStates     []common.App
+	appStates     []*common.App
 }
 
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
-			common.PRESENT:     sm.pullAppOnDevice,
+			common.PRESENT:     sm.pullApp,
 			common.RUNNING:     nil,
-			common.BUILDING:    sm.buildAppOnDevice,
+			common.BUILDING:    sm.buildApp,
 			common.PUBLISHING:  nil,
 			common.UNINSTALLED: nil,
 		},
 		common.UNINSTALLED: {
-			common.PRESENT:    nil,
+			common.PRESENT:    sm.pullApp,
 			common.RUNNING:    nil,
 			common.BUILDING:   nil,
 			common.PUBLISHING: nil,
@@ -41,16 +36,16 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.PRESENT: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
-			common.RUNNING:     nil,
-			common.BUILDING:    nil,
+			common.RUNNING:     sm.runApp,
+			common.BUILDING:    sm.buildApp,
 			common.PUBLISHING:  nil,
 		},
 		common.FAILED: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
-			common.PRESENT:     sm.pullAppOnDevice,
+			common.PRESENT:     sm.pullApp,
 			common.RUNNING:     nil,
-			common.BUILDING:    nil,
+			common.BUILDING:    sm.buildApp,
 			common.PUBLISHING:  nil,
 		},
 		common.BUILDING: {
@@ -75,37 +70,37 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.UNINSTALLED: nil,
 		},
 		common.RUNNING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.stopApp,
 			common.BUILDING:    nil,
 			common.PUBLISHING:  nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 		},
 		common.DOWNLOADING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 		},
 		common.STARTING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.STOPPING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.UPDATING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.DELETING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
@@ -125,9 +120,10 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 }
 
 func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
-	for _, state := range sm.appStates {
+	for i := range sm.appStates {
+		state := sm.appStates[i]
 		if state.AppKey == appKey && state.Stage == stage {
-			return &state
+			return state
 		}
 	}
 	return nil
@@ -148,7 +144,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 			Stage:                  payload.Stage,
 			RequestUpdate:          false,
 		}
-		sm.appStates = append(sm.appStates, *app)
+		sm.appStates = append(sm.appStates, app)
 
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database
@@ -205,128 +201,5 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		}
 	}()
 
-	return nil
-}
-
-func (sm *StateMachine) stopBuildOnDevice(payload common.TransitionPayload, app *common.App) error {
-	id := sm.LogManager.GetActiveBuildId(payload.ContainerName)
-	if id != "" {
-		ctx := context.Background()
-		err := sm.Container.CancelBuild(ctx, id)
-		if err != nil {
-			return err
-		}
-	}
-
-	fmt.Println("No active build was found.")
-	return nil
-}
-
-func (sm *StateMachine) buildAppOnDevice(payload common.TransitionPayload, app *common.App, errorChannel chan error) error {
-	if payload.Stage == common.DEV {
-		ctx := context.Background() // TODO: store context in memory for build cancellation
-
-		config := sm.Container.GetConfig()
-		fileDir := config.CommandLineArguments.AppBuildsDirectory
-		fileName := payload.AppName + config.CommandLineArguments.CompressedBuildExtension
-		filePath := fileDir + "/" + fileName
-
-		exists, _ := filesystem.FileExists(filePath)
-		if !exists {
-			sm.setState(app, common.FAILED)
-			err := fmt.Errorf("build files do not exist on path %s", filePath)
-			errorChannel <- err
-			return err
-		}
-
-		err := sm.setState(app, common.BUILDING)
-
-		if err != nil {
-			errorChannel <- err
-			return err
-		}
-
-		reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
-
-		if err != nil {
-			errorChannel <- err
-			return err
-		}
-
-		err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
-
-		buildFailed := false
-		if err != nil {
-			if errdefs.IsBuildFailed(err) {
-				buildFailed = true
-			} else {
-				errorChannel <- err
-				return err
-			}
-		}
-
-		app.ManuallyRequestedState = common.PRESENT
-		err = sm.setState(app, common.PRESENT)
-		if err != nil {
-			errorChannel <- err
-			return err
-		}
-
-		buildResultMessage := "Image built successfully"
-		if buildFailed {
-			buildResultMessage = "Image build failed to complete"
-		}
-
-		err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
-		if err != nil {
-			errorChannel <- err
-			return err
-		}
-	}
-
-	errorChannel <- nil
-	return nil
-}
-
-func (sm *StateMachine) pullAppOnDevice(payload common.TransitionPayload, app *common.App, errorChannel chan error) error {
-	config := sm.Container.GetConfig()
-	if payload.Stage == common.DEV {
-		err := fmt.Errorf("a dev stage app is not available on the registry")
-		errorChannel <- err
-		return err
-	}
-
-	err := sm.setState(app, common.DOWNLOADING)
-	if err != nil {
-		errorChannel <- nil
-		return err
-	}
-
-	ctx := context.Background()
-
-	// Need to authenticate to private registry to determine proper privileges to pull the app
-	authConfig := container.AuthConfig{
-		Username: payload.RegisteryToken,
-		Password: config.ReswarmConfig.Secret,
-	}
-
-	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
-	if err != nil {
-		errorChannel <- err
-		return err
-	}
-	err = sm.setState(app, common.PRESENT)
-	if err != nil {
-		errorChannel <- err
-		return err
-	}
-
-	err = sm.LogManager.Stream(payload.ContainerName, logging.PULL, reader)
-	if err != nil {
-		errorChannel <- err
-		return err
-	}
-
-	errorChannel <- nil
 	return nil
 }

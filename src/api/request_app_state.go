@@ -11,27 +11,25 @@ import (
 	"github.com/gammazero/nexus/v3/wamp"
 )
 
-func requestAppStateHandler(ex *External) func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-	return func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-		transitionPayload, err := responseToTransitionPayload(ex.Config, response)
-		if err != nil {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": err.Error()},
-				// TODO: show different URI error based on error that was returned upwards
-				Err: string(wamp.ErrInvalidArgument),
-			}
+func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+	transitionPayload, err := responseToTransitionPayload(ex.Config, response)
+	if err != nil {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
 		}
-		err = ex.StateMachine.RequestAppState(transitionPayload)
-		if err != nil {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": err.Error()},
-				// TODO: show different URI error based on error that was returned upwards
-				Err: string(wamp.ErrInvalidArgument),
-			}
-		}
-
-		return messenger.InvokeResult{} // Return empty result
 	}
+	err = ex.StateMachine.RequestAppState(transitionPayload)
+	if err != nil {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
+	}
+
+	return messenger.InvokeResult{} // Return empty result
 }
 
 // responseToTransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.

@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reagent/common"
 	"reagent/config"
+	"reagent/errdefs"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -107,6 +110,75 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 	}
 
 	return listOfDict, nil
+}
+
+func (docker *Docker) GetContainerID(ctx context.Context, containerName string) (string, error) {
+	filters := filters.NewArgs()
+	filters.Add("name", containerName)
+	containers, err := docker.client.ContainerList(ctx, types.ContainerListOptions{All: true, Filters: filters})
+	if err != nil {
+		return "", err
+	}
+
+	if len(containers) > 0 {
+		return containers[0].ID, nil
+	}
+
+	return "", errdefs.ContainerNotFound(errors.New("container not found"))
+}
+
+func (docker *Docker) RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error {
+	id, err := docker.GetContainerID(ctx, containerName)
+
+	if err != nil {
+		return err
+	}
+
+	return docker.RemoveContainerByID(ctx, id, options)
+}
+
+func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error {
+	optionStruct := types.ContainerRemoveOptions{}
+
+	removeVolumesKw := options["removeVolumes"]
+	removeLinksKw := options["removeLinks"]
+	forceKw := options["force"]
+
+	if removeVolumesKw != nil {
+		removeVolumes, ok := removeVolumesKw.(bool)
+		if ok {
+			optionStruct.RemoveVolumes = removeVolumes
+		}
+	}
+
+	if removeLinksKw != nil {
+		removeLinks, ok := removeLinksKw.(bool)
+		if ok {
+			optionStruct.RemoveLinks = removeLinks
+		}
+	}
+
+	if forceKw != nil {
+		force, ok := forceKw.(bool)
+		if ok {
+			optionStruct.Force = force
+		}
+	}
+
+	return docker.client.ContainerRemove(ctx, containerID, optionStruct)
+}
+
+func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout int64) error {
+	return docker.client.ContainerStop(ctx, containerID, (*time.Duration)(&timeout))
+}
+
+func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout int64) error {
+	id, err := docker.GetContainerID(ctx, containerName)
+	if err != nil {
+		return err
+	}
+
+	return docker.client.ContainerStop(ctx, id, (*time.Duration)(&timeout))
 }
 
 // ListImages lists all images available on the host.
@@ -207,21 +279,33 @@ func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadClo
 	return stats.Body, nil
 }
 
-// TODO: make more generic
-//
-// Run creates and starts a specific container
-func (docker *Docker) Run(ctx context.Context,
+func (docker *Docker) WaitForContainer(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error) {
+	return docker.client.ContainerWait(ctx, containerID, condition)
+}
+
+func (docker *Docker) CreateContainer(ctx context.Context,
 	cConfig container.Config,
 	hConfig container.HostConfig,
 	nConfig network.NetworkingConfig,
-	containerName string,
-) error {
+	containerName string) (string, error) {
+
 	resp, err := docker.client.ContainerCreate(ctx, &cConfig, &hConfig, &nConfig, nil, containerName)
 	if err != nil {
-		return err
+		if strings.Contains(err.Error(), "is already in use by container") {
+			return "", errdefs.ContainerNameAlreadyInUse(err)
+		}
+
+		return "", err
 	}
 
-	if err := docker.client.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+	return resp.ID, nil
+}
+
+// TODO: make more generic
+//
+// StartContainer creates and starts a specific container
+func (docker *Docker) StartContainer(ctx context.Context, containerID string) error {
+	if err := docker.client.ContainerStart(ctx, containerID, types.ContainerStartOptions{}); err != nil {
 		return err
 	}
 
