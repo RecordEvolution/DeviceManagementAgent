@@ -8,18 +8,16 @@ import (
 	"reagent/logging"
 )
 
-func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
 	config := sm.Container.GetConfig()
 	if payload.Stage == common.DEV {
 		err := fmt.Errorf("a dev stage app is not available on the registry")
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err := sm.setState(app, common.DOWNLOADING)
 	if err != nil {
-		errorChannel <- nil
-		return
+		return err
 	}
 
 	ctx := context.Background()
@@ -32,20 +30,17 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 
 	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.LogManager.Stream(payload.ContainerName, logging.PULL, reader)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
-	errorChannel <- nil
+	return nil
 }

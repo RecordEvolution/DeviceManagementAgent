@@ -5,18 +5,19 @@ import (
 	"reagent/common"
 )
 
-func (sm *StateMachine) stopApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) stopApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
 	err := sm.Container.StopContainerByName(ctx, payload.ContainerName, 0)
 
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {
-		errorChannel <- err
+		return err
 	}
+
+	return nil
 }

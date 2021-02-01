@@ -154,6 +154,7 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 		"requestor_account_key":    app.RequestorAccountKey,
 		"request_update":           app.RequestUpdate,
 		"manually_requested_state": app.ManuallyRequestedState,
+		"release_build":            app.ReleaseBuild,
 	}}
 
 	_, err := sc.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)

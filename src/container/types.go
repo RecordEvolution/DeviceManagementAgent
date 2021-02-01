@@ -49,6 +49,7 @@ type Container interface {
 	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error
 	RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error
+	Tag(ctx context.Context, source string, target string) error
 	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
 	Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)

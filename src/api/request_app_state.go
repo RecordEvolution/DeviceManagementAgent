@@ -47,6 +47,9 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 	registryTokenKw := kwargs["registry_token"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	dtaKeyKw := kwargs["device_to_app_key"]
+	newImageNameKw := kwargs["new_image_name"]
+	presentVersionKw := kwargs["present_version"]
+	publishContainerKw := kwargs["publish_container"]
 
 	var appKey uint64
 	// var releaseKey uint64
@@ -57,6 +60,9 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 	var requestedState string
 	var currentState string
 	var registryToken string
+	var newImageName string
+	var presentVersion string
+	var publishContainer string
 
 	var ok bool
 
@@ -133,6 +139,27 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 		}
 	}
 
+	if newImageNameKw != nil {
+		newImageName, ok = newImageNameKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse new_image_name")
+		}
+	}
+
+	if presentVersionKw != nil {
+		presentVersion, ok = presentVersionKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse present_version")
+		}
+	}
+
+	if publishContainerKw != nil {
+		publishContainer, ok = publishContainerKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse publish_container")
+		}
+	}
+
 	callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -142,7 +169,15 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 		return common.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
 	}
 
-	containerName := fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
+	var containerName string
+
+	// containerName used for sending publish app logs to
+	if publishContainer != "" {
+		containerName = publishContainer
+	} else {
+		containerName = fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
+	}
+
 	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, config.ReswarmConfig.Architecture, appKey, appName))
 	fullImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, imageName))
 
@@ -155,9 +190,11 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 		ContainerName:       strings.ToLower(containerName),
 		ImageName:           imageName,
 		DeviceToAppKey:      dtaKey,
+		NewImageName:        newImageName,
 		RequestorAccountKey: requestorAccountKey,
 		RepositoryImageName: strings.ToLower(fullImageName),
 		AccountID:           callerAuthID,
+		PresentVersion:      presentVersion,
 		RegisteryToken:      registryToken,
 	}, nil
 }

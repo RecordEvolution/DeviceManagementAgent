@@ -346,6 +346,10 @@ func (docker *Docker) CancelBuild(ctx context.Context, buildID string) error {
 	return docker.client.BuildCancel(ctx, buildID)
 }
 
+func (docker *Docker) Tag(ctx context.Context, source string, target string) error {
+	return docker.client.ImageTag(ctx, source, target)
+}
+
 // TODO: make more generic
 //
 // Build builds a Docker image using a tarfile as context

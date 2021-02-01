@@ -11,13 +11,17 @@ import (
 	"github.com/docker/docker/api/types/network"
 )
 
-func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App) error {
 	if payload.Stage == common.DEV {
-		sm.runDevApp(payload, app, errorChannel)
+		err := sm.runDevApp(payload, app)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
 	containerConfig := container.Config{
@@ -41,27 +45,24 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
-			errorChannel <- err
-			return
+
+			return err
 		}
 	} else {
 		removeContainerErr := sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
 		if removeContainerErr != nil {
-			errorChannel <- removeContainerErr
-			return
+			return removeContainerErr
 		}
 	}
 
 	containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.Container.StartContainer(ctx, containerID)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.setState(app, common.STARTING)
@@ -69,13 +70,13 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
+
+	return nil
 }

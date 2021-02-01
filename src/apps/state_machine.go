@@ -9,13 +9,21 @@ import (
 	"runtime"
 )
 
-type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App, errorChannel chan error)
+type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
+
+type OngoingTransition struct {
+	AppKey         uint64
+	Stage          common.Stage
+	RequestedState common.AppState
+	CurrentState   common.AppState
+}
 
 type StateMachine struct {
-	StateObserver StateObserver
-	LogManager    logging.LogManager
-	Container     container.Container
-	appStates     []*common.App
+	StateObserver      StateObserver
+	LogManager         logging.LogManager
+	Container          container.Container
+	ongoingTransitions []*OngoingTransition
+	appStates          []*common.App
 }
 
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
@@ -30,7 +38,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.UNINSTALLED: {
 			common.PRESENT:    sm.pullApp,
 			common.RUNNING:    nil,
-			common.BUILDING:   nil,
+			common.BUILDING:   sm.buildApp,
 			common.PUBLISHING: nil,
 		},
 		common.PRESENT: {
@@ -77,30 +85,30 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.UNINSTALLED: nil,
 		},
 		common.DOWNLOADING: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 		},
 		common.STARTING: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.STOPPING: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.UPDATING: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.DELETING: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
@@ -127,6 +135,39 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 		}
 	}
 	return nil
+}
+
+func (sm *StateMachine) addTransition(app *common.App) {
+	transition := &OngoingTransition{
+		AppKey:         app.AppKey,
+		Stage:          app.Stage,
+		RequestedState: app.ManuallyRequestedState,
+		CurrentState:   app.CurrentState,
+	}
+
+	sm.ongoingTransitions = append(sm.ongoingTransitions, transition)
+}
+
+func (sm *StateMachine) hasActiveTransition(app *common.App) bool {
+	for i := range sm.ongoingTransitions {
+		transition := sm.ongoingTransitions[i]
+		if transition.AppKey == app.AppKey && transition.Stage == app.Stage {
+			return true
+		}
+	}
+	return false
+}
+
+func (sm *StateMachine) finishTransition(app *common.App) {
+	trans := sm.ongoingTransitions
+	for i := range sm.ongoingTransitions {
+		transition := sm.ongoingTransitions[i]
+		if transition.AppKey == app.AppKey && transition.Stage == app.Stage {
+			trans[i] = trans[len(trans)-1]               // Copy last element to index i.
+			trans[len(trans)-1] = nil                    // Erase last element (write zero value).
+			sm.ongoingTransitions = trans[:len(trans)-1] // Truncate slice.
+		}
+	}
 }
 
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
@@ -174,7 +215,22 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	}
 
 	errChannel := make(chan error)
-	go transitionFunc(payload, app, errChannel)
+
+	go func() {
+		// ensure multiple transitions for the same app in parallel are not possible
+		if sm.hasActiveTransition(app) {
+			return
+		}
+
+		sm.addTransition(app)
+		err := transitionFunc(payload, app)
+		// send potential error to errChannel
+		// if error = nil, the transition has completed successfully
+		errChannel <- err
+
+		// transition has finished, remove from active transitions
+		sm.finishTransition(app)
+	}()
 
 	go func() {
 		err := <-errChannel
@@ -196,6 +252,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		// This will in turn update the in memory state and the local database state
 		// which will in turn update the remote database as well
 		err = sm.setState(app, common.FAILED)
+		// TODO: handle this properly in main goroutine
 		if err != nil {
 			fmt.Println("Failed to set local app state to 'FAILED'", err)
 		}

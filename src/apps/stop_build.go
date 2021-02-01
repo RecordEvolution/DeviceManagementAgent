@@ -2,20 +2,19 @@ package apps
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"reagent/common"
 )
 
-func (sm *StateMachine) stopBuild(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) stopBuild(payload common.TransitionPayload, app *common.App) error {
 	id := sm.LogManager.GetActiveBuildId(payload.ContainerName)
 	if id != "" {
 		ctx := context.Background()
 		err := sm.Container.CancelBuild(ctx, id)
 		if err != nil {
-			errorChannel <- err
-			return
+			return err
 		}
 	}
 
-	fmt.Println("No active build was found.")
+	return errors.New("active build with id " + id + " was not found")
 }

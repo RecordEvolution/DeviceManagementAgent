@@ -11,13 +11,17 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.App) error {
 	if payload.Stage == common.DEV {
-		sm.buildDevApp(payload, app, errorChannel)
+		err := sm.buildDevApp(payload, app)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, errorChannel chan error) {
+func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background() // TODO: store context in memory for build cancellation
 
 	config := sm.Container.GetConfig()
@@ -29,23 +33,20 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	if !exists {
 		sm.setState(app, common.FAILED)
 		err := fmt.Errorf("build files do not exist on path %s", filePath)
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err := sm.setState(app, common.BUILDING)
 	fmt.Printf("%+v \n", sm.appStates)
 
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
 
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
@@ -55,16 +56,18 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		if errdefs.IsBuildFailed(err) {
 			buildFailed = true
 		} else {
-			errorChannel <- err
-			return
+			return err
 		}
 	}
 
+	// need to specify that this is a release build on remote update
+	// this ensures that the dev release will be set to exists = true
+	// prod ready builds will not be set to exists until after they are pushed
+	app.ReleaseBuild = false
 	app.ManuallyRequestedState = common.PRESENT
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
 	buildResultMessage := "Image built successfully"
@@ -74,9 +77,8 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 
 	err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
 	if err != nil {
-		errorChannel <- err
-		return
+		return err
 	}
 
-	errorChannel <- nil
+	return nil
 }

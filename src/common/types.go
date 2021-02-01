@@ -11,6 +11,7 @@ type App struct {
 	CurrentState           AppState
 	Stage                  Stage
 	RequestUpdate          bool
+	ReleaseBuild           bool
 }
 
 // common.TransitionPayload provides the data used by the StateMachine to transition between states.
@@ -29,6 +30,7 @@ type TransitionPayload struct {
 	ContainerName       string
 	AccountID           string
 	RegisteryToken      string
+	PresentVersion      string
 	RequestUpdate       bool
 }
 
