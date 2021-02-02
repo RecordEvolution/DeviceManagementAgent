@@ -17,11 +17,8 @@ CREATE TABLE IF NOT EXISTS "RequestedAppStates" (
   app_name TEXT NOT NULL,
   app_key INTEGER NOT NULL,
   stage TEXT CHECK( stage IN ('DEV', 'PROD') ) NOT NULL,
-  container_name TEXT NOT NULL,
   current_state TEXT CHECK( current_state IN ('PRESENT', 'REMOVED', 'UNINSTALLED', 'FAILED', 'BUILDING', 'TRANSFERED', 'TRANSFERING', 'PUBLISHING', 'DOWNLOADING', 'STARTING', 'STOPPING', 'UPDATING', 'DELETING', 'RUNNING') ) NOT NULL,
   manually_requested_state TEXT CHECK( manually_requested_state IN ('PRESENT', 'REMOVED', 'UNINSTALLED', 'FAILED', 'BUILDING', 'TRANSFERED', 'TRANSFERING', 'PUBLISHING', 'DOWNLOADING', 'STARTING', 'STOPPING', 'UPDATING', 'DELETING', 'RUNNING') ) NOT NULL,
-  image_name TEXT NOT NULL,
-  repository_image_name TEXT NOT NULL,
   requestor_account_key INTEGER NOT NULL,
   device_to_app_key INTEGER NOT NULL,
   timestamp TEXT NOT NULL

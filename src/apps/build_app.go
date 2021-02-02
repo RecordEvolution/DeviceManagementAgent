@@ -37,19 +37,17 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	}
 
 	err := sm.setState(app, common.BUILDING)
-	fmt.Printf("%+v \n", sm.appStates)
 
 	if err != nil {
 		return err
 	}
 
-	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName}, Dockerfile: "Dockerfile"})
-
+	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName.Dev}, Dockerfile: "Dockerfile"})
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName, logging.BUILD, reader)
+	err = sm.LogManager.Stream(payload.ContainerName.Dev, logging.BUILD, reader)
 
 	buildFailed := false
 	if err != nil {
@@ -75,7 +73,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		buildResultMessage = "Image build failed to complete"
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
+	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
 	if err != nil {
 		return err
 	}

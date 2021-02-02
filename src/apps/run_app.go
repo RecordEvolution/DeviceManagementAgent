@@ -25,7 +25,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	ctx := context.Background()
 
 	containerConfig := container.Config{
-		Image:   payload.RepositoryImageName,
+		Image:   payload.RepositoryImageName.Dev,
 		Env:     []string{},
 		Labels:  map[string]string{"real": "True"},
 		Volumes: map[string]struct{}{},
@@ -42,7 +42,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		CapAdd:      []string{"ALL"},
 	}
 
-	containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName)
+	containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName.Dev)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 
@@ -55,7 +55,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		}
 	}
 
-	containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName)
+	containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}

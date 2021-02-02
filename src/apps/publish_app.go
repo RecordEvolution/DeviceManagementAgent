@@ -16,7 +16,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 	}
 
 	ctx := context.Background()
-	err = sm.Container.Tag(ctx, payload.ImageName, payload.NewImageName)
+	err = sm.Container.Tag(ctx, payload.ImageName.Dev, payload.NewImageName)
 	if err != nil {
 		return err
 	}
@@ -36,7 +36,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName, logging.PUSH, reader)
+	err = sm.LogManager.Stream(payload.PublishContainerName, logging.PUSH, reader)
 	if err != nil {
 		return err
 	}

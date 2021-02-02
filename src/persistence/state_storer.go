@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"reagent/common"
+	"reagent/config"
 	"reagent/system"
 	"runtime"
 	"strings"
@@ -15,16 +16,17 @@ import (
 )
 
 type AppStateStorer struct {
-	db *sql.DB
+	db     *sql.DB
+	config *config.Config
 }
 
-func NewSQLiteDb() (*AppStateStorer, error) {
+func NewSQLiteDb(config *config.Config) (*AppStateStorer, error) {
 	const databaseFileName = "reagent.db"
 	db, err := sql.Open("sqlite3", "./"+databaseFileName)
 	if err != nil {
 		return nil, err
 	}
-	return &AppStateStorer{db: db}, nil
+	return &AppStateStorer{db: db, config: config}, nil
 }
 
 func (sqlite *AppStateStorer) Close() error {
@@ -163,8 +165,19 @@ func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload
 
 	payloads := []common.TransitionPayload{}
 	for rows.Next() {
-		payload := common.TransitionPayload{}
-		err = rows.Scan(&payload.AppName, &payload.AppKey, &payload.Stage, &payload.ContainerName, &payload.CurrentState, &payload.RequestedState, &payload.ImageName, &payload.RepositoryImageName, &payload.DeviceToAppKey, &payload.RequestorAccountKey)
+		var appName string
+		var appKey uint64
+		var deviceToAppKey uint64
+		var requestorAccountKey uint64
+		var stage common.Stage
+		var currentState common.AppState
+		var requestedState common.AppState
+		// var callerAuthID string
+
+		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
+		err = rows.Scan(&appName, &appKey, &stage, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+		payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+
 		if err != nil {
 			return nil, err
 		}
@@ -190,9 +203,8 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
-		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.ContainerName,
-			payload.CurrentState, payload.RequestedState, payload.ImageName,
-			payload.RepositoryImageName, payload.RequestorAccountKey, payload.DeviceToAppKey,
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceToAppKey,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -211,8 +223,7 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		return err
 	}
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
-		payload.CurrentState, payload.RequestedState, payload.ImageName,
-		payload.RepositoryImageName, payload.RequestorAccountKey, payload.DeviceToAppKey,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceToAppKey,
 		time.Now().Format(time.RFC3339),
 	)
 

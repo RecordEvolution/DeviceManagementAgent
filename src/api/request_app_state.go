@@ -6,7 +6,6 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
-	"strings"
 
 	"github.com/gammazero/nexus/v3/wamp"
 )
@@ -34,9 +33,9 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 
 // responseToTransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.
 // Values that were not provided will be nil.
-func responseToTransitionPayload(config config.Config, result messenger.Result) (common.TransitionPayload, error) {
+func responseToTransitionPayload(config *config.Config, result messenger.Result) (common.TransitionPayload, error) {
 	kwargs := result.ArgumentsKw
-	details := result.Details
+	// details := result.Details
 
 	appKeyKw := kwargs["app_key"]
 	appNameKw := kwargs["app_name"]
@@ -44,26 +43,20 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 	requestedStateKw := kwargs["manually_requested_state"]
 	// releaseKeyKw := kwargs["release_key"]
 	currentStateKw := kwargs["state"]
-	registryTokenKw := kwargs["registry_token"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	dtaKeyKw := kwargs["device_to_app_key"]
 	newImageNameKw := kwargs["new_image_name"]
 	presentVersionKw := kwargs["present_version"]
-	publishContainerKw := kwargs["publish_container"]
 
 	var appKey uint64
-	// var releaseKey uint64
 	var dtaKey uint64
 	var requestorAccountKey uint64
 	var appName string
 	var stage string
 	var requestedState string
 	var currentState string
-	var registryToken string
 	var newImageName string
 	var presentVersion string
-	var publishContainer string
-
 	var ok bool
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -111,20 +104,6 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 		}
 	}
 
-	if registryTokenKw != nil {
-		registryToken, ok = registryTokenKw.(string)
-		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse registry_token")
-		}
-	}
-
-	// if releaseKeyKw != nil {
-	// 	releaseKey, ok = releaseKeyKw.(uint64)
-	// 	if !ok {
-	// 		return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
-	// 	}
-	// }
-
 	if requestorAccountKeyKw != nil {
 		requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
 		if !ok {
@@ -153,48 +132,26 @@ func responseToTransitionPayload(config config.Config, result messenger.Result) 
 		}
 	}
 
-	if publishContainerKw != nil {
-		publishContainer, ok = publishContainerKw.(string)
-		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse publish_container")
-		}
-	}
-
-	callerAuthIDString := details["caller_authid"]
+	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
 
-	callerAuthID, ok := callerAuthIDString.(string)
-	if !ok {
-		return common.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
-	}
+	// callerAuthID, ok := callerAuthIDString.(string)
+	// if !ok {
+	// 	return common.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
+	// }
 
-	var containerName string
+	payload := common.BuildTransitionPayload(
+		dtaKey, appKey, appName, requestorAccountKey,
+		common.Stage(stage), common.AppState(currentState),
+		common.AppState(requestedState), config,
+	)
 
-	// containerName used for sending publish app logs to
-	if publishContainer != "" {
-		containerName = publishContainer
-	} else {
-		containerName = fmt.Sprintf("%s_%d_%s", stage, appKey, appName)
-	}
+	// Not always part of the payload
+	payload.NewImageName = newImageName
+	payload.PresentVersion = presentVersion
 
-	imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, config.ReswarmConfig.Architecture, appKey, appName))
-	fullImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, imageName))
+	// registryToken is added before we transition state and is not part of the response payload
 
-	return common.TransitionPayload{
-		Stage:               common.Stage(stage),
-		RequestedState:      common.AppState(requestedState),
-		AppName:             appName,
-		AppKey:              appKey,
-		CurrentState:        common.AppState(currentState),
-		ContainerName:       strings.ToLower(containerName),
-		ImageName:           imageName,
-		DeviceToAppKey:      dtaKey,
-		NewImageName:        newImageName,
-		RequestorAccountKey: requestorAccountKey,
-		RepositoryImageName: strings.ToLower(fullImageName),
-		AccountID:           callerAuthID,
-		PresentVersion:      presentVersion,
-		RegisteryToken:      registryToken,
-	}, nil
+	return payload, nil
 }

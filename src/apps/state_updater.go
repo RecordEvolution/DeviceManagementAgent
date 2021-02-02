@@ -185,23 +185,16 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	appPayloads := make([]common.TransitionPayload, 0)
 	for _, deviceSyncState := range deviceSyncStateResponse {
 		appName := strings.Split(deviceSyncState.ContainerName, "_")[2]
-		imageName := strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", deviceSyncState.Stage, config.ReswarmConfig.Architecture, deviceSyncState.AppKey, appName))
-		presentImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, deviceSyncState.PresentImageName))
-		//repositoryImageName := strings.ToLower(fmt.Sprintf("%s%s%s", config.DockerRegistryURL, config.DockerMainRepository, imageName))
 
-		payload := common.TransitionPayload{
-			AppName:             appName,
-			AppKey:              deviceSyncState.AppKey,
-			ContainerName:       deviceSyncState.ContainerName,
-			ImageName:           imageName,
-			RepositoryImageName: presentImageName,
-			DeviceToAppKey:      uint64(deviceSyncState.DeviceToAppKey),
-			RequestorAccountKey: uint64(deviceSyncState.RequestorAccountKey),
-			RequestedState:      common.AppState(deviceSyncState.ManuallyRequestedState),
-			CurrentState:        common.AppState(deviceSyncState.CurrentState),
-			Stage:               common.Stage(deviceSyncState.Stage),
-			RequestUpdate:       deviceSyncState.RequestUpdate,
-		}
+		payload := common.BuildTransitionPayload(
+			uint64(deviceSyncState.DeviceToAppKey),
+			deviceSyncState.AppKey, appName,
+			uint64(deviceSyncState.RequestorAccountKey),
+			common.Stage(deviceSyncState.Stage),
+			common.AppState(deviceSyncState.CurrentState),
+			common.AppState(deviceSyncState.ManuallyRequestedState),
+			&config,
+		)
 
 		appPayloads = append(appPayloads, payload)
 	}

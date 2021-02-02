@@ -1,5 +1,7 @@
 package common
 
+import "reagent/config"
+
 type Dict map[string]interface{}
 
 type App struct {
@@ -29,24 +31,50 @@ func (a *App) FinishTransition() {
 	}
 }
 
-// common.TransitionPayload provides the data used by the StateMachine to transition between states.
+type StageBasedResult struct {
+	Dev  string
+	Prod string
+}
+
+// TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
-	RequestedState      AppState
-	CurrentState        AppState
-	Stage               Stage
-	RequestorAccountKey uint64
-	DeviceToAppKey      uint64
-	AppKey              uint64
-	AppName             string
-	ImageName           string
-	NewImageName        string
-	PresentImageName    string
-	RepositoryImageName string
-	ContainerName       string
-	AccountID           string
-	RegisteryToken      string
-	PresentVersion      string
-	RequestUpdate       bool
+	RequestedState       AppState
+	CurrentState         AppState
+	Stage                Stage
+	RequestorAccountKey  uint64
+	DeviceToAppKey       uint64
+	AppKey               uint64
+	AppName              string
+	ImageName            StageBasedResult
+	NewImageName         string
+	PresentImageName     string
+	RepositoryImageName  StageBasedResult
+	ContainerName        StageBasedResult
+	PublishContainerName string
+	RegisteryToken       string
+	PresentVersion       string
+	RequestUpdate        bool
+}
+
+func BuildTransitionPayload(
+	deviceToAppKey uint64, appKey uint64, appName string, requestorAccountKey uint64,
+	stage Stage, currentState AppState, requestedState AppState,
+	config *config.Config,
+) TransitionPayload {
+
+	payload := TransitionPayload{
+		Stage:               stage,
+		RequestedState:      requestedState,
+		AppName:             appName,
+		AppKey:              appKey,
+		CurrentState:        currentState,
+		DeviceToAppKey:      deviceToAppKey,
+		RequestorAccountKey: requestorAccountKey,
+	}
+
+	payload.initContainerData(appKey, appName, config)
+
+	return payload
 }
 
 type DeviceSyncResponse struct {

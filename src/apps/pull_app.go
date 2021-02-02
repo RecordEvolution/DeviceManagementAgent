@@ -28,7 +28,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		Password: config.ReswarmConfig.Secret,
 	}
 
-	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName, authConfig)
+	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName.Prod, authConfig)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName, logging.PULL, reader)
+	err = sm.LogManager.Stream(payload.ContainerName.Prod, logging.PULL, reader)
 	if err != nil {
 		return err
 	}

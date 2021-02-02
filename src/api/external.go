@@ -16,7 +16,7 @@ type External struct {
 	StateMachine apps.StateMachine
 	StateStorer  persistence.StateStorer
 	LogManager   logging.LogManager
-	Config       config.Config
+	Config       *config.Config
 }
 
 const topicPrefix = "re.mgmt"
