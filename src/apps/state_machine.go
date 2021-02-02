@@ -11,13 +11,6 @@ import (
 
 type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
 
-type OngoingTransition struct {
-	AppKey         uint64
-	Stage          common.Stage
-	RequestedState common.AppState
-	CurrentState   common.AppState
-}
-
 type StateMachine struct {
 	StateObserver StateObserver
 	LogManager    logging.LogManager
