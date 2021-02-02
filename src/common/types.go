@@ -12,6 +12,21 @@ type App struct {
 	Stage                  Stage
 	RequestUpdate          bool
 	ReleaseBuild           bool
+	transitioning          bool
+}
+
+func (a *App) IsTransitioning() bool {
+	return a.transitioning
+}
+
+func (a *App) BeginTransition() {
+	a.transitioning = true
+}
+
+func (a *App) FinishTransition() {
+	if a.transitioning {
+		a.transitioning = false
+	}
 }
 
 // common.TransitionPayload provides the data used by the StateMachine to transition between states.

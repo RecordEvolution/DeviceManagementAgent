@@ -19,11 +19,10 @@ type OngoingTransition struct {
 }
 
 type StateMachine struct {
-	StateObserver      StateObserver
-	LogManager         logging.LogManager
-	Container          container.Container
-	ongoingTransitions []*OngoingTransition
-	appStates          []*common.App
+	StateObserver StateObserver
+	LogManager    logging.LogManager
+	Container     container.Container
+	appStates     []*common.App
 }
 
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
@@ -137,39 +136,6 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) addTransition(app *common.App) {
-	transition := &OngoingTransition{
-		AppKey:         app.AppKey,
-		Stage:          app.Stage,
-		RequestedState: app.ManuallyRequestedState,
-		CurrentState:   app.CurrentState,
-	}
-
-	sm.ongoingTransitions = append(sm.ongoingTransitions, transition)
-}
-
-func (sm *StateMachine) hasActiveTransition(app *common.App) bool {
-	for i := range sm.ongoingTransitions {
-		transition := sm.ongoingTransitions[i]
-		if transition.AppKey == app.AppKey && transition.Stage == app.Stage {
-			return true
-		}
-	}
-	return false
-}
-
-func (sm *StateMachine) finishTransition(app *common.App) {
-	trans := sm.ongoingTransitions
-	for i := range sm.ongoingTransitions {
-		transition := sm.ongoingTransitions[i]
-		if transition.AppKey == app.AppKey && transition.Stage == app.Stage {
-			trans[i] = trans[len(trans)-1]               // Copy last element to index i.
-			trans[len(trans)-1] = nil                    // Erase last element (write zero value).
-			sm.ongoingTransitions = trans[:len(trans)-1] // Truncate slice.
-		}
-	}
-}
-
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
@@ -214,22 +180,22 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return nil
 	}
 
+	// ensure multiple transitions for the same app in parallel are not possible
+	if app.IsTransitioning() {
+		fmt.Printf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+		return nil
+	}
+
 	errChannel := make(chan error)
-
 	go func() {
-		// ensure multiple transitions for the same app in parallel are not possible
-		if sm.hasActiveTransition(app) {
-			return
-		}
-
-		sm.addTransition(app)
+		app.BeginTransition()
 		err := transitionFunc(payload, app)
 		// send potential error to errChannel
 		// if error = nil, the transition has completed successfully
 		errChannel <- err
 
-		// transition has finished, remove from active transitions
-		sm.finishTransition(app)
+		// transition has finished
+		app.FinishTransition()
 	}()
 
 	go func() {
