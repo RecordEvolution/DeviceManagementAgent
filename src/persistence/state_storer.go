@@ -207,7 +207,7 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 	for rows.Next() {
 		var appName string
 		var appKey uint64
-		var deviceToAppKey uint64
+		// var deviceToAppKey uint64
 		var requestorAccountKey uint64
 		var stage common.Stage
 		var version string
@@ -217,7 +217,7 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 
 		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
 		err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey)
-		payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+		payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
 
 		if err != nil {
 			return nil, err
@@ -241,6 +241,7 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 
 	hasResult := rows.Next() // only get first result
 
+	fmt.Println("hasResult:", hasResult)
 	if hasResult == false {
 		err := rows.Close()
 		if err != nil {
@@ -252,7 +253,7 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 
 	var appName string
 	var appKey uint64
-	var deviceToAppKey uint64
+	// var deviceToAppKey uint64
 	var requestorAccountKey uint64
 	var stage common.Stage
 	var version string
@@ -260,14 +261,17 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var requestedState common.AppState
 	// var callerAuthID string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey)
+	if err != nil {
+		return common.TransitionPayload{}, err
+	}
 
 	err = rows.Close()
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
 
-	payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}

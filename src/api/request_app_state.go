@@ -65,13 +65,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	// releaseKeyKw := kwargs["release_key"]
 	currentStateKw := kwargs["state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
-	dtaKeyKw := kwargs["device_to_app_key"]
+	// dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
 	presentVersionKw := kwargs["present_version"]
 	newestVersionKw := kwargs["newest_version"]
 
 	var appKey uint64
-	var dtaKey uint64
+	// var dtaKey uint64
 	var requestorAccountKey uint64
 	var appName string
 	var stage string
@@ -143,12 +143,12 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
-	if dtaKeyKw != nil {
-		dtaKey, ok = dtaKeyKw.(uint64)
-		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse device_to_app_key")
-		}
-	}
+	// if dtaKeyKw != nil {
+	// 	dtaKey, ok = dtaKeyKw.(uint64)
+	// 	if !ok {
+	// 		return common.TransitionPayload{}, fmt.Errorf("Failed to parse device_to_app_key")
+	// 	}
+	// }
 
 	if versionKw != nil {
 		version, ok = versionKw.(string)
@@ -180,8 +180,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	// 	return common.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
 	// }
 
-	payload := common.BuildTransitionPayload(
-		dtaKey, appKey, appName, requestorAccountKey,
+	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey,
 		common.Stage(stage), common.AppState(currentState),
 		common.AppState(requestedState), config,
 	)

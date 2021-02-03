@@ -174,9 +174,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	for _, deviceSyncState := range deviceSyncStateResponse {
 		appName := strings.Split(deviceSyncState.ContainerName, "_")[2]
 
-		payload := common.BuildTransitionPayload(
-			uint64(deviceSyncState.DeviceToAppKey),
-			deviceSyncState.AppKey, appName,
+		payload := common.BuildTransitionPayload(deviceSyncState.AppKey, appName,
 			uint64(deviceSyncState.RequestorAccountKey),
 			common.Stage(deviceSyncState.Stage),
 			common.AppState(deviceSyncState.CurrentState),

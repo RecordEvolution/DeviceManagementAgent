@@ -58,8 +58,7 @@ type TransitionPayload struct {
 	RequestUpdate        bool
 }
 
-func BuildTransitionPayload(
-	deviceToAppKey uint64, appKey uint64, appName string, requestorAccountKey uint64,
+func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,
 	stage Stage, currentState AppState, requestedState AppState,
 	config *config.Config,
 ) TransitionPayload {
@@ -70,7 +69,6 @@ func BuildTransitionPayload(
 		AppName:             appName,
 		AppKey:              appKey,
 		CurrentState:        currentState,
-		DeviceToAppKey:      deviceToAppKey,
 		RequestorAccountKey: requestorAccountKey,
 	}
 

@@ -24,7 +24,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
 			common.PRESENT:     sm.pullApp,
-			common.RUNNING:     nil,
+			common.RUNNING:     sm.pullAndRunApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: nil,
@@ -78,7 +78,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PRESENT:     sm.stopApp,
 			common.BUILT:       nil,
 			common.PUBLISHED:   nil,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
 		},
 		common.DOWNLOADING: {
@@ -141,6 +141,7 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 	if err != nil {
 		return err
 	}
+	fmt.Printf("%+v\n", requestedStatePayload)
 
 	// TODO: what to do when the app transition fails? How do we handle that?
 	if app.CurrentState == common.FAILED {
@@ -244,7 +245,11 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.FinishTransition()
 
 		// Verify if app has the latest requested state
-		// sm.VerifyState(app)
+		// TODO: properly handle this error
+		err = sm.VerifyState(app)
+		if err != nil {
+			fmt.Println("failed to verify state:", err)
+		}
 	}()
 
 	go func() {
