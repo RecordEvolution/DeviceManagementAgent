@@ -170,12 +170,13 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 		var deviceToAppKey uint64
 		var requestorAccountKey uint64
 		var stage common.Stage
+		var version string
 		var currentState common.AppState
 		var requestedState common.AppState
 		// var callerAuthID string
 
 		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
-		err = rows.Scan(&appName, &appKey, &stage, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey)
 		payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
 
 		if err != nil {
@@ -214,11 +215,12 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var deviceToAppKey uint64
 	var requestorAccountKey uint64
 	var stage common.Stage
+	var version string
 	var currentState common.AppState
 	var requestedState common.AppState
 	// var callerAuthID string
 
-	err = rows.Scan(&appName, &appKey, &stage, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
 
 	err = rows.Close()
 	if err != nil {
@@ -249,8 +251,8 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
-		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceToAppKey,
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -268,8 +270,8 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 	if err != nil {
 		return err
 	}
-	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceToAppKey,
+	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 		time.Now().Format(time.RFC3339),
 	)
 

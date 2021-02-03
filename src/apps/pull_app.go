@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/container"
@@ -10,9 +11,12 @@ import (
 
 func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
 	config := sm.Container.GetConfig()
+
+	fmt.Printf("%+v\n\n", payload)
+
 	if payload.Stage == common.DEV {
-		err := fmt.Errorf("a dev stage app is not available on the registry")
-		return err
+		// cannot pull dev apps from registry
+		return nil
 	}
 
 	err := sm.setState(app, common.DOWNLOADING)
@@ -28,7 +32,21 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		Password: config.ReswarmConfig.Secret,
 	}
 
-	reader, err := sm.Container.Pull(ctx, payload.RegistryImageName.Prod, authConfig)
+	version := ""
+	if payload.Version != "" {
+		version = payload.Version
+	} else if payload.PresentVersion != "" {
+		version = payload.PresentVersion
+	} else if payload.NewestVersion != "" {
+		version = payload.NewestVersion
+	}
+
+	if version == "" {
+		return errors.New("version string missing from payload")
+	}
+
+	fullImageNameWithVersion := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, version)
+	reader, err := sm.Container.Pull(ctx, fullImageNameWithVersion, authConfig)
 	if err != nil {
 		return err
 	}

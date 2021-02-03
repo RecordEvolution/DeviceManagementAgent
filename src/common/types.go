@@ -52,6 +52,8 @@ type TransitionPayload struct {
 	ContainerName        StageBasedResult
 	PublishContainerName string
 	RegisteryToken       string
+	NewestVersion        string
+	PresentVersion       string
 	Version              string
 	RequestUpdate        bool
 }
@@ -97,6 +99,8 @@ type DeviceSyncResponse struct {
 	RequestorAccountKey    int         `json:"requestor_account_key"`
 	PresentVersion         string      `json:"present_version"`
 	PresentImageName       string      `json:"present_image_name"`
+	NewImageName           string      `json:"new_image_name"`
+	NewestVersion          string      `json:"newest_version"`
 	Description            string      `json:"description"`
 	AppKey                 uint64      `json:"app_key"`
 }

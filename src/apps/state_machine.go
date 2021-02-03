@@ -144,6 +144,12 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 		return err
 	}
 
+	// TODO: what to do when the app transition fails? How do we handle that?
+	if app.CurrentState == common.FAILED {
+		fmt.Println("App transition finished in a failed state")
+		return nil
+	}
+
 	if requestedStatePayload.RequestedState != app.CurrentState {
 		fmt.Printf("App (%d, %s) is not in latest state, adjusting...\n", app.AppKey, app.Stage)
 		return sm.RequestAppState(requestedStatePayload)
@@ -216,6 +222,19 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	go func() {
 		app.BeginTransition()
 		err := transitionFunc(payload, app)
+
+		// If anything goes wrong with the transition function
+		// we should set the state change to FAILED
+		// This will in turn update the in memory state and the local database state
+		// which will in turn update the remote database as well
+		if err != nil {
+			setStateErr := sm.setState(app, common.FAILED)
+			if setStateErr != nil {
+				// wrap errors into one
+				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
+			}
+		}
+
 		// send potential error to errChannel
 		// if error = nil, the transition has completed successfully
 		errChannel <- err
@@ -224,7 +243,6 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.FinishTransition()
 
 		// Verify if app has the latest requested state
-		// TODO: properly handle if an error occurs in this goroutine
 		sm.VerifyState(app)
 	}()
 
@@ -239,19 +257,9 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		}
 
 		fmt.Printf("An error occured during transition from %s to %s using %s\n", app.CurrentState, payload.RequestedState, funcName)
-		fmt.Println(err)
+		fmt.Println("The current app state will has been set to FAILED")
 		fmt.Println()
-		fmt.Println("The current app state will be set to FAILED")
-
-		// If anything goes wrong with the transition function
-		// we should set the state change to FAILED
-		// This will in turn update the in memory state and the local database state
-		// which will in turn update the remote database as well
-		err = sm.setState(app, common.FAILED)
-		// TODO: handle this properly in main goroutine
-		if err != nil {
-			fmt.Println("Failed to set local app state to 'FAILED'", err)
-		}
+		fmt.Println(err)
 	}()
 
 	return nil

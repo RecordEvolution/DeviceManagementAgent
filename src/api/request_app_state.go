@@ -66,6 +66,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
+	presentVersionKw := kwargs["present_version"]
+	newestVersionKw := kwargs["newest_version"]
 
 	var appKey uint64
 	var dtaKey uint64
@@ -75,6 +77,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var requestedState string
 	var currentState string
 	var version string
+	var presentVersion string
+	var newestVersion string
 	var ok bool
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -152,6 +156,20 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if newestVersionKw != nil {
+		newestVersion, ok = newestVersionKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse newest_version")
+		}
+	}
+
+	if presentVersionKw != nil {
+		presentVersion, ok = presentVersionKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse present_version")
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -169,6 +187,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 
 	// Not always part of the payload
 	payload.Version = version
+	payload.NewestVersion = newestVersion
+	payload.PresentVersion = presentVersion
 
 	// registryToken is added before we transition state and is not part of the response payload
 	return payload, nil

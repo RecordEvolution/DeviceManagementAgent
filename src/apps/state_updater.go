@@ -184,6 +184,15 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 			&config,
 		)
 
+		if deviceSyncState.PresentVersion != "" {
+			payload.PresentVersion = deviceSyncState.PresentVersion
+			payload.Version = deviceSyncState.PresentVersion
+		}
+
+		if deviceSyncState.NewestVersion != "" {
+			payload.NewestVersion = deviceSyncState.NewestVersion
+		}
+
 		appPayloads = append(appPayloads, payload)
 	}
 
