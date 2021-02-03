@@ -82,7 +82,8 @@ type DeviceSyncResponse struct {
 	SwarmKey               int         `json:"swarm_key"`
 	AccountKey             int         `json:"account_key"`
 	SerialNumber           string      `json:"serial_number"`
-	Name                   string      `json:"name"`
+	AppName                string      `json:"app_name"`
+	Name                   string      `json:"name"` // device name
 	Status                 string      `json:"status"`
 	Architecture           string      `json:"architecture"`
 	Address                string      `json:"address"`

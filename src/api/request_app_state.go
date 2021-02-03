@@ -25,7 +25,6 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	// Before executing the state transition, fetch a registry token when required
 	token, err := ex.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
 	if err != nil {
-		fmt.Println("failed to get registryToken", err)
 		return messenger.InvokeResult{
 			ArgumentsKw: common.Dict{"cause": err.Error()},
 			Err:         string(wamp.ErrInvalidArgument),

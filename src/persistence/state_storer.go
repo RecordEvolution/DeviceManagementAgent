@@ -89,8 +89,23 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 		return err
 	}
 
-	// Update current state
+	// Update current app state
 	updateStatement, err := ast.db.Prepare(QueryUpdateAppStateByAppKeyAndStage) // Prepare statement.
+	if err != nil {
+		return err
+	}
+	_, err = updateStatement.Exec(newState, app.AppKey, app.Stage)
+	if err != nil {
+		return err
+	}
+
+	err = updateStatement.Close()
+	if err != nil {
+		return err
+	}
+
+	// Update requested app states current state
+	updateStatement, err = ast.db.Prepare(QueryUpdateRequestedAppStateCurrentStateByAppKeyAndStage) // Prepare statement.
 	if err != nil {
 		return err
 	}
@@ -328,6 +343,10 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 		time.Now().Format(time.RFC3339),
 	)
+
+	if err != nil {
+		return err
+	}
 
 	err = upsertStatement.Close()
 	if err != nil {
