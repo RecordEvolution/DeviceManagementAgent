@@ -69,8 +69,12 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PRESENT:     nil,
 		},
 		common.PUBLISHED: {
+			common.BUILT:       sm.buildApp,
+			common.RUNNING:     sm.runApp,
+			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
+			common.PUBLISHED:   sm.publishApp,
 		},
 		common.RUNNING: {
 			common.PRESENT:     sm.stopApp,
@@ -152,7 +156,6 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
-	fmt.Printf("%+v\n", payload)
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app = &common.App{
@@ -182,7 +185,8 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	}
 
 	// If appState is already up to date we should do nothing
-	if app.CurrentState == payload.RequestedState {
+	// It's possible to go from a built/published state to a built/published state since both represent a present state
+	if app.CurrentState == payload.RequestedState && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
 		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
 		return nil
 	}
