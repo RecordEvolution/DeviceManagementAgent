@@ -3,11 +3,13 @@ package persistence
 const QuerySelectCurrentAppStateByKeyAndStage = `SELECT state FROM AppStates WHERE app_key = ? AND stage = ?`
 
 const QuerySelectAllDeviceState = `SELECT interface_type, device_status FROM DeviceStates`
-const QuerySelectAllAppStates = `SELECT * FROM AppStates`
+const QuerySelectAllAppStates = `SELECT app_name, app_key, stage, state, timestamp FROM AppStates`
+
 const QuerySelectAllRequestedStates = `SELECT app_name, app_key, stage, version, current_state,
 manually_requested_state, requestor_account_key FROM RequestedAppStates`
 const QuerySelectRequestedStateByAppKeyAndStage = `SELECT app_name, app_key, stage, version, current_state,
 manually_requested_state, requestor_account_key FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
+const QuerySelectAppStateByAppKeyAndStage = `SELECT app_name, app_key, stage, state, timestamp FROM AppStates WHERE app_key = ? AND stage = ?`
 
 const QueryUpdateAppStateByAppKeyAndStage = `UPDATE AppStates SET state = ? WHERE app_key = ? AND stage = ?`
 const QueryUpdateDeviceState = `UPDATE DeviceStates SET device_status = ?, interface_type = ?`

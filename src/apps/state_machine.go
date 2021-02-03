@@ -36,7 +36,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHED: nil,
 		},
 		common.PRESENT: {
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
@@ -51,12 +51,11 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHED:   nil,
 		},
 		common.BUILT: {
-			common.BUILT:       sm.buildApp,
-			common.RUNNING:     sm.runApp,
-			common.PRESENT:     nil,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
-			common.PUBLISHED:   nil,
+			common.RUNNING:     sm.runApp,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   sm.publishApp,
 		},
 		common.TRANSFERED: {
 			common.REMOVED:     nil,
@@ -69,11 +68,10 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PRESENT:     nil,
 		},
 		common.PUBLISHED: {
-			common.BUILT:       sm.buildApp,
-			common.RUNNING:     sm.runApp,
-			common.PRESENT:     nil,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
+			common.RUNNING:     sm.runApp,
+			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 		},
 		common.RUNNING: {
@@ -160,6 +158,8 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 }
 
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
+	fmt.Printf("Received payload for state change: %+v\n", payload)
+
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
 	// if app was not found in memory, will create a new entry from payload
@@ -205,6 +205,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.ManuallyRequestedState = payload.RequestedState
 	}
 
+	fmt.Println("state trans:", app.CurrentState, payload.RequestedState)
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
 
 	if transitionFunc == nil {
@@ -243,7 +244,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.FinishTransition()
 
 		// Verify if app has the latest requested state
-		sm.VerifyState(app)
+		// sm.VerifyState(app)
 	}()
 
 	go func() {

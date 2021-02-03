@@ -312,8 +312,31 @@ func (docker *Docker) StartContainer(ctx context.Context, containerID string) er
 	return nil
 }
 
+func (docker *Docker) RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error {
+	filters := filters.NewArgs()
+
+	filters.Add("reference", fmt.Sprintf("%s:%s", imageName, tag))
+
+	images, err := docker.client.ImageList(ctx, types.ImageListOptions{Filters: filters})
+	if err != nil {
+		return err
+	}
+
+	if len(images) == 0 {
+		return fmt.Errorf("no image was found with name: %s:%s", imageName, tag)
+	}
+
+	if len(images) > 1 {
+		return fmt.Errorf("multiple images were found with name: %s:%s", imageName, tag)
+	}
+
+	image := images[0]
+
+	return docker.RemoveImageByID(ctx, image.ID, options)
+}
+
 // RemoveImage removes an image from the host
-func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error {
+func (docker *Docker) RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error {
 	forceKw := options["force"]
 	pruneChildrenKw := options["pruneChildren"]
 

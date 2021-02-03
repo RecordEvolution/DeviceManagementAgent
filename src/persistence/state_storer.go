@@ -39,25 +39,6 @@ func (sqlite *AppStateStorer) Init() error {
 	return sqlite.executeFromFile(basepath + "/init-script.sql")
 }
 
-// // UpdateAppState updates the current app state in the local database and remote database
-// func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
-// 	err := ast.updateLocalAppState(app, newState)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	err = ast.updateRemoteAppState(app, newState)
-// 	if err != nil {
-// 		// Silently fail, it's okay if a 'current app state update' fails while the device is offline.
-// 		// Will resync once the device is online again
-// 		// The messaging protocol should not fail with a valid internet connection
-// 		fmt.Printf("Failed to set remote app state to %s for app: %+v", newState, app)
-// 		fmt.Println()
-// 		fmt.Println()
-// 		fmt.Println("error:", err)
-// 	}
-// 	return nil
-// }
-
 func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	if err != nil {
@@ -103,6 +84,11 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 		return err
 	}
 
+	err = insertStatement.Close()
+	if err != nil {
+		return err
+	}
+
 	// Update current state
 	updateStatement, err := ast.db.Prepare(QueryUpdateAppStateByAppKeyAndStage) // Prepare statement.
 	if err != nil {
@@ -112,7 +98,51 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	if err != nil {
 		return err
 	}
+
+	err = updateStatement.Close()
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (ast *AppStateStorer) GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error) {
+
+	preppedStatement, err := ast.db.Prepare(QuerySelectAppStateByAppKeyAndStage)
+	if err != nil {
+		return PersistentAppState{}, err
+	}
+
+	rows, err := preppedStatement.Query(appKey, stage)
+
+	if err != nil {
+		return PersistentAppState{}, err
+	}
+
+	hasRow := rows.Next()
+	if !hasRow {
+		err := rows.Close()
+		if err != nil {
+			return PersistentAppState{}, err
+		}
+
+		return PersistentAppState{}, fmt.Errorf("no app state was found for app key: %d and stage: %s", appKey, stage)
+	}
+
+	appState := PersistentAppState{}
+	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Stage, &appState.State, &appState.Timestamp)
+
+	if err != nil {
+		return PersistentAppState{}, err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		return PersistentAppState{}, err
+	}
+
+	return appState, nil
 }
 
 func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
@@ -125,11 +155,16 @@ func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
 	pAppState := []PersistentAppState{}
 	for rows.Next() {
 		s := PersistentAppState{}
-		err = rows.Scan(&s.ID, &s.AppName, &s.AppName, &s.AppKey, &s.Stage, &s.State, &s.Timestamp)
+		err = rows.Scan(&s.AppName, &s.AppKey, &s.Stage, &s.State, &s.Timestamp)
 		if err != nil {
 			return nil, err
 		}
 		pAppState = append(pAppState, s)
+	}
+
+	err = rows.Close()
+	if err != nil {
+		return nil, err
 	}
 
 	return pAppState, nil
@@ -141,6 +176,11 @@ func (ast *AppStateStorer) insertAppState(app *common.App) error {
 		return err
 	}
 	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Stage, app.CurrentState, time.Now().Format(time.RFC3339))
+	if err != nil {
+		return err
+	}
+
+	err = insertStatement.Close()
 	if err != nil {
 		return err
 	}
@@ -270,10 +310,25 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 	if err != nil {
 		return err
 	}
+
+	if payload.CurrentState == "" {
+		state, err := ast.GetAppState(payload.AppKey, payload.Stage)
+		if err != nil {
+			return err
+		}
+
+		payload.CurrentState = state.State
+	}
+
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version,
 		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 		time.Now().Format(time.RFC3339),
 	)
+
+	err = upsertStatement.Close()
+	if err != nil {
+		return err
+	}
 
 	if err != nil {
 		return err
@@ -331,6 +386,11 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 		return err
 	}
 
+	err = insertStatement.Close()
+	if err != nil {
+		return err
+	}
+
 	// Fallback to the current when value is left out
 	var newestStatus string
 	var newestInterface string
@@ -356,6 +416,12 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 	if err != nil {
 		return err
 	}
+
+	err = updateStatement.Close()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

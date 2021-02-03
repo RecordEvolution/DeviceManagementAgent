@@ -6,7 +6,6 @@ import (
 )
 
 type PersistentAppState struct {
-	ID        int
 	AppName   string
 	AppKey    int
 	Stage     common.Stage
@@ -21,6 +20,7 @@ type StateStorer interface {
 	UpdateNetworkInterface(system.NetworkInterface) error
 	UpsertRequestedStateChange(payload common.TransitionPayload) error
 	BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error
+	GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error)
 	GetAppStates() ([]PersistentAppState, error)
 	GetRequestedState(app *common.App) (common.TransitionPayload, error)
 	GetRequestedStates() ([]common.TransitionPayload, error)
