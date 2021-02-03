@@ -66,7 +66,7 @@ func parseExitCodeFromStatus(status string) string {
 func (su *StateUpdater) UpdateRemoteAppStates() error {
 	ctx := context.Background()
 	containers, err := su.Container.ListContainers(ctx, nil)
-	localStates, err := su.StateStorer.GetLocalAppStates()
+	localStates, err := su.StateStorer.GetAppStates()
 
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 		}
 	}
 
-	return sc.StateStorer.GetLocalRequestedStates()
+	return sc.StateStorer.GetRequestedStates()
 }
 
 func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
@@ -125,7 +125,7 @@ func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppSta
 		fmt.Println("Failed to update remote app state", err)
 	}
 
-	return sc.StateStorer.UpdateLocalAppState(app, stateToSet)
+	return sc.StateStorer.UpdateAppState(app, stateToSet)
 }
 
 func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.AppState) error {

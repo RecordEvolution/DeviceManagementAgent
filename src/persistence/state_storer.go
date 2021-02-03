@@ -58,7 +58,7 @@ func (sqlite *AppStateStorer) Init() error {
 // 	return nil
 // }
 
-func (ast *AppStateStorer) UpdateLocalAppState(app *common.App, newState common.AppState) error {
+func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	if err != nil {
 		return err
@@ -115,7 +115,7 @@ func (ast *AppStateStorer) UpdateLocalAppState(app *common.App, newState common.
 	return nil
 }
 
-func (ast *AppStateStorer) GetLocalAppStates() ([]PersistentAppState, error) {
+func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
 	rows, err := ast.db.Query(QuerySelectAllAppStates)
 
 	if err != nil {
@@ -156,7 +156,7 @@ func (ast *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) 
 	return ast.updateDeviceState("", intf)
 }
 
-func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload, error) {
+func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, error) {
 	rows, err := ast.db.Query(QuerySelectAllRequestedStates)
 
 	if err != nil {
@@ -185,6 +185,41 @@ func (ast *AppStateStorer) GetLocalRequestedStates() ([]common.TransitionPayload
 	}
 
 	return payloads, nil
+}
+
+func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.TransitionPayload, error) {
+	preppedStatement, err := ast.db.Prepare(QuerySelectRequestedStateByAppKeyAndStage)
+	if err != nil {
+		return common.TransitionPayload{}, err
+	}
+
+	rows, err := preppedStatement.Query(app.AppKey, app.Stage)
+	if err != nil {
+		return common.TransitionPayload{}, err
+	}
+
+	hasResult := rows.Next() // only get first result
+
+	if hasResult == false {
+		return common.TransitionPayload{}, fmt.Errorf("No requested state found for app_key: %d with stage: %s", app.AppKey, app.Stage)
+	}
+
+	var appName string
+	var appKey uint64
+	var deviceToAppKey uint64
+	var requestorAccountKey uint64
+	var stage common.Stage
+	var currentState common.AppState
+	var requestedState common.AppState
+	// var callerAuthID string
+
+	err = rows.Scan(&appName, &appKey, &stage, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+	payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+	if err != nil {
+		return common.TransitionPayload{}, err
+	}
+
+	return payload, nil
 }
 
 func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error {

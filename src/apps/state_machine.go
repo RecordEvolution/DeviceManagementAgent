@@ -5,6 +5,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/logging"
+	"reagent/persistence"
 	"reflect"
 	"runtime"
 )
@@ -13,6 +14,7 @@ type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common
 
 type StateMachine struct {
 	StateObserver StateObserver
+	StateStorer   persistence.StateStorer
 	LogManager    logging.LogManager
 	Container     container.Container
 	appStates     []*common.App
@@ -130,6 +132,23 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
+func (sm *StateMachine) VerifyState(app *common.App) error {
+	fmt.Printf("Verifying if app (%d, %s) is in latest state...\n", app.AppKey, app.Stage)
+
+	requestedStatePayload, err := sm.StateStorer.GetRequestedState(app)
+	if err != nil {
+		return err
+	}
+
+	if requestedStatePayload.RequestedState != app.CurrentState {
+		fmt.Printf("App (%d, %s) is not in latest state, adjusting...\n", app.AppKey, app.Stage)
+		return sm.RequestAppState(requestedStatePayload)
+	}
+
+	fmt.Printf("App (%d, %s) is in latest state!\n", app.AppKey, app.Stage)
+	return nil
+}
+
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
@@ -163,11 +182,10 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	}
 
 	// If appState is already up to date we should do nothing
-	//! for debug purposes commented this
-	// if app.CurrentState == payload.RequestedState {
-	// 	fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
-	// 	return nil
-	// }
+	if app.CurrentState == payload.RequestedState {
+		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
+		return nil
+	}
 
 	if payload.CurrentState != "" {
 		app.CurrentState = payload.CurrentState
@@ -200,6 +218,10 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 
 		// transition has finished
 		app.FinishTransition()
+
+		// Verify if app has the latest requested state
+		// TODO: properly handle if an error occurs in this goroutine
+		sm.VerifyState(app)
 	}()
 
 	go func() {

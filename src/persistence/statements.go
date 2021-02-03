@@ -6,6 +6,8 @@ const QuerySelectAllDeviceState = `SELECT interface_type, device_status FROM Dev
 const QuerySelectAllAppStates = `SELECT * FROM AppStates`
 const QuerySelectAllRequestedStates = `SELECT app_name, app_key, stage, current_state,
 manually_requested_state, requestor_account_key, device_to_app_key FROM RequestedAppStates`
+const QuerySelectRequestedStateByAppKeyAndStage = `SELECT app_name, app_key, stage, current_state,
+manually_requested_state, requestor_account_key, device_to_app_key FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
 
 const QueryUpdateAppStateByAppKeyAndStage = `UPDATE AppStates SET state = ? WHERE app_key = ? AND stage = ?`
 const QueryUpdateDeviceState = `UPDATE DeviceStates SET device_status = ?, interface_type = ?`

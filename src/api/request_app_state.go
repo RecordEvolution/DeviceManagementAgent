@@ -21,25 +21,30 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		}
 	}
 
+	err = ex.StateStorer.UpsertRequestedStateChange(payload)
+	if err != nil {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			Err:         string(wamp.ErrInvalidArgument),
+		}
+	}
+
 	// TODO: only fetch token when it's required
 	// Before executing the state transition, fetch a registry token when required
 	token, err := ex.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
 	if err != nil {
 		return messenger.InvokeResult{
 			ArgumentsKw: common.Dict{"cause": err.Error()},
-			// TODO: show different URI error based on error that was returned upwards
-			Err: string(wamp.ErrInvalidArgument),
+			Err:         string(wamp.ErrInvalidArgument),
 		}
 	}
 
 	payload.RegisteryToken = token
 	err = ex.StateMachine.RequestAppState(payload)
-
 	if err != nil {
 		return messenger.InvokeResult{
 			ArgumentsKw: common.Dict{"cause": err.Error()},
-			// TODO: show different URI error based on error that was returned upwards
-			Err: string(wamp.ErrInvalidArgument),
+			Err:         string(wamp.ErrInvalidArgument),
 		}
 	}
 
