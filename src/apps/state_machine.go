@@ -206,7 +206,6 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.ManuallyRequestedState = payload.RequestedState
 	}
 
-	fmt.Println("state trans:", app.CurrentState, payload.RequestedState)
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
 
 	if transitionFunc == nil {

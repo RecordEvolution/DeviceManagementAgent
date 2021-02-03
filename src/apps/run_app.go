@@ -12,7 +12,6 @@ import (
 )
 
 func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App) error {
-	fmt.Println("Running run app as", payload.Stage)
 	if payload.Stage == common.DEV {
 		return sm.runDevApp(payload, app)
 	} else if payload.Stage == common.PROD {

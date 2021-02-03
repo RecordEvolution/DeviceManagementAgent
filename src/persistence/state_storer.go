@@ -256,7 +256,6 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 
 	hasResult := rows.Next() // only get first result
 
-	fmt.Println("hasResult:", hasResult)
 	if hasResult == false {
 		err := rows.Close()
 		if err != nil {
