@@ -201,6 +201,11 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	hasResult := rows.Next() // only get first result
 
 	if hasResult == false {
+		err := rows.Close()
+		if err != nil {
+			return common.TransitionPayload{}, err
+		}
+
 		return common.TransitionPayload{}, fmt.Errorf("No requested state found for app_key: %d with stage: %s", app.AppKey, app.Stage)
 	}
 
@@ -214,6 +219,12 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	// var callerAuthID string
 
 	err = rows.Scan(&appName, &appKey, &stage, &currentState, &requestedState, &requestorAccountKey, &deviceToAppKey)
+
+	err = rows.Close()
+	if err != nil {
+		return common.TransitionPayload{}, err
+	}
+
 	payload := common.BuildTransitionPayload(deviceToAppKey, appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
 	if err != nil {
 		return common.TransitionPayload{}, err
@@ -286,12 +297,20 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 	rows.Scan(&curInterfaceType, &curDeviceStatus)
 
 	if curInterfaceType == string(newInt) {
-		rows.Close()
+		err := rows.Close()
+		if err != nil {
+			return err
+		}
+
 		return fmt.Errorf("The current interface is already %s", curInterfaceType)
 	}
 
 	if curDeviceStatus == string(newStatus) {
-		rows.Close()
+		err := rows.Close()
+		if err != nil {
+			return err
+		}
+
 		return fmt.Errorf("The device status is already %s", curDeviceStatus)
 	}
 
