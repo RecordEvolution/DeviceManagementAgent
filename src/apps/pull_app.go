@@ -28,7 +28,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		Password: config.ReswarmConfig.Secret,
 	}
 
-	reader, err := sm.Container.Pull(ctx, payload.RepositoryImageName.Prod, authConfig)
+	reader, err := sm.Container.Pull(ctx, payload.RegistryImageName.Prod, authConfig)
 	if err != nil {
 		return err
 	}

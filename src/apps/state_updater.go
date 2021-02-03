@@ -114,25 +114,12 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 		}
 	}
 
-	payloads, err := sc.StateStorer.GetLocalRequestedStates()
-	for i, payload := range payloads {
-		token, err := sc.getRegistryToken(payload.RequestorAccountKey)
-		if err != nil {
-			return nil, err
-		}
-
-		payloads[i].RegisteryToken = token
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return payloads, nil
+	return sc.StateStorer.GetLocalRequestedStates()
 }
 
 func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
 	err := sc.UpdateRemoteAppState(app, stateToSet)
+	fmt.Println("Set remote state to", stateToSet)
 	if err != nil {
 		// Fail without returning, since it's ok to miss remote app state update
 		fmt.Println("Failed to update remote app state", err)
@@ -148,6 +135,7 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 		"app_key":                  app.AppKey,
 		"device_key":               config.ReswarmConfig.DeviceKey,
 		"swarm_key":                config.ReswarmConfig.SwarmKey,
+		"serial_number":            config.ReswarmConfig.SerialNumber,
 		"stage":                    app.Stage,
 		"state":                    stateToSet,
 		"device_to_app_key":        app.DeviceToAppKey,
@@ -202,7 +190,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	return appPayloads, nil
 }
 
-func (sc *StateUpdater) getRegistryToken(callerID uint64) (string, error) {
+func (sc *StateUpdater) GetRegistryToken(callerID uint64) (string, error) {
 	ctx := context.Background()
 	args := []common.Dict{{"callerID": callerID}}
 	resp, err := sc.Messenger.Call(ctx, common.TopicGetRegistryToken, args, nil, nil, nil)

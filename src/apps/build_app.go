@@ -13,7 +13,7 @@ import (
 
 func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.App) error {
 	if payload.Stage == common.DEV {
-		err := sm.buildDevApp(payload, app)
+		err := sm.buildDevApp(payload, app, false)
 		if err != nil {
 			return err
 		}
@@ -21,13 +21,20 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 	return nil
 }
 
-func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App) error {
+func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
 	ctx := context.Background() // TODO: store context in memory for build cancellation
+
+	sm.setState(app, common.REMOVED)
 
 	config := sm.Container.GetConfig()
 	fileDir := config.CommandLineArguments.AppBuildsDirectory
 	fileName := payload.AppName + config.CommandLineArguments.CompressedBuildExtension
 	filePath := fileDir + "/" + fileName
+
+	// need to specify that this is a release build on remote update
+	// this ensures that the dev release will be set to exists = true
+	// prod ready builds will not be set to exists until after they are pushed
+	app.ReleaseBuild = releaseBuild
 
 	exists, _ := filesystem.FileExists(filePath)
 	if !exists {
@@ -42,7 +49,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RepositoryImageName.Dev}, Dockerfile: "Dockerfile"})
+	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RegistryImageName.Dev}, Dockerfile: "Dockerfile"})
 	if err != nil {
 		return err
 	}
@@ -58,12 +65,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		}
 	}
 
-	// need to specify that this is a release build on remote update
-	// this ensures that the dev release will be set to exists = true
-	// prod ready builds will not be set to exists until after they are pushed
-	app.ReleaseBuild = false
-	app.ManuallyRequestedState = common.PRESENT
-	err = sm.setState(app, common.PRESENT)
+	err = sm.setState(app, common.BUILT)
 	if err != nil {
 		return err
 	}

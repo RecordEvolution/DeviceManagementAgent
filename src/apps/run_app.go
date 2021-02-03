@@ -25,7 +25,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	ctx := context.Background()
 
 	containerConfig := container.Config{
-		Image:   payload.RepositoryImageName.Dev,
+		Image:   payload.RegistryImageName.Dev,
 		Env:     []string{},
 		Labels:  map[string]string{"real": "True"},
 		Volumes: map[string]struct{}{},

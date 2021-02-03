@@ -5,21 +5,23 @@ type AppState string
 type Stage string
 
 const (
-	PRESENT      AppState = "PRESENT"
-	REMOVED      AppState = "REMOVED"
-	UNINSTALLED  AppState = "UNINSTALLED"
-	FAILED       AppState = "FAILED"
-	BUILDING     AppState = "BUILDING"
-	TRANSFERRED  AppState = "TRANSFERRED"
-	TRANSFERRING AppState = "TRANSFERRING"
-	PUBLISHING   AppState = "PUBLISHING"
-	DOWNLOADING  AppState = "DOWNLOADING"
-	STARTING     AppState = "STARTING"
-	STOPPING     AppState = "STOPPING"
-	STOPPED      AppState = "STOPPED"
-	UPDATING     AppState = "UPDATING"
-	DELETING     AppState = "DELETING"
-	RUNNING      AppState = "RUNNING"
+	PRESENT     AppState = "PRESENT"
+	REMOVED     AppState = "REMOVED"
+	UNINSTALLED AppState = "UNINSTALLED"
+	FAILED      AppState = "FAILED"
+	BUILT       AppState = "BUILT"
+	BUILDING    AppState = "BUILDING"
+	TRANSFERED  AppState = "TRANSFERED"
+	TRANSFERING AppState = "TRANSFERING"
+	PUBLISHING  AppState = "PUBLISHING"
+	PUBLISHED   AppState = "PUBLISHED"
+	DOWNLOADING AppState = "DOWNLOADING"
+	STARTING    AppState = "STARTING"
+	STOPPING    AppState = "STOPPING"
+	STOPPED     AppState = "STOPPED"
+	UPDATING    AppState = "UPDATING"
+	DELETING    AppState = "DELETING"
+	RUNNING     AppState = "RUNNING"
 )
 
 const (

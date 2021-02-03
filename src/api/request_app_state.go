@@ -6,12 +6,13 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"strconv"
 
 	"github.com/gammazero/nexus/v3/wamp"
 )
 
 func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-	transitionPayload, err := responseToTransitionPayload(ex.Config, response)
+	payload, err := responseToTransitionPayload(ex.Config, response)
 	if err != nil {
 		return messenger.InvokeResult{
 			ArgumentsKw: common.Dict{"cause": err.Error()},
@@ -19,7 +20,21 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 			Err: string(wamp.ErrInvalidArgument),
 		}
 	}
-	err = ex.StateMachine.RequestAppState(transitionPayload)
+
+	// TODO: only fetch token when it's required
+	// Before executing the state transition, fetch a registry token when required
+	token, err := ex.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
+	if err != nil {
+		return messenger.InvokeResult{
+			ArgumentsKw: common.Dict{"cause": err.Error()},
+			// TODO: show different URI error based on error that was returned upwards
+			Err: string(wamp.ErrInvalidArgument),
+		}
+	}
+
+	payload.RegisteryToken = token
+	err = ex.StateMachine.RequestAppState(payload)
+
 	if err != nil {
 		return messenger.InvokeResult{
 			ArgumentsKw: common.Dict{"cause": err.Error()},
@@ -45,8 +60,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	currentStateKw := kwargs["state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	dtaKeyKw := kwargs["device_to_app_key"]
-	newImageNameKw := kwargs["new_image_name"]
-	presentVersionKw := kwargs["present_version"]
+	versionKw := kwargs["version"]
 
 	var appKey uint64
 	var dtaKey uint64
@@ -55,8 +69,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var stage string
 	var requestedState string
 	var currentState string
-	var newImageName string
-	var presentVersion string
+	var version string
 	var ok bool
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -107,7 +120,16 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	if requestorAccountKeyKw != nil {
 		requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse requestor_account_key")
+			requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
+			if !ok {
+				return common.TransitionPayload{}, fmt.Errorf("Failed to parse requestor_account_key")
+			}
+
+			value, err := strconv.Atoi(requestorAccountKeyString)
+			if err != nil {
+				return common.TransitionPayload{}, err
+			}
+			requestorAccountKey = uint64(value)
 		}
 	}
 
@@ -118,17 +140,10 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
-	if newImageNameKw != nil {
-		newImageName, ok = newImageNameKw.(string)
+	if versionKw != nil {
+		version, ok = versionKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse new_image_name")
-		}
-	}
-
-	if presentVersionKw != nil {
-		presentVersion, ok = presentVersionKw.(string)
-		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse present_version")
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse version")
 		}
 	}
 
@@ -148,10 +163,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	)
 
 	// Not always part of the payload
-	payload.NewImageName = newImageName
-	payload.PresentVersion = presentVersion
+	payload.Version = version
 
 	// registryToken is added before we transition state and is not part of the response payload
-
 	return payload, nil
 }

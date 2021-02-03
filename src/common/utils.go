@@ -38,7 +38,7 @@ func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, co
 		Dev:  devImageName,
 		Prod: prodImageName,
 	}
-	tp.RepositoryImageName = StageBasedResult{
+	tp.RegistryImageName = StageBasedResult{
 		Dev:  devRegImageName,
 		Prod: prodRegImageName,
 	}

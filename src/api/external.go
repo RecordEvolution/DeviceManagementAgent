@@ -15,6 +15,7 @@ type External struct {
 	Messenger    messenger.Messenger
 	StateMachine apps.StateMachine
 	StateStorer  persistence.StateStorer
+	StateUpdater apps.StateUpdater
 	LogManager   logging.LogManager
 	Config       *config.Config
 }

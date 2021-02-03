@@ -23,56 +23,57 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.REMOVED: {
 			common.PRESENT:     sm.pullApp,
 			common.RUNNING:     nil,
-			common.BUILDING:    sm.buildApp,
-			common.PUBLISHING:  nil,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: nil,
 		},
 		common.UNINSTALLED: {
-			common.PRESENT:    sm.pullApp,
-			common.RUNNING:    nil,
-			common.BUILDING:   sm.buildApp,
-			common.PUBLISHING: nil,
+			common.PRESENT:   sm.pullApp,
+			common.RUNNING:   nil,
+			common.BUILT:     sm.buildApp,
+			common.PUBLISHED: nil,
 		},
 		common.PRESENT: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     sm.runApp,
-			common.BUILDING:    sm.buildApp,
-			common.PUBLISHING:  nil,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   sm.publishApp,
 		},
 		common.FAILED: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.PRESENT:     sm.pullApp,
 			common.RUNNING:     nil,
-			common.BUILDING:    sm.buildApp,
-			common.PUBLISHING:  nil,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   nil,
 		},
-		common.BUILDING: {
+		common.BUILT: {
+			common.BUILT:       sm.buildApp,
+			common.RUNNING:     sm.runApp,
 			common.PRESENT:     nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
-			common.PUBLISHING:  nil,
+			common.PUBLISHED:   nil,
 		},
-		common.TRANSFERRED: {
-			common.BUILDING:    nil,
-			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
-			common.PRESENT:     nil,
-		},
-		common.TRANSFERRING: {
+		common.TRANSFERED: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.PRESENT:     nil,
 		},
-		common.PUBLISHING: {
+		common.TRANSFERING: {
+			common.REMOVED:     nil,
+			common.UNINSTALLED: nil,
+			common.PRESENT:     nil,
+		},
+		common.PUBLISHED: {
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 		},
 		common.RUNNING: {
 			common.PRESENT:     sm.stopApp,
-			common.BUILDING:    nil,
-			common.PUBLISHING:  nil,
+			common.BUILT:       nil,
+			common.PUBLISHED:   nil,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 		},
@@ -132,6 +133,7 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
+	fmt.Printf("%+v\n", payload)
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app = &common.App{
@@ -144,8 +146,6 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 			Stage:                  payload.Stage,
 			RequestUpdate:          false,
 		}
-		sm.appStates = append(sm.appStates, app)
-
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database
 		// in that case, take that one
@@ -155,15 +155,26 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		}
 
 		// If app does not exist in database, it will be added
-		// + remote app state will be updated
+		// + remote app state will be updated if it received one from the database
 		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
 		sm.setState(app, app.CurrentState)
+
+		sm.appStates = append(sm.appStates, app)
 	}
 
 	// If appState is already up to date we should do nothing
-	if app.CurrentState == payload.RequestedState {
-		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
-		return nil
+	//! for debug purposes commented this
+	// if app.CurrentState == payload.RequestedState {
+	// 	fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
+	// 	return nil
+	// }
+
+	if payload.CurrentState != "" {
+		app.CurrentState = payload.CurrentState
+	}
+
+	if payload.RequestedState != "" {
+		app.ManuallyRequestedState = payload.RequestedState
 	}
 
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)

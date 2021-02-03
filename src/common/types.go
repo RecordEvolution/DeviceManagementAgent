@@ -44,15 +44,15 @@ type TransitionPayload struct {
 	RequestorAccountKey  uint64
 	DeviceToAppKey       uint64
 	AppKey               uint64
+	CallerAuthID         int
 	AppName              string
 	ImageName            StageBasedResult
-	NewImageName         string
 	PresentImageName     string
-	RepositoryImageName  StageBasedResult
+	RegistryImageName    StageBasedResult
 	ContainerName        StageBasedResult
 	PublishContainerName string
 	RegisteryToken       string
-	PresentVersion       string
+	Version              string
 	RequestUpdate        bool
 }
 
