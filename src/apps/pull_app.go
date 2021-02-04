@@ -49,12 +49,13 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	if err != nil {
 		return err
 	}
-	err = sm.setState(app, common.PRESENT)
+
+	err = sm.LogManager.Stream(payload.ContainerName.Prod, logging.PULL, reader)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName.Prod, logging.PULL, reader)
+	err = sm.setState(app, common.PRESENT)
 	if err != nil {
 		return err
 	}

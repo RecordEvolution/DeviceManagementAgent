@@ -37,15 +37,18 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, version)
 	if err != nil {
-		fmt.Println("Image wasn't found before trying to run, pulling...")
 		if errdefs.IsImageNotFound(err) {
+			sm.setState(app, common.DOWNLOADING)
 			pullErr := sm.pullApp(payload, app)
-			fmt.Println("Pulled image in running")
 			if err != nil {
-				fmt.Println("Failed to pull image in running")
 				return pullErr
 			}
 		}
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
 	}
 
 	containerConfig := container.Config{
