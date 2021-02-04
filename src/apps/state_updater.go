@@ -34,6 +34,36 @@ func (sc *StateUpdater) UpdateLocalRequestedStates() error {
 	return nil
 }
 
+func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.TransitionPayload)) error {
+	fmt.Printf("Verifying if app (%d, %s) is in latest state...\n", app.AppKey, app.Stage)
+
+	requestedStatePayload, err := sc.StateStorer.GetRequestedState(app)
+	if err != nil {
+		return err
+	}
+
+	// TODO: what to do when the app transition fails? How do we handle that?
+	if app.CurrentState == common.FAILED {
+		fmt.Println("App transition finished in a failed state")
+		return nil
+	}
+
+	if requestedStatePayload.RequestedState != app.CurrentState {
+		fmt.Printf("App (%d, %s) is not in latest state, transitioning to %s...\n", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
+
+		// TODO: get token only when neccessary
+		token, err := sc.GetRegistryToken(requestedStatePayload.RequestorAccountKey)
+		if err != nil {
+			return err
+		}
+		requestedStatePayload.RegisteryToken = token
+		action(requestedStatePayload)
+	}
+
+	fmt.Printf("App (%d, %s) is in latest state!\n", app.AppKey, app.Stage)
+	return nil
+}
+
 func (sc *StateUpdater) containerStateToAppState(containerState string, status string) (common.AppState, error) {
 	switch containerState {
 	case "running":

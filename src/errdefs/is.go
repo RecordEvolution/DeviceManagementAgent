@@ -14,3 +14,8 @@ func IsContainerNotFound(err error) bool {
 	_, ok := err.(ErrContainerNotFound)
 	return ok
 }
+
+func IsImageNotFound(err error) bool {
+	_, ok := err.(ErrImageNotFound)
+	return ok
+}

@@ -5,7 +5,6 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/logging"
-	"reagent/persistence"
 	"reflect"
 	"runtime"
 )
@@ -14,9 +13,9 @@ type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common
 
 type StateMachine struct {
 	StateObserver StateObserver
-	StateStorer   persistence.StateStorer
-	LogManager    logging.LogManager
+	StateUpdater  StateUpdater
 	Container     container.Container
+	LogManager    logging.LogManager
 	appStates     []*common.App
 }
 
@@ -134,29 +133,6 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) VerifyState(app *common.App) error {
-	fmt.Printf("Verifying if app (%d, %s) is in latest state...\n", app.AppKey, app.Stage)
-
-	requestedStatePayload, err := sm.StateStorer.GetRequestedState(app)
-	if err != nil {
-		return err
-	}
-
-	// TODO: what to do when the app transition fails? How do we handle that?
-	if app.CurrentState == common.FAILED {
-		fmt.Println("App transition finished in a failed state")
-		return nil
-	}
-
-	if requestedStatePayload.RequestedState != app.CurrentState {
-		fmt.Printf("App (%d, %s) is not in latest state, transitioning to %s...\n", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
-		return sm.RequestAppState(requestedStatePayload)
-	}
-
-	fmt.Printf("App (%d, %s) is in latest state!\n", app.AppKey, app.Stage)
-	return nil
-}
-
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
@@ -241,11 +217,14 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.FinishTransition()
 
 		// Verify if app has the latest requested state
-		// TODO: properly handle this error
-		err = sm.VerifyState(app)
-		if err != nil {
-			fmt.Println("failed to verify state:", err)
-		}
+		err = sm.StateUpdater.VerifyState(app, func(payload common.TransitionPayload) {
+			err := sm.RequestAppState(payload)
+			if err != nil {
+				// TODO: properly handle this error
+				fmt.Println("failed to verify state:", err)
+			}
+		})
+
 	}()
 
 	go func() {

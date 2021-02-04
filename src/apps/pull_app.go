@@ -31,14 +31,14 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	}
 
 	// TODO: properly handle multiple versions
-	version := ""
-	if payload.Version != "" {
-		version = payload.Version
-	} else if payload.PresentVersion != "" {
-		version = payload.PresentVersion
-	} else if payload.NewestVersion != "" {
+	var version string
+	if payload.NewestVersion != payload.PresentVersion {
+		version = payload.NewestVersion
+	} else if payload.NewestVersion != payload.Version {
 		version = payload.NewestVersion
 	}
+
+	fmt.Println("Versions:", "PV:", payload.PresentVersion, "NV:", payload.NewestVersion, "V:", payload.Version)
 
 	if version == "" {
 		return errors.New("version string missing from payload")

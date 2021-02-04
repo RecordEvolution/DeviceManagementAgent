@@ -23,7 +23,30 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.Version)
+	// TODO: properly handle multiple versions
+	var version string
+	if payload.NewestVersion != payload.PresentVersion {
+		version = payload.NewestVersion
+	} else if payload.NewestVersion != payload.Version {
+		version = payload.NewestVersion
+	}
+
+	fmt.Println("Versions:", "PV:", payload.PresentVersion, "NV:", payload.NewestVersion, "V:", payload.Version)
+
+	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, version)
+
+	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, version)
+	if err != nil {
+		fmt.Println("Image wasn't found before trying to run, pulling...")
+		if errdefs.IsImageNotFound(err) {
+			pullErr := sm.pullApp(payload, app)
+			fmt.Println("Pulled image in running")
+			if err != nil {
+				fmt.Println("Failed to pull image in running")
+				return pullErr
+			}
+		}
+	}
 
 	containerConfig := container.Config{
 		Image:   fullImageNameWithTag,

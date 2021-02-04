@@ -181,6 +181,37 @@ func (docker *Docker) StopContainerByName(ctx context.Context, containerName str
 	return docker.client.ContainerStop(ctx, container.ID, (*time.Duration)(&timeout))
 }
 
+func (docker *Docker) GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error) {
+
+	filters := filters.NewArgs()
+	fullImageNameWithTag := fmt.Sprintf("%s:%s", imageName, tag)
+	filters.Add("reference", fullImageNameWithTag)
+
+	options := types.ImageListOptions{Filters: filters}
+
+	images, err := docker.client.ImageList(ctx, options)
+	if err != nil {
+		return ImageResult{}, err
+	}
+
+	if len(images) == 0 {
+		return ImageResult{}, errdefs.ImageNotFound(fmt.Errorf("no image found with name: %s:%s", imageName, tag))
+	}
+
+	image := images[0]
+
+	return ImageResult{
+		Created:     image.Created,
+		Containers:  image.Containers,
+		SharedSize:  image.SharedSize,
+		VirtualSize: image.VirtualSize,
+		ID:          image.ID,
+		Labels:      image.Labels,
+		Size:        image.Size,
+		RepoTags:    image.RepoTags,
+	}, nil
+}
+
 // ListImages lists all images available on the host.
 func (docker *Docker) ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error) {
 	allKw := options["all"]

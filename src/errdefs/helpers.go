@@ -35,7 +35,6 @@ func ContainerNameAlreadyInUse(err error) error {
 	return ErrContainerNameAlreadyInUse{err}
 }
 
-
 type ErrContainerNotFound struct{ error }
 
 func (e ErrContainerNotFound) Cause() error {
@@ -48,6 +47,24 @@ func (e ErrContainerNotFound) Unwrap() error {
 
 func ContainerNotFound(err error) error {
 	if err == nil || IsContainerNotFound(err) {
+		return err
+	}
+
+	return ErrContainerNotFound{err}
+}
+
+type ErrImageNotFound struct{ error }
+
+func (e ErrImageNotFound) Cause() error {
+	return e.error
+}
+
+func (e ErrImageNotFound) Unwrap() error {
+	return e.error
+}
+
+func ImageNotFound(err error) error {
+	if err == nil || IsImageNotFound(err) {
 		return err
 	}
 

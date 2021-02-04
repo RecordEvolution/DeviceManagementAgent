@@ -56,6 +56,7 @@ type Container interface {
 	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
 	WaitForContainer(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error)
 	StartContainer(ctx context.Context, containerID string) error
+	GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error)
 	RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
 	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error

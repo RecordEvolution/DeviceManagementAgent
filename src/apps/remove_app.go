@@ -3,7 +3,6 @@ package apps
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 )
@@ -29,16 +28,12 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 		}
 
 		// TODO: properly handle multiple versions
-		version := ""
-		if payload.Version != "" {
-			version = payload.Version
-		} else if payload.PresentVersion != "" {
-			version = payload.PresentVersion
-		} else if payload.NewestVersion != "" {
+		var version string
+		if payload.NewestVersion != payload.PresentVersion {
+			version = payload.NewestVersion
+		} else if payload.NewestVersion != payload.Version {
 			version = payload.NewestVersion
 		}
-
-		fmt.Printf("%+v\n", payload)
 
 		if version == "" {
 			return errors.New("version string missing from payload")

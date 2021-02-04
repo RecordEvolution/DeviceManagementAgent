@@ -226,13 +226,17 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 		var requestorAccountKey uint64
 		var stage common.Stage
 		var version string
+		var newestVersion string
 		var currentState common.AppState
 		var requestedState common.AppState
 		// var callerAuthID string
 
 		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
-		err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &newestVersion, &currentState, &requestedState, &requestorAccountKey)
 		payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+		payload.Version = version
+		payload.NewestVersion = newestVersion
+		payload.PresentVersion = version
 
 		if err != nil {
 			return nil, err
@@ -271,11 +275,12 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var requestorAccountKey uint64
 	var stage common.Stage
 	var version string
+	var newestVersion string
 	var currentState common.AppState
 	var requestedState common.AppState
 	// var callerAuthID string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &currentState, &requestedState, &requestorAccountKey)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &newestVersion, &currentState, &requestedState, &requestorAccountKey)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -289,7 +294,7 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 
 	// TODO: handle multiple versions
 	payload.Version = version
-	payload.NewestVersion = version
+	payload.NewestVersion = newestVersion
 	payload.PresentVersion = version
 
 	if err != nil {
@@ -315,7 +320,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
-		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version,
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.NewestVersion,
 			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 			time.Now().Format(time.RFC3339),
 		)
@@ -344,7 +349,7 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		payload.CurrentState = state.State
 	}
 
-	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version,
+	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.NewestVersion,
 		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
 		time.Now().Format(time.RFC3339),
 	)
