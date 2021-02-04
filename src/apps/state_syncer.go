@@ -1,11 +1,15 @@
 package apps
 
+import "fmt"
+
 type StateSyncer struct {
 	StateMachine StateMachine
 	StateUpdater StateUpdater
 }
 
 func (su *StateSyncer) Sync() error {
+	fmt.Println("------------------------------------- STARTING DEVICE STATE SYNC -------------------------------------")
+
 	payloads, err := su.StateUpdater.GetLatestRequestedStates(true)
 	if err != nil {
 		return err
@@ -26,6 +30,8 @@ func (su *StateSyncer) Sync() error {
 			return err
 		}
 	}
+
+	fmt.Println("------------------------------------- COMPLETED DEVICE STATE SYNC -------------------------------------")
 
 	return nil
 }

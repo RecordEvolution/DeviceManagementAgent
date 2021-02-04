@@ -112,29 +112,29 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 	return listOfDict, nil
 }
 
-func (docker *Docker) GetContainerID(ctx context.Context, containerName string) (string, error) {
+func (docker *Docker) GetContainer(ctx context.Context, containerName string) (types.Container, error) {
 	filters := filters.NewArgs()
 	filters.Add("name", containerName)
 	containers, err := docker.client.ContainerList(ctx, types.ContainerListOptions{All: true, Filters: filters})
 	if err != nil {
-		return "", err
+		return types.Container{}, err
 	}
 
 	if len(containers) > 0 {
-		return containers[0].ID, nil
+		return containers[0], nil
 	}
 
-	return "", errdefs.ContainerNotFound(errors.New("container not found"))
+	return types.Container{}, errdefs.ContainerNotFound(errors.New("container not found"))
 }
 
 func (docker *Docker) RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error {
-	id, err := docker.GetContainerID(ctx, containerName)
+	container, err := docker.GetContainer(ctx, containerName)
 
 	if err != nil {
 		return err
 	}
 
-	return docker.RemoveContainerByID(ctx, id, options)
+	return docker.RemoveContainerByID(ctx, container.ID, options)
 }
 
 func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error {
@@ -173,12 +173,12 @@ func (docker *Docker) StopContainerByID(ctx context.Context, containerID string,
 }
 
 func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout int64) error {
-	id, err := docker.GetContainerID(ctx, containerName)
+	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
 		return err
 	}
 
-	return docker.client.ContainerStop(ctx, id, (*time.Duration)(&timeout))
+	return docker.client.ContainerStop(ctx, container.ID, (*time.Duration)(&timeout))
 }
 
 // ListImages lists all images available on the host.
@@ -307,6 +307,25 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 func (docker *Docker) StartContainer(ctx context.Context, containerID string) error {
 	if err := docker.client.ContainerStart(ctx, containerID, types.ContainerStartOptions{}); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (docker *Docker) RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error {
+	filters := filters.NewArgs()
+	filters.Add("reference", imageName)
+
+	images, err := docker.client.ImageList(ctx, types.ImageListOptions{Filters: filters})
+	if err != nil {
+		return err
+	}
+
+	for _, image := range images {
+		err := docker.RemoveImageByID(ctx, image.ID, options)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

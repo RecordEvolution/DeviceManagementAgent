@@ -43,7 +43,8 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		CapAdd:      []string{"ALL"},
 	}
 
-	containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName.Prod)
+	var containerID string
+	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
@@ -53,6 +54,8 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 				return err
 			}
 		}
+	} else {
+		containerID = cont.ID
 	}
 
 	err = sm.Container.StartContainer(ctx, containerID)
@@ -102,24 +105,24 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		CapAdd:      []string{"ALL"},
 	}
 
-	containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName.Dev)
+	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
 		}
 	} else {
-		removeContainerErr := sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
 		if removeContainerErr != nil {
 			return removeContainerErr
 		}
 	}
 
-	containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
+	newContainerID, err := sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
 
-	err = sm.Container.StartContainer(ctx, containerID)
+	err = sm.Container.StartContainer(ctx, newContainerID)
 	if err != nil {
 		return err
 	}
@@ -130,7 +133,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	// TODO: handle error channel for wait
-	sm.Container.WaitForContainer(ctx, containerID, container.WaitConditionNotRunning)
+	sm.Container.WaitForContainer(ctx, newContainerID, container.WaitConditionNotRunning)
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {

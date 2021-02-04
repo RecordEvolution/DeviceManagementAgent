@@ -141,7 +141,6 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%+v\n", requestedStatePayload)
 
 	// TODO: what to do when the app transition fails? How do we handle that?
 	if app.CurrentState == common.FAILED {
@@ -150,7 +149,7 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 	}
 
 	if requestedStatePayload.RequestedState != app.CurrentState {
-		fmt.Printf("App (%d, %s) is not in latest state, adjusting...\n", app.AppKey, app.Stage)
+		fmt.Printf("App (%d, %s) is not in latest state, transitioning to %s...\n", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
 		return sm.RequestAppState(requestedStatePayload)
 	}
 
@@ -159,8 +158,6 @@ func (sm *StateMachine) VerifyState(app *common.App) error {
 }
 
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
-	fmt.Printf("Received payload for state change: %+v\n", payload)
-
 	app := sm.getApp(payload.AppKey, payload.Stage)
 
 	// if app was not found in memory, will create a new entry from payload

@@ -2,6 +2,8 @@ package apps
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 )
@@ -13,20 +15,36 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 		options := map[string]interface{}{"force": true}
 
 		// check if the image has a running container
-		containerID, err := sm.Container.GetContainerID(ctx, payload.ContainerName.Prod)
+		container, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
 		if err != nil {
 			if !errdefs.IsContainerNotFound(err) {
 				return err
 			}
 		} else {
 			// remove container if it exists
-			removeContainerErr := sm.Container.RemoveContainerByID(ctx, containerID, options)
+			removeContainerErr := sm.Container.RemoveContainerByID(ctx, container.ID, options)
 			if removeContainerErr != nil {
 				return removeContainerErr
 			}
 		}
 
-		err = sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.Version, options)
+		// TODO: properly handle multiple versions
+		version := ""
+		if payload.Version != "" {
+			version = payload.Version
+		} else if payload.PresentVersion != "" {
+			version = payload.PresentVersion
+		} else if payload.NewestVersion != "" {
+			version = payload.NewestVersion
+		}
+
+		fmt.Printf("%+v\n", payload)
+
+		if version == "" {
+			return errors.New("version string missing from payload")
+		}
+
+		err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Prod, options)
 		if err != nil {
 			return err
 		}

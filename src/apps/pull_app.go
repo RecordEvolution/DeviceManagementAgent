@@ -12,8 +12,6 @@ import (
 func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
 	config := sm.Container.GetConfig()
 
-	fmt.Printf("%+v\n\n", payload)
-
 	if payload.Stage == common.DEV {
 		// cannot pull dev apps from registry
 		return nil
@@ -32,6 +30,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		Password: config.ReswarmConfig.Secret,
 	}
 
+	// TODO: properly handle multiple versions
 	version := ""
 	if payload.Version != "" {
 		version = payload.Version

@@ -44,7 +44,7 @@ type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
-	GetContainerID(ctx context.Context, containerName string) (string, error)
+	GetContainer(ctx context.Context, containerName string) (types.Container, error)
 	StopContainerByID(ctx context.Context, containerName string, timeout int64) error
 	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error
@@ -58,6 +58,7 @@ type Container interface {
 	StartContainer(ctx context.Context, containerID string) error
 	RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
+	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	GetConfig() config.Config

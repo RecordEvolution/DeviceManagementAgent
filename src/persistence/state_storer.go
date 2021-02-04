@@ -286,6 +286,12 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	}
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+
+	// TODO: handle multiple versions
+	payload.Version = version
+	payload.NewestVersion = version
+	payload.PresentVersion = version
+
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
