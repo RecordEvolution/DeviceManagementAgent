@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/container"
@@ -30,21 +29,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		Password: config.ReswarmConfig.Secret,
 	}
 
-	// TODO: properly handle multiple versions
-	var version string
-	if payload.NewestVersion != payload.PresentVersion {
-		version = payload.NewestVersion
-	} else if payload.NewestVersion != payload.Version {
-		version = payload.NewestVersion
-	}
-
-	fmt.Println("Versions:", "PV:", payload.PresentVersion, "NV:", payload.NewestVersion, "V:", payload.Version)
-
-	if version == "" {
-		return errors.New("version string missing from payload")
-	}
-
-	fullImageNameWithVersion := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, version)
+	fullImageNameWithVersion := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.NewestVersion)
 	reader, err := sm.Container.Pull(ctx, fullImageNameWithVersion, authConfig)
 	if err != nil {
 		return err
@@ -53,6 +38,12 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	err = sm.LogManager.Stream(payload.ContainerName.Prod, logging.PULL, reader)
 	if err != nil {
 		return err
+	}
+
+	if payload.NewestVersion != app.Version {
+		app.Version = payload.NewestVersion
+		app.ReleaseKey = payload.NewReleaseKey
+		app.RequestUpdate = true
 	}
 
 	err = sm.setState(app, common.PRESENT)

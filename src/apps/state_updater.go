@@ -34,7 +34,7 @@ func (sc *StateUpdater) UpdateLocalRequestedStates() error {
 	return nil
 }
 
-func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.TransitionPayload)) error {
+func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.TransitionPayload) error) error {
 	fmt.Printf("Verifying if app (%d, %s) is in latest state...\n", app.AppKey, app.Stage)
 
 	requestedStatePayload, err := sc.StateStorer.GetRequestedState(app)
@@ -56,8 +56,12 @@ func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.
 		if err != nil {
 			return err
 		}
+
 		requestedStatePayload.RegisteryToken = token
-		action(requestedStatePayload)
+		err = action(requestedStatePayload)
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("App (%d, %s) is in latest state!\n", app.AppKey, app.Stage)
@@ -161,6 +165,7 @@ func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppSta
 func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.AppState) error {
 	ctx := context.Background()
 	config := sc.Messenger.GetConfig()
+
 	payload := []common.Dict{{
 		"app_key":                  app.AppKey,
 		"device_key":               config.ReswarmConfig.DeviceKey,
@@ -170,6 +175,7 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 		"state":                    stateToSet,
 		"device_to_app_key":        app.DeviceToAppKey,
 		"requestor_account_key":    app.RequestorAccountKey,
+		"release_key":              app.ReleaseKey,
 		"request_update":           app.RequestUpdate,
 		"manually_requested_state": app.ManuallyRequestedState,
 		"release_build":            app.ReleaseBuild,
@@ -178,6 +184,11 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 	_, err := sc.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
 	if err != nil {
 		return err
+	}
+
+	// The update has been sent, we know that the backend is aware now
+	if app.RequestUpdate {
+		app.RequestUpdate = false
 	}
 
 	return nil
@@ -208,17 +219,15 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 			common.Stage(deviceSyncState.Stage),
 			common.AppState(deviceSyncState.CurrentState),
 			common.AppState(deviceSyncState.ManuallyRequestedState),
+			uint64(deviceSyncState.ReleaseKey),
+			uint64(deviceSyncState.NewReleaseKey),
 			&config,
 		)
 
-		if deviceSyncState.PresentVersion != "" {
-			payload.PresentVersion = deviceSyncState.PresentVersion
-			payload.Version = deviceSyncState.PresentVersion
-		}
-
-		if deviceSyncState.NewestVersion != "" {
-			payload.NewestVersion = deviceSyncState.NewestVersion
-		}
+		payload.RequestUpdate = deviceSyncState.RequestUpdate
+		payload.PresentVersion = deviceSyncState.PresentVersion
+		payload.Version = deviceSyncState.PresentVersion
+		payload.NewestVersion = deviceSyncState.NewestVersion
 
 		appPayloads = append(appPayloads, payload)
 	}

@@ -6,11 +6,13 @@ import (
 )
 
 type PersistentAppState struct {
-	AppName   string
-	AppKey    int
-	Stage     common.Stage
-	State     common.AppState
-	Timestamp string
+	AppName    string
+	AppKey     int
+	ReleaseKey int
+	Version    string
+	Stage      common.Stage
+	State      common.AppState
+	Timestamp  string
 }
 
 type StateStorer interface {

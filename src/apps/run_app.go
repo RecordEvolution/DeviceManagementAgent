@@ -23,19 +23,11 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	// TODO: properly handle multiple versions
-	var version string
-	if payload.NewestVersion != payload.PresentVersion {
-		version = payload.NewestVersion
-	} else if payload.NewestVersion != payload.Version {
-		version = payload.NewestVersion
-	}
+	fmt.Printf("%+v \n", app)
 
-	fmt.Println("Versions:", "PV:", payload.PresentVersion, "NV:", payload.NewestVersion, "V:", payload.Version)
+	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
 
-	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, version)
-
-	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, version)
+	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
 	if err != nil {
 		if errdefs.IsImageNotFound(err) {
 			sm.setState(app, common.DOWNLOADING)

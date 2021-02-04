@@ -123,7 +123,7 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	return nil
 }
 
-func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
+func (sm *StateMachine) findApp(appKey uint64, stage common.Stage) *common.App {
 	for i := range sm.appStates {
 		state := sm.appStates[i]
 		if state.AppKey == appKey && state.Stage == stage {
@@ -133,8 +133,28 @@ func (sm *StateMachine) getApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
-	app := sm.getApp(payload.AppKey, payload.Stage)
+func (sm *StateMachine) UpdateAppState(payload common.TransitionPayload, app *common.App) error {
+	// apply these from payload if the app already exists
+	if payload.CurrentState != "" {
+		app.CurrentState = payload.CurrentState
+	}
+
+	if payload.RequestedState != "" {
+		app.ManuallyRequestedState = payload.RequestedState
+	}
+
+	if payload.PresentVersion != "" {
+		app.Version = payload.PresentVersion
+	}
+
+	return sm.setState(app, app.CurrentState)
+}
+
+// GetOrInitAppState gets the state of an app that is currently in memory. If an app state does not exist with given key and stage, it will create a new entry. This entry will be stored in memory and in the local database
+//
+// The state machine is not responsible for fetching state from the local database and will only concern itself with the app states that has been preloaded.
+func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*common.App, error) {
+	app := sm.findApp(payload.AppKey, payload.Stage)
 
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
@@ -143,10 +163,12 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 			AppName:                payload.AppName,
 			CurrentState:           payload.CurrentState,
 			DeviceToAppKey:         payload.DeviceToAppKey,
+			ReleaseKey:             payload.ReleaseKey,
 			RequestorAccountKey:    payload.RequestorAccountKey,
 			ManuallyRequestedState: payload.RequestedState,
 			Stage:                  payload.Stage,
-			RequestUpdate:          false,
+			Version:                payload.PresentVersion,
+			RequestUpdate:          payload.RequestUpdate,
 		}
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database
@@ -159,36 +181,54 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		// If app does not exist in database, it will be added
 		// + remote app state will be updated if it received one from the database
 		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
-		sm.setState(app, app.CurrentState)
+		err := sm.setState(app, app.CurrentState)
+		if err != nil {
+			return nil, err
+		}
 
 		sm.appStates = append(sm.appStates, app)
+
+	}
+
+	return app, nil
+}
+
+func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
+	fmt.Printf("payload from request: %+v\n", payload)
+
+	app, err := sm.GetOrInitAppState(payload)
+	if err != nil {
+		return err
+	}
+
+	// Update the app data with the provided payload
+	err = sm.UpdateAppState(payload, app)
+	if err != nil {
+		return err
 	}
 
 	// If appState is already up to date we should do nothing
 	// It's possible to go from a built/published state to a built/published state since both represent a present state
-	if app.CurrentState == payload.RequestedState && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
+	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
 		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
 		return nil
 	}
 
-	if payload.CurrentState != "" {
-		app.CurrentState = payload.CurrentState
-	}
-
-	if payload.RequestedState != "" {
-		app.ManuallyRequestedState = payload.RequestedState
-	}
-
-	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
-
-	if transitionFunc == nil {
-		fmt.Printf("Not yet implemented transition from %s to %s\n", app.CurrentState, payload.RequestedState)
+	// ensure multiple transitions in parallel for the same app are not possible
+	if app.IsTransitioning() {
+		fmt.Printf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
 	}
 
-	// ensure multiple transitions for the same app in parallel are not possible
-	if app.IsTransitioning() {
-		fmt.Printf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+	var transitionFunc TransitionFunc
+	if payload.RequestUpdate && payload.NewestVersion != app.Version {
+		transitionFunc = sm.getUpdateTransition(payload, app)
+	} else {
+		transitionFunc = sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+	}
+
+	if transitionFunc == nil {
+		fmt.Printf("Not yet implemented transition from %s to %s\n", app.CurrentState, payload.RequestedState)
 		return nil
 	}
 
@@ -217,14 +257,8 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		app.FinishTransition()
 
 		// Verify if app has the latest requested state
-		err = sm.StateUpdater.VerifyState(app, func(payload common.TransitionPayload) {
-			err := sm.RequestAppState(payload)
-			if err != nil {
-				// TODO: properly handle this error
-				fmt.Println("failed to verify state:", err)
-			}
-		})
-
+		// TODO: properly handle it when verifying fails
+		err = sm.StateUpdater.VerifyState(app, sm.RequestAppState)
 	}()
 
 	go func() {

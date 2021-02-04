@@ -56,10 +56,33 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 		return ast.insertAppState(app)
 	}
 
-	var curState string
-	rows.Scan(&curState)
+	if app.RequestUpdate {
+		// It looks like the requestUpdate failed, we should enable this flag on this app's requestedState
+		// so when it reconnects, it can try to let the database know it is now a different version as the remote database
+		// note: this is only neccessary because we do not force users to update to the latest version
+		// The database will then check if this version is actually the latest version, if not it will request another update
 
-	if curState == string(newState) {
+		requestedState, err := ast.GetRequestedState(app)
+		if err != nil {
+			return err
+		}
+
+		requestedState.RequestUpdate = true
+		err = ast.UpsertRequestedStateChange(requestedState)
+		if err != nil {
+			return err
+		}
+	}
+
+	var curState string
+	var curVersion string
+	var curReleaseKey uint64
+	err = rows.Scan(&curState, &curVersion, &curReleaseKey)
+	if err != nil {
+		return err
+	}
+
+	if curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
 		err := rows.Close()
 		if err != nil {
 			return err
@@ -79,7 +102,7 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	if err != nil {
 		return err
 	}
-	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Stage, curState, time.Now().Format(time.RFC3339))
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, curState, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -94,7 +117,7 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	if err != nil {
 		return err
 	}
-	_, err = updateStatement.Exec(newState, app.AppKey, app.Stage)
+	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
@@ -109,7 +132,7 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	if err != nil {
 		return err
 	}
-	_, err = updateStatement.Exec(newState, app.AppKey, app.Stage)
+	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
@@ -146,7 +169,7 @@ func (ast *AppStateStorer) GetAppState(appKey uint64, stage common.Stage) (Persi
 	}
 
 	appState := PersistentAppState{}
-	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Stage, &appState.State, &appState.Timestamp)
+	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Version, &appState.ReleaseKey, &appState.Stage, &appState.State, &appState.Timestamp)
 
 	if err != nil {
 		return PersistentAppState{}, err
@@ -170,7 +193,7 @@ func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
 	pAppState := []PersistentAppState{}
 	for rows.Next() {
 		s := PersistentAppState{}
-		err = rows.Scan(&s.AppName, &s.AppKey, &s.Stage, &s.State, &s.Timestamp)
+		err = rows.Scan(&s.AppName, &s.AppKey, &s.Version, &s.ReleaseKey, &s.Stage, &s.State, &s.Timestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +213,7 @@ func (ast *AppStateStorer) insertAppState(app *common.App) error {
 	if err != nil {
 		return err
 	}
-	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Stage, app.CurrentState, time.Now().Format(time.RFC3339))
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, app.CurrentState, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -224,23 +247,27 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 		var appKey uint64
 		// var deviceToAppKey uint64
 		var requestorAccountKey uint64
+		var releaseKey uint64
+		var newReleaseKey uint64
 		var stage common.Stage
 		var version string
+		var presentVersion string
 		var newestVersion string
 		var currentState common.AppState
 		var requestedState common.AppState
 		// var callerAuthID string
 
 		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
-		err = rows.Scan(&appName, &appKey, &stage, &version, &newestVersion, &currentState, &requestedState, &requestorAccountKey)
-		payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
-		payload.Version = version
-		payload.NewestVersion = newestVersion
-		payload.PresentVersion = version
-
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey)
 		if err != nil {
 			return nil, err
 		}
+
+		payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, releaseKey, newReleaseKey, ast.config)
+		payload.Version = version
+		payload.NewestVersion = newestVersion
+		payload.PresentVersion = presentVersion
+
 		payloads = append(payloads, payload)
 	}
 
@@ -275,12 +302,15 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var requestorAccountKey uint64
 	var stage common.Stage
 	var version string
+	var presentVersion string
+	var releaseKey uint64
+	var newReleaseKey uint64
 	var newestVersion string
 	var currentState common.AppState
 	var requestedState common.AppState
 	// var callerAuthID string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &newestVersion, &currentState, &requestedState, &requestorAccountKey)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -290,12 +320,11 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 		return common.TransitionPayload{}, err
 	}
 
-	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, ast.config)
+	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, releaseKey, newReleaseKey, ast.config)
 
-	// TODO: handle multiple versions
 	payload.Version = version
 	payload.NewestVersion = newestVersion
-	payload.PresentVersion = version
+	payload.PresentVersion = presentVersion
 
 	if err != nil {
 		return common.TransitionPayload{}, err
@@ -320,8 +349,8 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
-		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
+		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -349,8 +378,8 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		payload.CurrentState = state.State
 	}
 
-	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey,
+	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate,
 		time.Now().Format(time.RFC3339),
 	)
 
@@ -384,7 +413,10 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 
 	var curInterfaceType string
 	var curDeviceStatus string
-	rows.Scan(&curInterfaceType, &curDeviceStatus)
+	err = rows.Scan(&curInterfaceType, &curDeviceStatus)
+	if err != nil {
+		return err
+	}
 
 	if curInterfaceType == string(newInt) {
 		err := rows.Close()

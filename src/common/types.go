@@ -8,12 +8,14 @@ type App struct {
 	AppKey                 uint64
 	DeviceToAppKey         uint64
 	RequestorAccountKey    uint64
+	ReleaseKey             uint64
 	AppName                string
 	ManuallyRequestedState AppState
 	CurrentState           AppState
 	Stage                  Stage
 	RequestUpdate          bool
 	ReleaseBuild           bool
+	Version                string
 	transitioning          bool
 }
 
@@ -54,12 +56,14 @@ type TransitionPayload struct {
 	RegisteryToken       string
 	NewestVersion        string
 	PresentVersion       string
+	ReleaseKey           uint64
+	NewReleaseKey        uint64
 	Version              string
 	RequestUpdate        bool
 }
 
 func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,
-	stage Stage, currentState AppState, requestedState AppState,
+	stage Stage, currentState AppState, requestedState AppState, releaseKey uint64, newReleaseKey uint64,
 	config *config.Config,
 ) TransitionPayload {
 
@@ -69,6 +73,8 @@ func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey u
 		AppName:             appName,
 		AppKey:              appKey,
 		CurrentState:        currentState,
+		ReleaseKey:          releaseKey,
+		NewReleaseKey:       newReleaseKey,
 		RequestorAccountKey: requestorAccountKey,
 	}
 
@@ -88,6 +94,7 @@ type DeviceSyncResponse struct {
 	Architecture           string      `json:"architecture"`
 	Address                string      `json:"address"`
 	ReleaseKey             int         `json:"release_key"`
+	NewReleaseKey          int         `json:"new_release_key"`
 	DeviceToAppKey         int         `json:"device_to_app_key"`
 	CurrentState           string      `json:"current_state"`
 	Stage                  string      `json:"stage"`

@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"reagent/common"
 	"reagent/errdefs"
 )
@@ -25,18 +24,6 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 			if removeContainerErr != nil {
 				return removeContainerErr
 			}
-		}
-
-		// TODO: properly handle multiple versions
-		var version string
-		if payload.NewestVersion != payload.PresentVersion {
-			version = payload.NewestVersion
-		} else if payload.NewestVersion != payload.Version {
-			version = payload.NewestVersion
-		}
-
-		if version == "" {
-			return errors.New("version string missing from payload")
 		}
 
 		err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Prod, options)

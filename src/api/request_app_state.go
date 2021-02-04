@@ -61,16 +61,19 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	appNameKw := kwargs["app_name"]
 	stageKw := kwargs["stage"]
 	requestedStateKw := kwargs["manually_requested_state"]
-	// releaseKeyKw := kwargs["release_key"]
+	releaseKeyKw := kwargs["release_key"]
+	newReleaseKeyKw := kwargs["new_release_key"]
 	currentStateKw := kwargs["state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	// dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
 	presentVersionKw := kwargs["present_version"]
 	newestVersionKw := kwargs["newest_version"]
+	requestUpdateKw := kwargs["request_update"]
 
 	var appKey uint64
-	// var dtaKey uint64
+	var releaseKey uint64
+	var newReleaseKey uint64
 	var requestorAccountKey uint64
 	var appName string
 	var stage string
@@ -79,6 +82,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var version string
 	var presentVersion string
 	var newestVersion string
+	var requestUpdate bool
 	var ok bool
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -142,12 +146,19 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
-	// if dtaKeyKw != nil {
-	// 	dtaKey, ok = dtaKeyKw.(uint64)
-	// 	if !ok {
-	// 		return common.TransitionPayload{}, fmt.Errorf("Failed to parse device_to_app_key")
-	// 	}
-	// }
+	if releaseKeyKw != nil {
+		releaseKey, ok = releaseKeyKw.(uint64)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
+		}
+	}
+
+	if newReleaseKeyKw != nil {
+		newReleaseKey, ok = newReleaseKeyKw.(uint64)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse new_release_key")
+		}
+	}
 
 	if versionKw != nil {
 		version, ok = versionKw.(string)
@@ -170,6 +181,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if requestUpdateKw != nil {
+		requestUpdate, ok = requestUpdateKw.(bool)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse request_update")
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -181,12 +199,18 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey,
 		common.Stage(stage), common.AppState(currentState),
-		common.AppState(requestedState), config,
+		common.AppState(requestedState), releaseKey, newReleaseKey, config,
 	)
 
-	// Not always part of the payload
+	payload.RequestUpdate = requestUpdate
+
+	// Version used to publish a release
 	payload.Version = version
+
+	// Newest version that is available of app
 	payload.NewestVersion = newestVersion
+
+	// Version that is currently on the device
 	payload.PresentVersion = presentVersion
 
 	// registryToken is added before we transition state and is not part of the response payload
