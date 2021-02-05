@@ -16,22 +16,18 @@ func (su *StateSyncer) Sync() error {
 	}
 
 	for i := range payloads {
-		payload := payloads[i]
 
-		token, err := su.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
+		token, err := su.StateUpdater.GetRegistryToken(payloads[i].RequestorAccountKey)
 		if err != nil {
 			return err
 		}
 
 		payloads[i].RegisteryToken = token
-
-		err = su.StateMachine.RequestAppState(payload)
+		err = su.StateMachine.RequestAppState(payloads[i])
 		if err != nil {
 			return err
 		}
 	}
-
-	fmt.Println("------------------------------------- COMPLETED DEVICE STATE SYNC -------------------------------------")
 
 	return nil
 }
