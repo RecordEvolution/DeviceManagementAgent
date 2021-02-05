@@ -52,6 +52,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.BUILT: {
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
+			common.PRESENT:     nil,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -86,13 +87,13 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.UNINSTALLED: nil,
 		},
 		common.STARTING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.stopApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
 		},
 		common.STOPPING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.stopApp,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: nil,
 			common.RUNNING:     nil,
@@ -194,11 +195,15 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 }
 
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
-	fmt.Printf("payload from request: %+v\n", payload)
-
 	app, err := sm.GetOrInitAppState(payload)
 	if err != nil {
 		return err
+	}
+
+	// ensure multiple transitions in parallel for the same app are not possible
+	if app.IsTransitioning() {
+		fmt.Printf("App with name %s and stage %s is already transitioning \n", app.AppName, app.Stage)
+		return nil
 	}
 
 	// Update the app data with the provided payload
@@ -210,13 +215,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	// If appState is already up to date we should do nothing
 	// It's possible to go from a built/published state to a built/published state since both represent a present state
 	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
-		fmt.Printf("app %s is already on latest state (%s) \n", app.AppName, payload.RequestedState)
-		return nil
-	}
-
-	// ensure multiple transitions in parallel for the same app are not possible
-	if app.IsTransitioning() {
-		fmt.Printf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+		fmt.Printf("app %s (%s) is already on latest state (%s) \n", app.AppName, app.Stage, payload.RequestedState)
 		return nil
 	}
 
@@ -231,6 +230,8 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		fmt.Printf("Not yet implemented transition from %s to %s\n", app.CurrentState, payload.RequestedState)
 		return nil
 	}
+
+	fmt.Printf("Executing transition from %s to %s\n", app.CurrentState, payload.RequestedState)
 
 	errChannel := make(chan error)
 	go func() {

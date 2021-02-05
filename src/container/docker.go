@@ -165,7 +165,15 @@ func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID strin
 		}
 	}
 
-	return docker.client.ContainerRemove(ctx, containerID, optionStruct)
+	err := docker.client.ContainerRemove(ctx, containerID, optionStruct)
+	if err != nil {
+		if strings.Contains(err.Error(), "is already in progress") {
+			return errdefs.ContainerRemovalAlreadyInProgress(err)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout int64) error {
@@ -310,7 +318,17 @@ func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadClo
 	return stats.Body, nil
 }
 
-func (docker *Docker) WaitForContainer(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error) {
+func (docker *Docker) WaitForContainerByName(ctx context.Context, containerName string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error, error) {
+	container, err := docker.GetContainer(ctx, containerName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	statusChan, errChan := docker.client.ContainerWait(ctx, container.ID, condition)
+	return statusChan, errChan, nil
+}
+
+func (docker *Docker) WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error) {
 	return docker.client.ContainerWait(ctx, containerID, condition)
 }
 

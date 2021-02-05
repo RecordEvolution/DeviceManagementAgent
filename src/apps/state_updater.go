@@ -153,7 +153,7 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 
 func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
 	err := sc.UpdateRemoteAppState(app, stateToSet)
-	fmt.Println("Set remote state to", stateToSet)
+	fmt.Printf("Set remote state to %s for %s (%s) \n", stateToSet, app.AppName, app.Stage)
 	if err != nil {
 		// Fail without returning, since it's ok to miss remote app state update
 		fmt.Println("Failed to update remote app state", err)

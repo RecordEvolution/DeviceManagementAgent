@@ -37,7 +37,7 @@ func NewWamp(config config.Config) (*WampSession, error) {
 		AuthHandlers: map[string]client.AuthFunc{
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
-		Debug:           true,
+		Debug:           false,
 		ResponseTimeout: 5 * time.Second,
 		// Serialization:
 		TlsCfg: &tls.Config{

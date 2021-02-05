@@ -1,98 +1,93 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
+	"reagent/api"
+	"reagent/apps"
+	"reagent/config"
+	"reagent/container"
 	"reagent/logging"
-	"strconv"
-	"time"
+	"reagent/messenger"
+	"reagent/persistence"
+	"reagent/system"
 )
 
 func main() {
-
-	// process CLI args
-	// argsCLI := os.Args[1:]
-
-	// define and parse CLI flags
-	logFile := flag.String("logfile", "/var/log/reagent.log",
-		"Log file used by the ReAgent to store all its log messages")
-	logFlag := flag.Bool("logflag", true,
-		"ReAgent logs to stdout/stderr (false) or given file (true)")
-	cfgFile := flag.String("cfgfile", "device-config.reswarm",
-		"Configuration file of IoT device running on localhost")
-	logLevl := flag.String("loglevel", "INFO",
-		"Log level is one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
-	flag.Parse()
-
-	startts := time.Now()
-	cliSummary := ("starting ReAgent" +
-		" - " + "cfgFile: " + (*cfgFile) +
-		" - " + "logFile: " + (*logFile) +
-		" - " + "logFlag: " + strconv.FormatBool(*logFlag) +
-		" - " + "logLevl: " + (*logLevl))
-	fmt.Println("[" + startts.Format(time.RFC3339Nano) + "] " + cliSummary)
-
-	// initialize logging target
-	var (
-		logTarget io.Writer
-	)
-	if *logFlag {
-		logfile, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			panic(err)
-		}
-		defer logfile.Close()
-		logTarget = logfile
-	} else {
-		logTarget = os.Stdout
+	reswarmConfig, err := config.LoadReswarmConfig("./demo_demo_swarm_TestDevice.reswarm")
+	if err != nil {
+		panic(err)
+	}
+	cliArgs := config.CommandLineArguments{
+		AppBuildsDirectory:       "/Users/ruben/Desktop",
+		CompressedBuildExtension: ".tgz",
 	}
 
-	// create logging instance(s) with target (stdout vs. file) and log level
-	var (
-		AgentLogger *logging.DefaultLogger
-		// warnLogger *logging.DefaultLogger
-		// errorLogger *logging.DefaultLogger
-	)
-	AgentLogger = logging.NewLogger(logTarget, logging.GetLogLevel(*logLevl))
-
-	// submit first log message
-	AgentLogger.DoLog(logging.INFO, cliSummary)
-
-	// check for configuration file
-	_, err := os.Stat(*cfgFile)
-	if os.IsNotExist(err) {
-		AgentLogger.DoLog(logging.ERROR, "configuration file "+(*cfgFile)+" does not exist")
-		return
+	generalConfig := config.Config{
+		ReswarmConfig:        reswarmConfig,
+		CommandLineArguments: &cliArgs,
 	}
 
-	AgentLogger.DoLog(logging.INFO, "using configuration file "+(*cfgFile))
+	stateStorer, _ := persistence.NewSQLiteDb(&generalConfig)
+	err = stateStorer.Init()
+	if err != nil {
+		panic(err)
+	}
 
-	// Example setup:
-	// reswarmConfig, err := fs.LoadReswarmConfig(*cfgFile)
-	// wampSession, err := messenger.NewWampMessenger(reswarmConfig)
-	// defer wampSession.Close()
+	messenger, _ := messenger.NewWamp(generalConfig)
+	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
 
-	// docker, err := container.NewDocker(reswarmConfig)
-	// appManager := apps.New(docker, wampSession)
+	container, _ := container.NewDocker(generalConfig)
 
-	// appManager.BuildDevApp("testApp", "./TestApp.tar")
+	stateUpdater := apps.StateUpdater{
+		StateStorer: stateStorer,
+		Messenger:   messenger,
+		Container:   container,
+	}
 
-	// payload := wamp.Dict{
-	// 	"swarm_key":           reswarmConfig.SwarmKey,
-	// 	"device_key":          reswarmConfig.DeviceKey,
-	// 	"status":              "CONNECTED",
-	// 	"boot_config_applied": true,
-	// 	"firewall_applied":    true,
-	// }
+	stateObserver := apps.StateObserver{
+		StateUpdater: stateUpdater,
+	}
+
+	logManager := logging.LogManager{
+		Messenger:         messenger,
+		BuildContainerMap: map[string]string{},
+	}
+
+	stateMachine := apps.StateMachine{
+		StateObserver: stateObserver,
+		StateUpdater:  stateUpdater,
+		Container:     container,
+		LogManager:    logManager,
+	}
+
+	stateSyncer := apps.StateSyncer{
+		StateMachine: stateMachine,
+		StateUpdater: stateUpdater,
+	}
+
+	err = stateSyncer.Sync()
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	external := api.External{
+		Messenger:    messenger,
+		StateMachine: stateMachine,
+		Config:       &generalConfig,
+		LogManager:   logManager,
+		StateUpdater: stateUpdater,
+		StateStorer:  stateStorer,
+	}
+
+	external.RegisterAll()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 	select {
 	case <-sigChan:
-		AgentLogger.DoLog(logging.INFO, "Exiting")
 		return
 	}
 }

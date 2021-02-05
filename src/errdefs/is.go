@@ -19,3 +19,8 @@ func IsImageNotFound(err error) bool {
 	_, ok := err.(ErrImageNotFound)
 	return ok
 }
+
+func IsContainerRemovalAlreadyInProgress(err error) bool {
+	_, ok := err.(ErrContainerRemovalAlreadyInProgress)
+	return ok
+}

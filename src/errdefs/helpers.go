@@ -70,3 +70,21 @@ func ImageNotFound(err error) error {
 
 	return ErrContainerNotFound{err}
 }
+
+type ErrContainerRemovalAlreadyInProgress struct{ error }
+
+func (e ErrContainerRemovalAlreadyInProgress) Cause() error {
+	return e.error
+}
+
+func (e ErrContainerRemovalAlreadyInProgress) Unwrap() error {
+	return e.error
+}
+
+func ContainerRemovalAlreadyInProgress(err error) error {
+	if err == nil || IsContainerRemovalAlreadyInProgress(err) {
+		return err
+	}
+
+	return ErrContainerRemovalAlreadyInProgress{err}
+}

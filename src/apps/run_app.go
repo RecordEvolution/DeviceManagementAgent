@@ -87,7 +87,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	}
 
 	// TODO: handle error channel for wait
-	sm.Container.WaitForContainer(ctx, containerID, container.WaitConditionNotRunning)
+	sm.Container.WaitForContainerByID(ctx, containerID, container.WaitConditionNotRunning)
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {
@@ -129,10 +129,27 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 			return err
 		}
 	} else {
+		err := sm.setState(app, common.STOPPING)
+		if err != nil {
+			return err
+		}
+
 		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
 		if removeContainerErr != nil {
-			return removeContainerErr
+			// It's possible we're trying to remove the container when it's already being removed
+			// RUNNING -> STOPPED -> RUNNING
+			if !errdefs.IsContainerRemovalAlreadyInProgress(removeContainerErr) {
+				return removeContainerErr
+			}
 		}
+
+		// TODO: read from error channels
+		sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
 	}
 
 	newContainerID, err := sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
@@ -144,14 +161,6 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	if err != nil {
 		return err
 	}
-
-	err = sm.setState(app, common.STARTING)
-	if err != nil {
-		return err
-	}
-
-	// TODO: handle error channel for wait
-	sm.Container.WaitForContainer(ctx, newContainerID, container.WaitConditionNotRunning)
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {
