@@ -30,7 +30,7 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	_, _, err = sm.Container.WaitForContainerByName(ctx, payload.ContainerName.Prod, container.WaitConditionNotRunning)
+	_, err = sm.Container.WaitForContainerByName(ctx, payload.ContainerName.Prod, container.WaitConditionNotRunning)
 	if err != nil {
 		return err
 	}
@@ -67,8 +67,11 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		}
 	}
 
-	// TODO: read from error channels
-	sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	// doesn't seem to work
+	// _, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	// if err != nil {
+	// 	return err
+	// }
 
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {

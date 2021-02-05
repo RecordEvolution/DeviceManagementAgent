@@ -17,6 +17,8 @@ func BuildFailed(err error) error {
 	return ErrBuildFailed{err}
 }
 
+/*------------*/
+
 type ErrContainerNameAlreadyInUse struct{ error }
 
 func (e ErrContainerNameAlreadyInUse) Cause() error {
@@ -34,6 +36,8 @@ func ContainerNameAlreadyInUse(err error) error {
 
 	return ErrContainerNameAlreadyInUse{err}
 }
+
+/*------------*/
 
 type ErrContainerNotFound struct{ error }
 
@@ -53,6 +57,8 @@ func ContainerNotFound(err error) error {
 	return ErrContainerNotFound{err}
 }
 
+/*------------*/
+
 type ErrImageNotFound struct{ error }
 
 func (e ErrImageNotFound) Cause() error {
@@ -70,6 +76,8 @@ func ImageNotFound(err error) error {
 
 	return ErrContainerNotFound{err}
 }
+
+/*------------*/
 
 type ErrContainerRemovalAlreadyInProgress struct{ error }
 

@@ -318,18 +318,35 @@ func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadClo
 	return stats.Body, nil
 }
 
-func (docker *Docker) WaitForContainerByName(ctx context.Context, containerName string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error, error) {
+func (docker *Docker) WaitForContainerByName(ctx context.Context, containerName string, condition container.WaitCondition) (int64, error) {
 	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
-		return nil, nil, err
+		return -1, err
 	}
 
 	statusChan, errChan := docker.client.ContainerWait(ctx, container.ID, condition)
-	return statusChan, errChan, nil
+	select {
+	case err := <-errChan:
+		if strings.Contains(err.Error(), "No such container") {
+			return -1, errdefs.ContainerNotFound(err)
+		}
+		return -1, err
+	case status := <-statusChan:
+		return status.StatusCode, nil
+	}
 }
 
-func (docker *Docker) WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (<-chan container.ContainerWaitOKBody, <-chan error) {
-	return docker.client.ContainerWait(ctx, containerID, condition)
+func (docker *Docker) WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error) {
+	statusChan, errChan := docker.client.ContainerWait(ctx, containerID, condition)
+	select {
+	case err := <-errChan:
+		if strings.Contains(err.Error(), "No such container") {
+			return -1, errdefs.ContainerNotFound(err)
+		}
+		return -1, err
+	case status := <-statusChan:
+		return status.StatusCode, nil
+	}
 }
 
 func (docker *Docker) CreateContainer(ctx context.Context,

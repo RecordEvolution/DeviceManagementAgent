@@ -65,17 +65,17 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		}
 	}
 
-	err = sm.setState(app, common.BUILT)
-	if err != nil {
-		return err
-	}
-
 	buildResultMessage := "Image built successfully"
 	if buildFailed {
 		buildResultMessage = "Image build failed to complete"
 	}
 
 	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.BUILT)
 	if err != nil {
 		return err
 	}

@@ -30,17 +30,16 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
 	if err != nil {
 		if errdefs.IsImageNotFound(err) {
-			sm.setState(app, common.DOWNLOADING)
+			err := sm.setState(app, common.DOWNLOADING)
+			if err != nil {
+				return err
+			}
+
 			pullErr := sm.pullApp(payload, app)
 			if err != nil {
 				return pullErr
 			}
 		}
-	}
-
-	err = sm.setState(app, common.STARTING)
-	if err != nil {
-		return err
 	}
 
 	containerConfig := container.Config{
@@ -59,6 +58,11 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		Privileged:  true,
 		NetworkMode: "host",
 		CapAdd:      []string{"ALL"},
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
 	}
 
 	var containerID string
@@ -81,20 +85,12 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.setState(app, common.STARTING)
+	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
-
-	// TODO: handle error channel for wait
-	sm.Container.WaitForContainerByID(ctx, containerID, container.WaitConditionNotRunning)
 
 	err = sm.setState(app, common.RUNNING)
-	if err != nil {
-		return err
-	}
-
-	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
@@ -143,8 +139,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 			}
 		}
 
-		// TODO: read from error channels
-		sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	err = sm.setState(app, common.STARTING)

@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 )
@@ -13,17 +14,28 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 		options := map[string]interface{}{"force": true}
 
 		// check if the image has a running container
-		container, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+		cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+		fmt.Println("found ", cont.ID)
 		if err != nil {
 			if !errdefs.IsContainerNotFound(err) {
 				return err
 			}
 		} else {
 			// remove container if it exists
-			removeContainerErr := sm.Container.RemoveContainerByID(ctx, container.ID, options)
+			removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, options)
 			if removeContainerErr != nil {
-				return removeContainerErr
+				if !errdefs.IsContainerNotFound(removeContainerErr) {
+					return removeContainerErr
+				}
 			}
+
+			// doesn't seem to work
+			// _, err := sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+			// if err != nil {
+			// 	if !errdefs.IsContainerNotFound(err) {
+			// 		return err
+			// 	}
+			// }
 		}
 
 		err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Prod, options)
