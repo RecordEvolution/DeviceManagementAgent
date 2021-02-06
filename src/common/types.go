@@ -5,18 +5,18 @@ import "reagent/config"
 type Dict map[string]interface{}
 
 type App struct {
-	AppKey                 uint64
-	DeviceToAppKey         uint64
-	RequestorAccountKey    uint64
-	ReleaseKey             uint64
-	AppName                string
-	ManuallyRequestedState AppState
-	CurrentState           AppState
-	Stage                  Stage
-	RequestUpdate          bool
-	ReleaseBuild           bool
-	Version                string
-	transitioning          bool
+	AppKey              uint64
+	DeviceToAppKey      uint64
+	RequestorAccountKey uint64
+	ReleaseKey          uint64
+	AppName             string
+	RequestedState      AppState
+	CurrentState        AppState
+	Stage               Stage
+	RequestUpdate       bool
+	ReleaseBuild        bool
+	Version             string
+	transitioning       bool
 }
 
 func (a *App) IsTransitioning() bool {
@@ -100,6 +100,7 @@ type DeviceSyncResponse struct {
 	Stage                  string      `json:"stage"`
 	ContainerName          string      `json:"container_name"`
 	RequestUpdate          bool        `json:"request_update"`
+	TargetState            string      `json:"target_state"`
 	ManuallyRequestedState string      `json:"manually_requested_state"`
 	InheritFromGroup       interface{} `json:"inherit_from_group"`
 	RequestorAccountKey    int         `json:"requestor_account_key"`

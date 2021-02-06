@@ -26,7 +26,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.RUNNING:     sm.pullAndRunApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 		},
 		common.UNINSTALLED: {
 			common.PRESENT:   sm.pullApp,
@@ -36,7 +36,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.PRESENT: {
 			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -59,17 +59,17 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.TRANSFERED: {
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.PRESENT:     nil,
 		},
 		common.TRANSFERING: {
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.PRESENT:     nil,
 		},
 		common.PUBLISHED: {
 			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -79,35 +79,35 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.BUILT:       nil,
 			common.PUBLISHED:   nil,
 			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 		},
 		common.DOWNLOADING: {
 			common.PRESENT:     nil,
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 		},
 		common.STARTING: {
 			common.PRESENT:     sm.stopApp,
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},
 		common.STOPPING: {
 			common.PRESENT:     sm.stopApp,
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},
 		common.UPDATING: {
 			common.PRESENT:     nil,
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},
 		common.DELETING: {
 			common.PRESENT:     nil,
 			common.REMOVED:     nil,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},
 	}
@@ -141,7 +141,7 @@ func (sm *StateMachine) UpdateAppState(payload common.TransitionPayload, app *co
 	}
 
 	if payload.RequestedState != "" {
-		app.ManuallyRequestedState = payload.RequestedState
+		app.RequestedState = payload.RequestedState
 	}
 
 	if payload.PresentVersion != "" {
@@ -160,16 +160,16 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app = &common.App{
-			AppKey:                 payload.AppKey,
-			AppName:                payload.AppName,
-			CurrentState:           payload.CurrentState,
-			DeviceToAppKey:         payload.DeviceToAppKey,
-			ReleaseKey:             payload.ReleaseKey,
-			RequestorAccountKey:    payload.RequestorAccountKey,
-			ManuallyRequestedState: payload.RequestedState,
-			Stage:                  payload.Stage,
-			Version:                payload.PresentVersion,
-			RequestUpdate:          payload.RequestUpdate,
+			AppKey:              payload.AppKey,
+			AppName:             payload.AppName,
+			CurrentState:        payload.CurrentState,
+			DeviceToAppKey:      payload.DeviceToAppKey,
+			ReleaseKey:          payload.ReleaseKey,
+			RequestorAccountKey: payload.RequestorAccountKey,
+			RequestedState:      payload.RequestedState,
+			Stage:               payload.Stage,
+			Version:             payload.PresentVersion,
+			RequestUpdate:       payload.RequestUpdate,
 		}
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database

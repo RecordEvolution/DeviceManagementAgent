@@ -60,7 +60,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	appKeyKw := kwargs["app_key"]
 	appNameKw := kwargs["app_name"]
 	stageKw := kwargs["stage"]
-	requestedStateKw := kwargs["manually_requested_state"]
+	requestedStateKw := kwargs["target_state"]
 	releaseKeyKw := kwargs["release_key"]
 	newReleaseKeyKw := kwargs["new_release_key"]
 	currentStateKw := kwargs["current_state"]

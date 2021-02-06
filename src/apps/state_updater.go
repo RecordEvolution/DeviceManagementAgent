@@ -167,18 +167,17 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 	config := sc.Messenger.GetConfig()
 
 	payload := []common.Dict{{
-		"app_key":                  app.AppKey,
-		"device_key":               config.ReswarmConfig.DeviceKey,
-		"swarm_key":                config.ReswarmConfig.SwarmKey,
-		"serial_number":            config.ReswarmConfig.SerialNumber,
-		"stage":                    app.Stage,
-		"state":                    stateToSet,
-		"device_to_app_key":        app.DeviceToAppKey,
-		"requestor_account_key":    app.RequestorAccountKey,
-		"release_key":              app.ReleaseKey,
-		"request_update":           app.RequestUpdate,
-		"manually_requested_state": app.ManuallyRequestedState,
-		"release_build":            app.ReleaseBuild,
+		"app_key":               app.AppKey,
+		"device_key":            config.ReswarmConfig.DeviceKey,
+		"swarm_key":             config.ReswarmConfig.SwarmKey,
+		"serial_number":         config.ReswarmConfig.SerialNumber,
+		"stage":                 app.Stage,
+		"state":                 stateToSet,
+		"device_to_app_key":     app.DeviceToAppKey,
+		"requestor_account_key": app.RequestorAccountKey,
+		"release_key":           app.ReleaseKey,
+		"request_update":        app.RequestUpdate,
+		"release_build":         app.ReleaseBuild,
 	}}
 
 	_, err := sc.Messenger.Call(ctx, common.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
@@ -218,7 +217,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 			uint64(deviceSyncState.RequestorAccountKey),
 			common.Stage(deviceSyncState.Stage),
 			common.AppState(deviceSyncState.CurrentState),
-			common.AppState(deviceSyncState.ManuallyRequestedState),
+			common.AppState(deviceSyncState.TargetState),
 			uint64(deviceSyncState.ReleaseKey),
 			uint64(deviceSyncState.NewReleaseKey),
 			&config,
