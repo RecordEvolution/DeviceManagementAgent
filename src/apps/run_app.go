@@ -85,12 +85,20 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.LogManager.Write(payload.ContainerName.Prod, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
 
 	err = sm.setState(app, common.RUNNING)
+	if err != nil {
+		return err
+	}
+
+	// in case there's an active subscription, (an open panel) before the app was started, we need to make sure we start a stream
+	// NOTE: this is currently not possible since we close the panel everytime we switch states for production apps
+	// but in case we change this in the future, then this is already accounted for
+	err = sm.LogManager.UpdateLogStream(payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
