@@ -74,12 +74,13 @@ type JSONMessage struct {
 	Aux             *json.RawMessage `json:"aux,omitempty"`
 }
 
-func (lm *LogManager) emitStream(subscription *LogSubscription) error {
+// TODO: handle errors from this goroutine
+func (lm *LogManager) emitStream(subscription *LogSubscription) {
 	topic := lm.buildTopic(subscription.ContainerName)
 
-	if subscription.Stream == nil {
-		fmt.Println("Stream is empty, most likely a build stream")
-		return nil
+	// shouldn't occur, but for safety reasons...
+	if subscription.Streaming {
+		return
 	}
 
 	scanner := bufio.NewScanner(subscription.Stream)
@@ -90,18 +91,23 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) error {
 
 		err := lm.Messenger.Publish(topic, []interface{}{chunk}, nil, nil)
 		if err != nil {
-			return err
+			return
 		}
 
-		fmt.Println("chunk was sent:", chunk)
 	}
 
+	fmt.Println("goroutine has finshed publishing logs for", subscription.ContainerName)
+
 	subscription.Streaming = false
-	return nil
 }
 
+// ReviveDeadLogs will iterate over all apps that are running and check if it has an active logger subscription. If a subscription exists, it will publish the container logs.
 func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState) error {
 	for _, app := range appStates {
+		if app.State != common.RUNNING {
+			continue
+		}
+
 		containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
 		topic := lm.buildTopic(containerName)
 
@@ -117,10 +123,8 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 			continue
 		}
 
-		if app.State == common.RUNNING {
-			// app is running and there's a subscription active in this realm, init publish
-			lm.createLogTask(fmt.Sprint(id), containerName)
-		}
+		// app is running and there's a subscription active in this realm, init publish
+		lm.createLogTask(fmt.Sprint(id), containerName)
 	}
 	return nil
 }
@@ -167,22 +171,31 @@ func (lm *LogManager) Init() error {
 	err = lm.Messenger.Subscribe(common.TopicMetaEventSubOnDelete, func(r messenger.Result) {
 		_ = r.Arguments[0]   // the id of the client session that used to be listening
 		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
+		idString := fmt.Sprint(id)
 
-		if lm.ActiveLogs[fmt.Sprint(id)] == nil {
+		if lm.ActiveLogs[idString] == nil {
 			fmt.Println("does not exist in subscriptions")
 			return
 		}
 
-		activeSubscription := lm.ActiveLogs[fmt.Sprint(id)]
+		activeSubscription := lm.ActiveLogs[idString]
 
 		if activeSubscription.Stream == nil {
 			fmt.Println("stream was empty, nothing to close")
-			return
+		} else {
+			// cancel the io stream that is active
+			// TODO: figure out way to handle errors inside a subscription callback, however this error would be rare
+			err := activeSubscription.Stream.Close()
+			if err != nil {
+				fmt.Println("error occured while trying to close stream")
+				return
+			}
+
+			fmt.Println("Closed active stream for", activeSubscription.ContainerName)
 		}
 
-		// cancel the io stream that is active
-		activeSubscription.Stream.Close()
-		fmt.Println("Closed active stream for", activeSubscription.ContainerName)
+		// remove entry from active logs map
+		delete(lm.ActiveLogs, idString)
 	}, nil)
 
 	if err != nil {
@@ -209,6 +222,12 @@ func (lm *LogManager) createLogTask(id string, containerName string) error {
 	}
 
 	lm.ActiveLogs[id] = &subscriptionEntry
+
+	// a subscription can be created without an actual stream, in that case don't stream
+	if stream == nil {
+		return nil
+	}
+
 	go lm.emitStream(&subscriptionEntry)
 
 	return nil
