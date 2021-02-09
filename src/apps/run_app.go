@@ -23,8 +23,6 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	fmt.Printf("%+v \n", app)
-
 	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
 
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)

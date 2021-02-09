@@ -229,7 +229,7 @@ func (lm *LogManager) buildTopic(containerName string) string {
 
 func (lm *LogManager) UpdateLogStream(containerName string) error {
 	for _, subscription := range lm.ActiveLogs {
-		if subscription.ContainerName == containerName && subscription.Stream == nil {
+		if subscription.ContainerName == containerName && !subscription.Streaming {
 			reader, err := lm.getLogStream(containerName)
 			if err != nil {
 				return err
