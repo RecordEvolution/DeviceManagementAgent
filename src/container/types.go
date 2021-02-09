@@ -45,6 +45,7 @@ type Container interface {
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
+	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
 	StopContainerByID(ctx context.Context, containerName string, timeout int64) error
 	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error

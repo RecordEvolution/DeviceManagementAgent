@@ -15,7 +15,7 @@ type StateMachine struct {
 	StateObserver StateObserver
 	StateUpdater  StateUpdater
 	Container     container.Container
-	LogManager    logging.LogManager
+	LogManager    *logging.LogManager
 	appStates     []*common.App
 }
 
@@ -30,9 +30,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.UNINSTALLED: {
 			common.PRESENT:   sm.pullApp,
-			common.RUNNING:   nil,
+			common.RUNNING:   sm.runApp,
 			common.BUILT:     sm.buildApp,
-			common.PUBLISHED: nil,
+			common.PUBLISHED: sm.publishApp,
 		},
 		common.PRESENT: {
 			common.REMOVED:     sm.removeApp,
@@ -51,21 +51,21 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.BUILT: {
 			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.PRESENT:     nil,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 		},
 		common.TRANSFERED: {
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 		},
 		common.TRANSFERING: {
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.pullApp,
 		},
 		common.PUBLISHED: {
 			common.REMOVED:     sm.removeApp,
@@ -76,8 +76,8 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.RUNNING: {
 			common.PRESENT:     sm.stopApp,
-			common.BUILT:       nil,
-			common.PUBLISHED:   nil,
+			common.BUILT:       sm.stopApp,
+			common.PUBLISHED:   sm.removeAndPublishApp,
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 		},

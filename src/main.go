@@ -19,6 +19,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	cliArgs := config.CommandLineArguments{
 		AppBuildsDirectory:       "/Users/ruben/Desktop",
 		CompressedBuildExtension: ".tgz",
@@ -35,7 +36,11 @@ func main() {
 		panic(err)
 	}
 
-	messenger, _ := messenger.NewWamp(generalConfig)
+	messenger, err := messenger.NewWamp(generalConfig)
+	if err != nil {
+		panic(err)
+	}
+
 	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
 
 	container, _ := container.NewDocker(generalConfig)
@@ -51,15 +56,15 @@ func main() {
 	}
 
 	logManager := logging.LogManager{
-		Messenger:         messenger,
-		BuildContainerMap: map[string]string{},
+		Messenger: messenger,
+		Container: container,
 	}
 
 	stateMachine := apps.StateMachine{
 		StateObserver: stateObserver,
 		StateUpdater:  stateUpdater,
 		Container:     container,
-		LogManager:    logManager,
+		LogManager:    &logManager,
 	}
 
 	stateSyncer := apps.StateSyncer{
@@ -77,12 +82,13 @@ func main() {
 		Messenger:    messenger,
 		StateMachine: stateMachine,
 		Config:       &generalConfig,
-		LogManager:   logManager,
+		LogManager:   &logManager,
 		StateUpdater: stateUpdater,
 		StateStorer:  stateStorer,
 	}
 
 	external.RegisterAll()
+	logManager.Init()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)

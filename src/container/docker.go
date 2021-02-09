@@ -318,6 +318,52 @@ func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadClo
 	return stats.Body, nil
 }
 
+func (docker *Docker) Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error) {
+	containerOptions := types.ContainerLogsOptions{}
+	stdoutKw := options["stdout"]
+	stderrKw := options["stderr"]
+	followKw := options["follow"]
+	tailKw := options["tail"]
+
+	if stdoutKw != nil {
+		stdout, ok := stdoutKw.(bool)
+		if ok {
+			containerOptions.ShowStdout = stdout
+		}
+	}
+
+	if stderrKw != nil {
+		stderr, ok := stderrKw.(bool)
+		if ok {
+			containerOptions.ShowStderr = stderr
+		}
+	}
+
+	if followKw != nil {
+		follow, ok := followKw.(bool)
+		if ok {
+			containerOptions.Follow = follow
+		}
+	}
+
+	if tailKw != nil {
+		tail, ok := tailKw.(string)
+		if ok {
+			containerOptions.Tail = tail
+		}
+	}
+
+	reader, err := docker.client.ContainerLogs(ctx, containerName, containerOptions)
+	if err != nil {
+		if strings.Contains(err.Error(), "No such container") {
+			return nil, errdefs.ContainerNotFound(err)
+		}
+		return nil, err
+	}
+
+	return reader, nil
+}
+
 func (docker *Docker) WaitForContainerByName(ctx context.Context, containerName string, condition container.WaitCondition) (int64, error) {
 	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {

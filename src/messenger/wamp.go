@@ -37,7 +37,7 @@ func NewWamp(config config.Config) (*WampSession, error) {
 		AuthHandlers: map[string]client.AuthFunc{
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
-		Debug:           false,
+		Debug:           true,
 		ResponseTimeout: 5 * time.Second,
 		// Serialization:
 		TlsCfg: &tls.Config{
@@ -55,12 +55,8 @@ func NewWamp(config config.Config) (*WampSession, error) {
 	return &WampSession{client: client, config: config}, nil
 }
 
-func (wampSession *WampSession) Publish(topic string, args []common.Dict, kwargs common.Dict, options common.Dict) error {
-	var wampList []interface{}
-	for _, dict := range args {
-		wampList = append(wampList, dict)
-	}
-	return wampSession.client.Publish(topic, wamp.Dict(options), wampList, wamp.Dict(kwargs))
+func (wampSession *WampSession) Publish(topic string, args []interface{}, kwargs common.Dict, options common.Dict) error {
+	return wampSession.client.Publish(topic, wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
 func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options common.Dict) error {
@@ -82,18 +78,22 @@ func (wampSession *WampSession) GetConfig() config.Config {
 	return wampSession.config
 }
 
+func (wampSession *WampSession) SubscriptionID(topic string) (id uint64, ok bool) {
+	subID, ok := wampSession.client.SubscriptionID(topic)
+	return uint64(subID), ok
+}
+func (wampSession *WampSession) RegistrationID(topic string) (id uint64, ok bool) {
+	subID, ok := wampSession.client.RegistrationID(topic)
+	return uint64(subID), ok
+}
+
 func (wampSession *WampSession) Call(
 	ctx context.Context,
 	topic string,
-	args []common.Dict,
+	args []interface{},
 	kwargs common.Dict,
 	options common.Dict,
 	progCb func(Result)) (Result, error) {
-
-	var wampList []interface{}
-	for _, dict := range args {
-		wampList = append(wampList, dict)
-	}
 
 	handler := func(result *wamp.Result) {
 		cbResultMap := Result{
@@ -105,7 +105,7 @@ func (wampSession *WampSession) Call(
 		progCb(cbResultMap)
 	}
 
-	result, err := wampSession.client.Call(ctx, topic, wamp.Dict(options), wampList, wamp.Dict(kwargs), handler)
+	result, err := wampSession.client.Call(ctx, topic, wamp.Dict(options), args, wamp.Dict(kwargs), handler)
 
 	if err != nil {
 		return Result{}, err

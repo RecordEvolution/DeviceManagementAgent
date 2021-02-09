@@ -12,3 +12,8 @@ const TopicSetActualAppOnDeviceState = "reswarm.containers.update_app_on_device"
 const TopicGetRequestedAppStates = "reswarm.containers.get_requested_app_states"
 const TopicGetRegistryToken = "reswarm.containers.get_registry_token"
 const TopicUpdateDeviceStatus = "reswarm.devices.update_device"
+
+// Meta events
+const TopicMetaEventSubOnCreate = "wamp.subscription.on_create"
+const TopicMetaEventSubOnDelete = "wamp.subscription.on_delete"
+const TopicMetaProcLookupSubscription = "wamp.subscription.lookup"

@@ -26,7 +26,7 @@ func AdjustSettings(config string) bool {
 func UpdateRemoteDeviceStatus(messenger messenger.Messenger, status DeviceStatus) error {
 	config := messenger.GetConfig()
 	ctx := context.Background()
-	args := []common.Dict{{
+	args := []interface{}{common.Dict{
 		"swarm_key":  config.ReswarmConfig.SwarmKey,
 		"device_key": config.ReswarmConfig.DeviceKey,
 		"status":     string(status),

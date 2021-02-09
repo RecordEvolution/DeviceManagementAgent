@@ -16,7 +16,7 @@ type External struct {
 	StateMachine apps.StateMachine
 	StateStorer  persistence.StateStorer
 	StateUpdater apps.StateUpdater
-	LogManager   logging.LogManager
+	LogManager   *logging.LogManager
 	Config       *config.Config
 }
 

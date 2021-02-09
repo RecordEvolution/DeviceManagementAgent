@@ -27,9 +27,11 @@ type InvokeResult struct {
 
 type Messenger interface {
 	Register(topic string, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error
-	Publish(topic string, args []common.Dict, kwargs common.Dict, options common.Dict) error
+	Publish(topic string, args []interface{}, kwargs common.Dict, options common.Dict) error
 	Subscribe(topic string, cb func(Result), options common.Dict) error
-	Call(ctx context.Context, topic string, args []common.Dict, kwargs common.Dict, options common.Dict, progCb func(Result)) (Result, error)
+	Call(ctx context.Context, topic string, args []interface{}, kwargs common.Dict, options common.Dict, progCb func(Result)) (Result, error)
+	SubscriptionID(topic string) (id uint64, ok bool)
+	RegistrationID(topic string) (id uint64, ok bool)
 	GetConfig() config.Config
 	Close() error
 }

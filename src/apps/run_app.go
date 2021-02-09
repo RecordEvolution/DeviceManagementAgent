@@ -153,7 +153,9 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 	newContainerID, err := sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
 	if err != nil {
-		return err
+		if !errdefs.IsContainerNameAlreadyInUse(err) {
+			return err
+		}
 	}
 
 	err = sm.Container.StartContainer(ctx, newContainerID)
@@ -167,6 +169,15 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
+	if err != nil {
+		return err
+	}
+
+	// when we build the app, we create a subscription
+	// now we make sure to populate this existing subscription with a stream (if the user is still subscribed)
+	// since we have now started the app
+	// it's also possible for users to have an active subscription before the app has started running
+	err = sm.LogManager.UpdateLogStream(payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
