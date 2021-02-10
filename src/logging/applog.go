@@ -85,6 +85,7 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) {
 
 	scanner := bufio.NewScanner(subscription.Stream)
 	subscription.Streaming = true
+	defer subscription.Stream.Close()
 
 	for scanner.Scan() {
 		chunk := scanner.Text()
