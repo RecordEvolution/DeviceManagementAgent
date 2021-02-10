@@ -12,11 +12,38 @@ import (
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/gammazero/nexus/v3/wamp/crsign"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type WampSession struct {
 	client *client.Client
 	config config.Config
+}
+
+type wampLogWrapper struct {
+	logger *zerolog.Logger
+}
+
+func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
+	return wampLogWrapper{logger: zeroLogger}
+}
+
+func (wl wampLogWrapper) Print(v ...interface{}) {
+	wl.logger.Print(v)
+}
+
+func (wl wampLogWrapper) Println(v ...interface{}) {
+	wl.logger.Print(v, "\n")
+}
+
+func (wl wampLogWrapper) Printf(format string, v ...interface{}) {
+	wl.logger.Printf(format, v)
+}
+
+func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
+	wrapper := newWampLogger(&zeroLogger)
+	return wrapper
 }
 
 // New creates a new wamp session from a ReswarmConfig file
@@ -37,8 +64,9 @@ func NewWamp(config config.Config) (*WampSession, error) {
 		AuthHandlers: map[string]client.AuthFunc{
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
-		Debug:           false,
+		Debug:           true,
 		ResponseTimeout: 5 * time.Second,
+		Logger:          wrapZeroLogger(log.Logger),
 		// Serialization:
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},

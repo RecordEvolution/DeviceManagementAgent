@@ -5,6 +5,7 @@ const TopicRequestAppState = "request_app_state"
 const TopicWriteToFile = "write_data"
 const TopicHandshake = "device_handshake"
 const TopicContainerImages = "get_images"
+const TopicStartTerminal = "start_terminal"
 
 // Topics used for backend communication
 const TopicBootConfig = "reswarm.containers.get_boot_config"

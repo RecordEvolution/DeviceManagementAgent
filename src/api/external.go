@@ -2,25 +2,26 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"reagent/apps"
 	"reagent/common"
 	"reagent/config"
 	"reagent/logging"
 	"reagent/messenger"
 	"reagent/persistence"
+	"reagent/terminal"
 )
 
+// External is the API that is meant to be used by the externally exposed WAMP topics.
+// It contains all the functionality available in the reagent.
 type External struct {
-	Messenger    messenger.Messenger
-	StateMachine apps.StateMachine
-	StateStorer  persistence.StateStorer
-	StateUpdater apps.StateUpdater
-	LogManager   *logging.LogManager
-	Config       *config.Config
+	Messenger       messenger.Messenger
+	StateStorer     persistence.StateStorer
+	StateMachine    *apps.StateMachine
+	StateUpdater    *apps.StateUpdater
+	TerminalManager *terminal.TerminalManager
+	LogManager      *logging.LogManager
+	Config          *config.Config
 }
-
-const topicPrefix = "re.mgmt"
 
 func (ex *External) getTopicHandlerMap() map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
 	return map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult{
@@ -28,6 +29,7 @@ func (ex *External) getTopicHandlerMap() map[string]func(ctx context.Context, re
 		string(common.TopicWriteToFile):     ex.writeToFileHandler,
 		string(common.TopicHandshake):       ex.deviceHandshakeHandler,
 		string(common.TopicContainerImages): ex.getImagesHandler,
+		string(common.TopicStartTerminal):   ex.startTerminalHandler,
 	}
 }
 
@@ -37,7 +39,7 @@ func (ex *External) RegisterAll() {
 	topicHandlerMap := ex.getTopicHandlerMap()
 	for topic, handler := range topicHandlerMap {
 		// will register all topics, e.g.: re.mgmt.request_app_state
-		fullTopic := fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
+		fullTopic := common.BuildExternalApiTopic(serialNumber, topic)
 		ex.Messenger.Register(fullTopic, handler, nil)
 	}
 }

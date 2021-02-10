@@ -1,8 +1,10 @@
 package container
 
 import (
+	"bufio"
 	"context"
 	"io"
+	"net"
 	"reagent/common"
 	"reagent/config"
 
@@ -39,6 +41,11 @@ type ImageResult struct {
 	RepoTags    []string          `json:"repoTags,omitempty"`
 }
 
+type HijackedResponse struct {
+	Conn   net.Conn
+	Reader *bufio.Reader
+}
+
 // Container generic interface for a Container API
 type Container interface {
 	Login(ctx context.Context, username string, password string) error
@@ -46,6 +53,9 @@ type Container interface {
 	CancelBuild(ctx context.Context, buildID string) error
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
 	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
+	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)
+	ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error)
+	Attach(ctx context.Context, containerName string, shell string) (HijackedResponse, error)
 	StopContainerByID(ctx context.Context, containerName string, timeout int64) error
 	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error

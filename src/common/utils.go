@@ -18,6 +18,12 @@ func BuildRegistryImageName(registryURL string, mainRepositoryName string, image
 	return strings.ToLower(fmt.Sprintf("%s%s%s", registryURL, mainRepositoryName, imageName))
 }
 
+const topicPrefix = "re.mgmt"
+
+func BuildExternalApiTopic(serialNumber string, topic string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
+}
+
 func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, config *config.Config) {
 	publishContainer := BuildContainerName("pub", appKey, appName)
 	devContainerName := BuildContainerName(DEV, appKey, appName)

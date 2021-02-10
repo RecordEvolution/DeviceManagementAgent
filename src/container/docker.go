@@ -403,6 +403,7 @@ func (docker *Docker) Attach(ctx context.Context, containerName string, shell st
 		Stream: true,
 		Stdout: true,
 		Stderr: true,
+		Logs:   false,
 		Stdin:  true,
 	}
 
@@ -426,8 +427,6 @@ func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shel
 		Tty: true,
 	}
 
-	execStartOpts := types.ExecStartCheck{Tty: true}
-
 	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
 		return HijackedResponse{}, err
@@ -437,16 +436,13 @@ func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shel
 	if err != nil {
 		return HijackedResponse{}, err
 	}
-
-	err = docker.client.ContainerExecStart(ctx, respID.ID, execStartOpts)
-	if err != nil {
-		return HijackedResponse{}, err
-	}
+	fmt.Println("created exec")
 
 	response, err := docker.client.ContainerExecAttach(ctx, respID.ID, execOptions)
 	if err != nil {
 		return HijackedResponse{}, err
 	}
+	fmt.Println("attached to exec")
 
 	return HijackedResponse(response), nil
 }
