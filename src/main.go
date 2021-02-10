@@ -12,6 +12,7 @@ import (
 	"reagent/messenger"
 	"reagent/persistence"
 	"reagent/system"
+	"reagent/terminal"
 )
 
 func main() {
@@ -78,17 +79,30 @@ func main() {
 		fmt.Println(err)
 	}
 
+	terminalManager := terminal.TerminalManager{
+		Container: container,
+		Messenger: messenger,
+	}
+
 	external := api.External{
-		Messenger:    messenger,
-		StateMachine: stateMachine,
-		Config:       &generalConfig,
-		LogManager:   &logManager,
-		StateUpdater: stateUpdater,
-		StateStorer:  stateStorer,
+		StateMachine:    &stateMachine,
+		Config:          &generalConfig,
+		LogManager:      &logManager,
+		TerminalManager: &terminalManager,
+		StateUpdater:    &stateUpdater,
+		Messenger:       messenger,
+		StateStorer:     stateStorer,
 	}
 
 	external.RegisterAll()
+
+	appStates, err := stateStorer.GetAppStates()
+	if err != nil {
+		panic(err)
+	}
+
 	logManager.Init()
+	logManager.ReviveDeadLogs(appStates)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
