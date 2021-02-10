@@ -115,7 +115,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 
 		id := result.Arguments[0]
 		if id == nil {
-			fmt.Printf("app %s has no active subs.. skipping..", app.AppName)
+			fmt.Printf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
 			continue
 		}
 
