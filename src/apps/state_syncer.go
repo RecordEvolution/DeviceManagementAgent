@@ -1,6 +1,8 @@
 package apps
 
-import "fmt"
+import (
+	"github.com/rs/zerolog/log"
+)
 
 type StateSyncer struct {
 	StateMachine StateMachine
@@ -8,7 +10,7 @@ type StateSyncer struct {
 }
 
 func (su *StateSyncer) Sync() error {
-	fmt.Println("------------------------------------- STARTING DEVICE STATE SYNC -------------------------------------")
+	log.Info().Msg("Device Sync Initialized...")
 
 	payloads, err := su.StateUpdater.GetLatestRequestedStates(true)
 	if err != nil {

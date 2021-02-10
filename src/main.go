@@ -22,7 +22,7 @@ func main() {
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load reswarm config file")
+		log.Fatal().Stack().Err(err).Msg("failed to load reswarm config file")
 	}
 
 	generalConfig := config.Config{
@@ -33,12 +33,12 @@ func main() {
 	stateStorer, _ := persistence.NewSQLiteDb(&generalConfig)
 	err = stateStorer.Init()
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to initalize SQLite database")
+		log.Fatal().Stack().Err(err).Msg("failed to initalize SQLite database")
 	}
 
 	messenger, err := messenger.NewWamp(generalConfig)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to setup wamp connection")
+		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
 
 	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
@@ -75,7 +75,7 @@ func main() {
 	err = stateSyncer.Sync()
 
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to run sync")
+		log.Fatal().Stack().Err(err).Msg("failed to run sync")
 	}
 
 	terminalManager := terminal.New(messenger, container)
@@ -94,7 +94,7 @@ func main() {
 
 	appStates, err := stateStorer.GetAppStates()
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to get local app states")
+		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
 	}
 
 	logManager.Init()

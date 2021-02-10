@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 )
@@ -60,7 +59,6 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 
 	// check if the image has a running container
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
-	fmt.Println("found ", cont.ID)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err

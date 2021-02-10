@@ -49,7 +49,7 @@ type Config struct {
 func GetCliArguments() *CommandLineArguments {
 	logFile := flag.String("logFile", "/Users/ruben/Desktop/reagent.log",
 		"Log file used by the ReAgent to store all its log messages")
-	debug := flag.Bool("debug", true, "sets the log level to debug")
+	debug := flag.Bool("debug", false, "sets the log level to debug")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	appsBuildDirectory := flag.String("appsDirectory", "/Users/ruben/Desktop", "sets the directory where app build files will be stored")
 	compressedBuildExtension := flag.String("compressedBuildExtension", ".tgz", "sets the extension used to decompress the transfered build files")

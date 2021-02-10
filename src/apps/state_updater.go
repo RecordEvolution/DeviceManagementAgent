@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"reagent/common"
 	"reagent/container"
 	"reagent/messenger"
 	"reagent/persistence"
 	"regexp"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 type StateUpdater struct {
@@ -35,7 +38,7 @@ func (sc *StateUpdater) UpdateLocalRequestedStates() error {
 }
 
 func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.TransitionPayload) error) error {
-	fmt.Printf("Verifying if app (%d, %s) is in latest state...\n", app.AppKey, app.Stage)
+	log.Printf("Verifying if app (%d, %s) is in latest state...", app.AppKey, app.Stage)
 
 	requestedStatePayload, err := sc.StateStorer.GetRequestedState(app)
 	if err != nil {
@@ -44,12 +47,12 @@ func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.
 
 	// TODO: what to do when the app transition fails? How do we handle that?
 	if app.CurrentState == common.FAILED {
-		fmt.Println("App transition finished in a failed state")
+		log.Print("App transition finished in a failed state")
 		return nil
 	}
 
 	if requestedStatePayload.RequestedState != app.CurrentState {
-		fmt.Printf("App (%d, %s) is not in latest state, transitioning to %s...\n", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
+		log.Printf("App (%d, %s) is not in latest state, transitioning to %s...", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
 
 		// TODO: get token only when neccessary
 		token, err := sc.GetRegistryToken(requestedStatePayload.RequestorAccountKey)
@@ -64,7 +67,7 @@ func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.
 		}
 	}
 
-	fmt.Printf("App (%d, %s) is in latest state!\n", app.AppKey, app.Stage)
+	log.Printf("App (%d, %s) is in latest state!", app.AppKey, app.Stage)
 	return nil
 }
 
@@ -153,10 +156,10 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 
 func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
 	err := sc.UpdateRemoteAppState(app, stateToSet)
-	fmt.Printf("Set remote state to %s for %s (%s) \n", stateToSet, app.AppName, app.Stage)
+	log.Printf("Set remote state to %s for %s (%s)", stateToSet, app.AppName, app.Stage)
 	if err != nil {
 		// Fail without returning, since it's ok to miss remote app state update
-		fmt.Println("Failed to update remote app state", err)
+		log.Warn().Stack().Err(err).Msg("Failed to update remote app state")
 	}
 
 	return sc.StateStorer.UpdateAppState(app, stateToSet)

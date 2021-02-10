@@ -1,11 +1,14 @@
 package logging
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"reagent/config"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/pkgerrors"
 )
 
 func SetupLogger(cliArgs *config.CommandLineArguments) {
@@ -14,14 +17,34 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 		log.Error().Err(err).Msg("error occured while trying to open log file")
 	}
 
+	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, file)
-	log.Logger = log.Output(multiWriter)
+	logger := log.Output(multiWriter)
+	log.Logger = logger
 
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if cliArgs.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 
-	log.Info().Msgf("%+v", *cliArgs)
+	prettyArgs, err := format(*cliArgs)
+	if err != nil {
+		prettyArgs = fmt.Sprintf("%+v", *cliArgs)
+	}
+
+	log.Debug().Msgf("REAgent CLI Arguments:\n %s", prettyArgs)
+}
+
+func format(data interface{}) (string, error) {
+	var p []byte
+	//    var err := error
+	p, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+
+	return string(p), nil
 }

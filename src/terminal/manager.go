@@ -69,8 +69,6 @@ func (tm *TerminalManager) createSession(containerName string, shell string) err
 		return err
 	}
 
-	fmt.Printf("%+v\n", hijackedResponse)
-
 	session := TerminalSession{
 		Session:       &hijackedResponse,
 		ContainerName: containerName,

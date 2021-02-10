@@ -7,6 +7,8 @@ import (
 	"reagent/logging"
 	"reflect"
 	"runtime"
+
+	"github.com/rs/zerolog/log"
 )
 
 type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
@@ -202,7 +204,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 
 	// ensure multiple transitions in parallel for the same app are not possible
 	if app.IsTransitioning() {
-		fmt.Printf("App with name %s and stage %s is already transitioning \n", app.AppName, app.Stage)
+		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
 	}
 
@@ -215,7 +217,7 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	// If appState is already up to date we should do nothing
 	// It's possible to go from a built/published state to a built/published state since both represent a present state
 	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
-		fmt.Printf("app %s (%s) is already on latest state (%s) \n", app.AppName, app.Stage, payload.RequestedState)
+		log.Warn().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
 		return nil
 	}
 
@@ -227,11 +229,11 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	}
 
 	if transitionFunc == nil {
-		fmt.Printf("Not yet implemented transition from %s to %s\n", app.CurrentState, payload.RequestedState)
+		log.Warn().Msgf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
 		return nil
 	}
 
-	fmt.Printf("Executing transition from %s to %s\n", app.CurrentState, payload.RequestedState)
+	log.Info().Msgf("Executing transition from %s to %s", app.CurrentState, payload.RequestedState)
 
 	errChannel := make(chan error)
 	go func() {
@@ -268,14 +270,12 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 
 		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
 		if err == nil {
-			fmt.Println("Successfully finished transaction function:", funcName)
+			log.Info().Msgf("Successfully finished transaction function:", funcName)
 			return
 		}
 
-		fmt.Printf("An error occured during transition from %s to %s using %s\n", app.CurrentState, payload.RequestedState, funcName)
-		fmt.Println("The current app state will has been set to FAILED")
-		fmt.Println()
-		fmt.Println(err)
+		log.Error().Msgf("An error occured during transition from %s to %s using %s", app.CurrentState, payload.RequestedState, funcName)
+		log.Error().Err(err).Msg("The current app state will has been set to FAILED")
 	}()
 
 	return nil

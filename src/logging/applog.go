@@ -14,6 +14,8 @@ import (
 	"reagent/persistence"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func GetBuildLogs(appid string) string {
@@ -97,7 +99,7 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) {
 
 	}
 
-	fmt.Println("goroutine has finshed publishing logs for", subscription.ContainerName)
+	log.Print("goroutine has finshed publishing logs for", subscription.ContainerName)
 
 	subscription.Streaming = false
 }
@@ -116,7 +118,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 
 		id := result.Arguments[0]
 		if id == nil {
-			fmt.Printf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
+			log.Printf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
 			continue
 		}
 
@@ -157,7 +159,7 @@ func (lm *LogManager) Init() error {
 		idString := fmt.Sprint(id)
 		if lm.ActiveLogs[idString] != nil {
 			// this shouldn't happen if the subscriptions are properly removed
-			fmt.Println("It somehow already exists?")
+			log.Warn().Msg("The subscription somehow already exists, this should never happen")
 			return
 		}
 
@@ -177,17 +179,17 @@ func (lm *LogManager) Init() error {
 		activeSubscription := lm.ActiveLogs[idString]
 
 		if activeSubscription.Stream == nil {
-			fmt.Println("stream was empty, nothing to close")
+			log.Print("stream was empty, nothing to close")
 		} else {
 			// cancel the io stream that is active
 			// TODO: figure out way to handle errors inside a subscription callback, however this error would be rare
 			err := activeSubscription.Stream.Close()
 			if err != nil {
-				fmt.Println("error occured while trying to close stream")
+				log.Print("error occured while trying to close stream")
 				return
 			}
 
-			fmt.Println("Closed active stream for", activeSubscription.ContainerName)
+			log.Print("Closed active stream for", activeSubscription.ContainerName)
 		}
 
 		// remove entry from active logs map
