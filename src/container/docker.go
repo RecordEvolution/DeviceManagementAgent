@@ -167,6 +167,9 @@ func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID strin
 
 	err := docker.client.ContainerRemove(ctx, containerID, optionStruct)
 	if err != nil {
+		if strings.Contains(err.Error(), "No such container") {
+			return errdefs.ContainerNotFound(err)
+		}
 		if strings.Contains(err.Error(), "is already in progress") {
 			return errdefs.ContainerRemovalAlreadyInProgress(err)
 		}
@@ -393,6 +396,88 @@ func (docker *Docker) WaitForContainerByID(ctx context.Context, containerID stri
 	case status := <-statusChan:
 		return status.StatusCode, nil
 	}
+}
+
+func (docker *Docker) Attach(ctx context.Context, containerName string, shell string) (HijackedResponse, error) {
+	attachOpts := types.ContainerAttachOptions{
+		Stream: true,
+		Stdout: true,
+		Stderr: true,
+		Stdin:  true,
+	}
+
+	response, err := docker.client.ContainerAttach(ctx, containerName, attachOpts)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	return HijackedResponse(response), nil
+}
+
+func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error) {
+	execConfig := types.ExecConfig{
+		AttachStderr: true,
+		AttachStdout: true,
+		AttachStdin:  true,
+		Tty:          true,
+		Cmd:          []string{shell},
+	}
+	execOptions := types.ExecStartCheck{
+		Tty: true,
+	}
+
+	execStartOpts := types.ExecStartCheck{Tty: true}
+
+	container, err := docker.GetContainer(ctx, containerName)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	respID, err := docker.client.ContainerExecCreate(ctx, container.ID, execConfig)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	err = docker.client.ContainerExecStart(ctx, respID.ID, execStartOpts)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	response, err := docker.client.ContainerExecAttach(ctx, respID.ID, execOptions)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	return HijackedResponse(response), nil
+}
+
+func (docker *Docker) ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error) {
+	execConfig := types.ExecConfig{
+		AttachStderr: true, AttachStdout: true,
+		Tty: false,
+		Cmd: cmd,
+	}
+	execOptions := types.ExecStartCheck{}
+
+	container, err := docker.GetContainer(ctx, containerName)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	respID, err := docker.client.ContainerExecCreate(ctx, container.ID, execConfig)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	response, err := docker.client.ContainerExecAttach(ctx, respID.ID, execOptions)
+	if err != nil {
+		return HijackedResponse{}, err
+	}
+
+	return HijackedResponse{
+		Conn:   response.Conn,
+		Reader: response.Reader,
+	}, nil
 }
 
 func (docker *Docker) CreateContainer(ctx context.Context,

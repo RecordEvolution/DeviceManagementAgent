@@ -140,7 +140,8 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		if removeContainerErr != nil {
 			// It's possible we're trying to remove the container when it's already being removed
 			// RUNNING -> STOPPED -> RUNNING
-			if !errdefs.IsContainerRemovalAlreadyInProgress(removeContainerErr) {
+			// It's also possible the container does not exist yet, if it's the first time you're building the app
+			if !errdefs.IsContainerRemovalAlreadyInProgress(removeContainerErr) && !errdefs.IsContainerNotFound(removeContainerErr) {
 				return removeContainerErr
 			}
 		}
