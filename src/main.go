@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"reagent/api"
@@ -13,33 +12,33 @@ import (
 	"reagent/persistence"
 	"reagent/system"
 	"reagent/terminal"
+
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
-	reswarmConfig, err := config.LoadReswarmConfig("./demo_demo_swarm_TestDevice.reswarm")
-	if err != nil {
-		panic(err)
-	}
+	cliArgs := config.GetCliArguments()
+	logging.SetupLogger(cliArgs)
 
-	cliArgs := config.CommandLineArguments{
-		AppBuildsDirectory:       "/Users/ruben/Desktop",
-		CompressedBuildExtension: ".tgz",
+	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to load reswarm config file")
 	}
 
 	generalConfig := config.Config{
 		ReswarmConfig:        reswarmConfig,
-		CommandLineArguments: &cliArgs,
+		CommandLineArguments: cliArgs,
 	}
 
 	stateStorer, _ := persistence.NewSQLiteDb(&generalConfig)
 	err = stateStorer.Init()
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to initalize SQLite database")
 	}
 
 	messenger, err := messenger.NewWamp(generalConfig)
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to setup wamp connection")
 	}
 
 	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
@@ -76,13 +75,10 @@ func main() {
 	err = stateSyncer.Sync()
 
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal().Err(err).Msg("failed to run sync")
 	}
 
-	terminalManager := terminal.TerminalManager{
-		Container: container,
-		Messenger: messenger,
-	}
+	terminalManager := terminal.New(messenger, container)
 
 	external := api.External{
 		StateMachine:    &stateMachine,
@@ -98,7 +94,7 @@ func main() {
 
 	appStates, err := stateStorer.GetAppStates()
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to get local app states")
 	}
 
 	logManager.Init()

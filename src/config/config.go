@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"flag"
 	"io/ioutil"
 	"os"
 )
@@ -34,11 +35,39 @@ type ReswarmConfig struct {
 type CommandLineArguments struct {
 	AppBuildsDirectory       string
 	CompressedBuildExtension string
+	Debug                    bool
+	DebugMessaging           bool
+	LogFileLocation          string
+	ConfigFileLocation       string
 }
 
 type Config struct {
 	ReswarmConfig        *ReswarmConfig
 	CommandLineArguments *CommandLineArguments
+}
+
+func GetCliArguments() *CommandLineArguments {
+	logFile := flag.String("logFile", "/Users/ruben/Desktop/reagent.log",
+		"Log file used by the ReAgent to store all its log messages")
+	debug := flag.Bool("debug", true, "sets the log level to debug")
+	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
+	appsBuildDirectory := flag.String("appsDirectory", "/Users/ruben/Desktop", "sets the directory where app build files will be stored")
+	compressedBuildExtension := flag.String("compressedBuildExtension", ".tgz", "sets the extension used to decompress the transfered build files")
+	cfgFile := flag.String("config", "./demo_demo_swarm_TestDevice.reswarm",
+		"Configuration file of IoT device running on localhost")
+
+	flag.Parse()
+
+	cliArgs := CommandLineArguments{
+		AppBuildsDirectory:       *appsBuildDirectory,
+		CompressedBuildExtension: *compressedBuildExtension,
+		Debug:                    *debug,
+		DebugMessaging:           *debugMessaging,
+		LogFileLocation:          *logFile,
+		ConfigFileLocation:       *cfgFile,
+	}
+
+	return &cliArgs
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path
