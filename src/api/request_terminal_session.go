@@ -33,9 +33,10 @@ func (ex *External) requestTerminalSessHandler(ctx context.Context, response mes
 
 	// this will be used by the frontend to register/call to the terminal session
 	responseData := common.Dict{
-		"dataTopic":  termSess.DataTopic,
-		"writeTopic": termSess.WriteTopic,
-		"sessionID":  termSess.SessionID,
+		"dataTopic":   termSess.DataTopic,
+		"writeTopic":  termSess.WriteTopic,
+		"resizeTopic": termSess.ResizeTopic,
+		"sessionID":   termSess.SessionID,
 	}
 
 	return &messenger.InvokeResult{Arguments: []interface{}{responseData}}, nil

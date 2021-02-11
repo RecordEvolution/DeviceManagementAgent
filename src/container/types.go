@@ -41,14 +41,21 @@ type ImageResult struct {
 	RepoTags    []string          `json:"repoTags,omitempty"`
 }
 
+type TtyDimension struct {
+	Height uint
+	Width  uint
+}
+
 type HijackedResponse struct {
 	Conn   net.Conn
 	Reader *bufio.Reader
+	ExecID string
 }
 
 // Container generic interface for a Container API
 type Container interface {
 	Login(ctx context.Context, username string, password string) error
+	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)

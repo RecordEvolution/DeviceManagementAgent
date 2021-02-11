@@ -412,7 +412,17 @@ func (docker *Docker) Attach(ctx context.Context, containerName string, shell st
 		return HijackedResponse{}, err
 	}
 
-	return HijackedResponse(response), nil
+	return HijackedResponse{
+		Conn:   response.Conn,
+		Reader: response.Reader,
+	}, nil
+}
+
+func (docker *Docker) ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error {
+	return docker.client.ContainerExecResize(ctx, execID, types.ResizeOptions{
+		Height: dimension.Height,
+		Width:  dimension.Width,
+	})
 }
 
 func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error) {
@@ -445,6 +455,7 @@ func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shel
 	return HijackedResponse{
 		Conn:   response.Conn,
 		Reader: response.Reader,
+		ExecID: respID.ID,
 	}, nil
 }
 
@@ -475,6 +486,7 @@ func (docker *Docker) ExecCommand(ctx context.Context, containerName string, cmd
 	return HijackedResponse{
 		Conn:   response.Conn,
 		Reader: response.Reader,
+		ExecID: respID.ID,
 	}, nil
 }
 

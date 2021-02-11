@@ -38,7 +38,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 	}
 }
 
-// RegisterAll registers all the RPCs/Subscriptions exposed by the reagent
+// RegisterAll registers all the static RPCs/Subscriptions exposed by the reagent
 func (ex *External) RegisterAll() {
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 	topicHandlerMap := ex.getTopicHandlerMap()

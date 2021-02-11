@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"reagent/common"
 	"reagent/container"
+	"reagent/logging"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"regexp"
@@ -23,6 +24,7 @@ type TerminalSession struct {
 	in            chan string
 	DataTopic     string
 	WriteTopic    string
+	ResizeTopic   string
 }
 
 func NewSession(containerName string, serialNumber string, hijackedResponse *container.HijackedResponse) *TerminalSession {
@@ -44,8 +46,12 @@ func (termSess *TerminalSession) init(serialNumber string) *TerminalSession {
 	// topic that the data will be publish to
 	dataTopic := common.BuildExternalApiTopic(serialNumber, fmt.Sprintf("term_data.%s.%s", termSess.ContainerName, sessionID))
 
+	resizeTopic := common.BuildExternalApiTopic(serialNumber, fmt.Sprintf("term_resize.%s.%s", termSess.ContainerName, sessionID))
+
 	termSess.DataTopic = dataTopic
 	termSess.WriteTopic = writeTopic
+	termSess.ResizeTopic = resizeTopic
+
 	termSess.SessionID = sessionID
 	termSess.in = inChan
 
@@ -90,9 +96,52 @@ func (tm *TerminalManager) getShell(containerName string) (string, error) {
 	return defaultShell, nil
 }
 
-func (tm *TerminalManager) initSessionChannels(termSess *TerminalSession) error {
-	// Register in channel (receives data from WAMP sends it to channel)
-	err := tm.Messenger.Register(topics.Topic(termSess.WriteTopic), func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+func (tm *TerminalManager) registerResizeTopic(termSess *TerminalSession) error {
+	return tm.Messenger.Register(topics.Topic(termSess.ResizeTopic), func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+		payloadArg := invocation.Arguments[0]
+		payload, ok := payloadArg.(map[string]interface{})
+		if !ok {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"error": "failed to parse data"},
+				Err:         string(wamp.ErrInvalidURI),
+			}
+		}
+
+		logging.PrettyPrintDebug(payload)
+
+		heightKw := payload["height"]
+		widthKw := payload["width"]
+
+		height, ok := heightKw.(uint64)
+		if !ok {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"error": "failed to parse height"},
+				Err:         string(wamp.ErrCanceled),
+			}
+		}
+
+		width, ok := widthKw.(uint64)
+		if !ok {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"error": "failed to parse width"},
+				Err:         string(wamp.ErrCanceled),
+			}
+		}
+
+		err := tm.ResizeTerminal(termSess.SessionID, container.TtyDimension{Height: uint(height), Width: uint(width)})
+		if err != nil {
+			return messenger.InvokeResult{
+				ArgumentsKw: common.Dict{"error": err.Error()},
+				Err:         string(wamp.ErrCanceled),
+			}
+		}
+
+		return messenger.InvokeResult{}
+	}, nil)
+}
+
+func (tm *TerminalManager) registerWriteTopic(termSess *TerminalSession) error {
+	return tm.Messenger.Register(topics.Topic(termSess.WriteTopic), func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
 		dataArg := invocation.Arguments[0]
 		data, ok := dataArg.(string)
 		if !ok {
@@ -106,7 +155,17 @@ func (tm *TerminalManager) initSessionChannels(termSess *TerminalSession) error 
 
 		return messenger.InvokeResult{}
 	}, nil)
+}
 
+func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSession) error {
+	// Register in channel (receives data from WAMP sends it to channel)
+
+	err := tm.registerWriteTopic(termSess)
+	if err != nil {
+		return err
+	}
+
+	err = tm.registerResizeTopic(termSess)
 	if err != nil {
 		return err
 	}
@@ -139,7 +198,7 @@ func (tm *TerminalManager) initSessionChannels(termSess *TerminalSession) error 
 
 			if nr > 0 {
 				bytesToPublish := buf[0:nr]
-				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{string(bytesToPublish)}, nil, nil, nil)
+				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, nil, nil)
 				if er != nil {
 					err = er
 					break
@@ -155,14 +214,32 @@ func (tm *TerminalManager) initSessionChannels(termSess *TerminalSession) error 
 	return nil
 }
 
-func (tm *TerminalManager) StartTerminalSession(sessionID string) error {
+func (tm *TerminalManager) getSession(sessionID string) (*TerminalSession, error) {
 	aTSession := tm.ActiveSessions[sessionID]
 
 	if aTSession == nil {
-		return errors.New("session was not found")
+		return nil, errors.New("session was not found")
+	}
+	return aTSession, nil
+}
+
+func (tm *TerminalManager) ResizeTerminal(sessionID string, dimension container.TtyDimension) error {
+	termSession, err := tm.getSession(sessionID)
+	if err != nil {
+		return err
 	}
 
-	err := tm.initSessionChannels(aTSession)
+	ctx := context.Background()
+	return tm.Container.ResizeExecContainer(ctx, termSession.Session.ExecID, dimension)
+}
+
+func (tm *TerminalManager) StartTerminalSession(sessionID string) error {
+	session, err := tm.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+
+	err = tm.initTerminalMessagingChannels(session)
 	if err != nil {
 		return err
 	}
