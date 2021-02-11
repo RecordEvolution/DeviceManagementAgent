@@ -3,15 +3,12 @@ package api
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"os"
-	"reagent/common"
 	"reagent/messenger"
-
-	"github.com/gammazero/nexus/v3/wamp"
 )
 
-func (ex *External) writeToFileHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+func (ex *External) writeToFileHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	args := response.Arguments
 
 	// Matches file_transfer.ts payload
@@ -23,32 +20,22 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 
 	name, ok := nameArg.(string)
 	if !ok {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse name argument %s", nameArg)},
-			Err:         string(wamp.ErrInvalidArgument),
-		}
+		return nil, errors.New("Failed to parse name argument")
 	}
 
 	chunk, ok := chunkArg.(string)
 	if !ok {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": fmt.Sprintf("Failed to parse chunk argument %s", chunkArg)},
-			Err:         string(wamp.ErrInvalidArgument),
-		}
+		return nil, errors.New("Failed to parse chunk argument")
 	}
 
 	filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
 	err := write(name, filePath, chunk)
 
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			// TODO: show different URI error based on error that was returned upwards
-			Err: string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
-	return messenger.InvokeResult{}
+	return &messenger.InvokeResult{}, nil
 }
 
 // Write decodes hex encoded data chunks and writes to a file.

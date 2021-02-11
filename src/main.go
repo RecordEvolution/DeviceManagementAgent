@@ -78,7 +78,7 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to run sync")
 	}
 
-	terminalManager := terminal.New(messenger, container)
+	terminalManager := terminal.NewManager(messenger, container)
 
 	external := api.External{
 		StateMachine:    &stateMachine,

@@ -436,22 +436,24 @@ func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shel
 	if err != nil {
 		return HijackedResponse{}, err
 	}
-	fmt.Println("created exec")
 
 	response, err := docker.client.ContainerExecAttach(ctx, respID.ID, execOptions)
 	if err != nil {
 		return HijackedResponse{}, err
 	}
-	fmt.Println("attached to exec")
 
-	return HijackedResponse(response), nil
+	return HijackedResponse{
+		Conn:   response.Conn,
+		Reader: response.Reader,
+	}, nil
 }
 
 func (docker *Docker) ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error) {
 	execConfig := types.ExecConfig{
-		AttachStderr: true, AttachStdout: true,
-		Tty: false,
-		Cmd: cmd,
+		AttachStderr: true,
+		AttachStdout: true,
+		Tty:          false,
+		Cmd:          cmd,
 	}
 	execOptions := types.ExecStartCheck{}
 

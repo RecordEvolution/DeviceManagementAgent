@@ -9,9 +9,11 @@ require (
 	github.com/docker/docker v20.10.2+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
+	github.com/gammazero/nexus v2.1.0+incompatible
 	github.com/gammazero/nexus/v3 v3.0.3
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/go-cmp v0.5.4 // indirect
+	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/mattn/go-sqlite3 v1.14.6
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect

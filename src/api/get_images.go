@@ -2,21 +2,14 @@ package api
 
 import (
 	"context"
-	"reagent/common"
 	"reagent/messenger"
-
-	"github.com/gammazero/nexus/v3/wamp"
 )
 
-func (ex *External) getImagesHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+func (ex *External) getImagesHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	images, err := ex.StateMachine.Container.ListImages(ctx, nil)
 
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			// TODO: show different URI error based on error that was returned upwards
-			Err: string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
 	// See https://github.com/golang/go/wiki/InterfaceSlice
@@ -25,5 +18,5 @@ func (ex *External) getImagesHandler(ctx context.Context, response messenger.Res
 		args = append(args, image)
 	}
 
-	return messenger.InvokeResult{Arguments: args}
+	return &messenger.InvokeResult{Arguments: args}, nil
 }

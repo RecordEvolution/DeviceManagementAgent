@@ -3,7 +3,6 @@ package common
 import "reagent/config"
 
 type Dict map[string]interface{}
-
 type App struct {
 	AppKey              uint64
 	DeviceToAppKey      uint64

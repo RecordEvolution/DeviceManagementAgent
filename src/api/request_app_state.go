@@ -7,48 +7,33 @@ import (
 	"reagent/config"
 	"reagent/messenger"
 	"strconv"
-
-	"github.com/gammazero/nexus/v3/wamp"
 )
 
-func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) messenger.InvokeResult {
+func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	payload, err := responseToTransitionPayload(ex.Config, response)
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			// TODO: show different URI error based on error that was returned upwards
-			Err: string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
 	// TODO: only fetch token when it's required
 	// Before executing the state transition, fetch a registry token when required
 	token, err := ex.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			Err:         string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
 	err = ex.StateStorer.UpsertRequestedStateChange(payload)
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			Err:         string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
 	payload.RegisteryToken = token
 	err = ex.StateMachine.RequestAppState(payload)
 	if err != nil {
-		return messenger.InvokeResult{
-			ArgumentsKw: common.Dict{"cause": err.Error()},
-			Err:         string(wamp.ErrInvalidArgument),
-		}
+		return nil, err
 	}
 
-	return messenger.InvokeResult{} // Return empty result
+	return &messenger.InvokeResult{}, nil
 }
 
 // responseToTransitionPayload parses a Messenger response to a generic common.TransitionPayload struct.

@@ -96,3 +96,30 @@ func ContainerRemovalAlreadyInProgress(err error) error {
 
 	return ErrContainerRemovalAlreadyInProgress{err}
 }
+
+/*-----------*/
+
+type ErrRegistrationHandlerFailed struct {
+	err error
+	URI string
+}
+
+func (e ErrRegistrationHandlerFailed) Error() string {
+	return e.err.Error()
+}
+
+func (e ErrRegistrationHandlerFailed) Cause() error {
+	return e.err
+}
+
+func (e ErrRegistrationHandlerFailed) Unwrap() error {
+	return e.err
+}
+
+func RegistrationHandlerFailed(err error, URI string) error {
+	if err == nil || IsRegistrationHandlerFailed(err) {
+		return err
+	}
+
+	return ErrRegistrationHandlerFailed{err, URI}
+}

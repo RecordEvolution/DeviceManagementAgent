@@ -7,6 +7,7 @@ import (
 	"reagent/config"
 	"reagent/logging"
 	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/persistence"
 	"reagent/terminal"
 )
@@ -23,13 +24,17 @@ type External struct {
 	Config          *config.Config
 }
 
-func (ex *External) getTopicHandlerMap() map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult {
-	return map[string]func(ctx context.Context, response messenger.Result) messenger.InvokeResult{
-		string(common.TopicRequestAppState): ex.requestAppStateHandler,
-		string(common.TopicWriteToFile):     ex.writeToFileHandler,
-		string(common.TopicHandshake):       ex.deviceHandshakeHandler,
-		string(common.TopicContainerImages): ex.getImagesHandler,
-		string(common.TopicStartTerminal):   ex.startTerminalHandler,
+// RegistrationHandler is the handler that gets executed whenever a registered topic gets called.
+type RegistrationHandler = func(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error)
+
+func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
+	return map[topics.Topic]RegistrationHandler{
+		topics.TopicRequestAppState:        ex.requestAppStateHandler,
+		topics.TopicWriteToFile:            ex.writeToFileHandler,
+		topics.TopicHandshake:              ex.deviceHandshakeHandler,
+		topics.TopicContainerImages:        ex.getImagesHandler,
+		topics.TopicRequestTerminalSession: ex.requestTerminalSessHandler,
+		topics.TopicStartTerminalSession:   ex.startTerminalSessHandler,
 	}
 }
 
@@ -39,7 +44,23 @@ func (ex *External) RegisterAll() {
 	topicHandlerMap := ex.getTopicHandlerMap()
 	for topic, handler := range topicHandlerMap {
 		// will register all topics, e.g.: re.mgmt.request_app_state
-		fullTopic := common.BuildExternalApiTopic(serialNumber, topic)
-		ex.Messenger.Register(fullTopic, handler, nil)
+		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
+		ex.Messenger.Register(topics.Topic(fullTopic), wrapWithErrorHandler(handler), nil)
+	}
+}
+
+func wrapWithErrorHandler(registrationHandler RegistrationHandler) func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+	return func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+		invokeResult, err := registrationHandler(ctx, invocation)
+		if err != nil {
+			return messenger.InvokeResult{
+				Err: "wamp.error.canceled",
+				Arguments: []interface{}{
+					common.Dict{"error": err.Error()},
+				},
+			}
+		}
+
+		return *invokeResult
 	}
 }

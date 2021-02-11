@@ -24,3 +24,8 @@ func IsContainerRemovalAlreadyInProgress(err error) bool {
 	_, ok := err.(ErrContainerRemovalAlreadyInProgress)
 	return ok
 }
+
+func IsRegistrationHandlerFailed(err error) bool {
+	_, ok := err.(ErrContainerRemovalAlreadyInProgress)
+	return ok
+}

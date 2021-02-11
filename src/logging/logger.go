@@ -37,6 +37,15 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 	log.Debug().Msgf("REAgent CLI Arguments:\n %s", prettyArgs)
 }
 
+func PrettyPrintDebug(data interface{}) {
+	pretty, err := format(data)
+	if err != nil {
+		pretty = fmt.Sprintf("%+v", pretty)
+	}
+
+	log.Debug().Msg(pretty)
+}
+
 func format(data interface{}) (string, error) {
 	var p []byte
 	//    var err := error

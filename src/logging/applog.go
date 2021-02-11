@@ -11,6 +11,7 @@ import (
 	"reagent/container"
 	"reagent/errdefs"
 	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/persistence"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) {
 	for scanner.Scan() {
 		chunk := scanner.Text()
 
-		err := lm.Messenger.Publish(topic, []interface{}{chunk}, nil, nil)
+		err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
 		if err != nil {
 			return
 		}
@@ -111,7 +112,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 		topic := lm.buildTopic(containerName)
 
 		ctx := context.Background()
-		result, err := lm.Messenger.Call(ctx, common.TopicMetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
+		result, err := lm.Messenger.Call(ctx, topics.TopicMetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -131,7 +132,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 func (lm *LogManager) Init() error {
 	lm.ActiveLogs = make(map[string]*LogSubscription)
 
-	err := lm.Messenger.Subscribe(common.TopicMetaEventSubOnCreate, func(r messenger.Result) {
+	err := lm.Messenger.Subscribe(topics.TopicMetaEventSubOnCreate, func(r messenger.Result) {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
 		subscriptionArg := r.Arguments[1] // the id of the subscription that was created
 		subscription, ok := subscriptionArg.(map[string]interface{})
@@ -167,7 +168,7 @@ func (lm *LogManager) Init() error {
 
 	}, nil)
 
-	err = lm.Messenger.Subscribe(common.TopicMetaEventSubOnDelete, func(r messenger.Result) {
+	err = lm.Messenger.Subscribe(topics.TopicMetaEventSubOnDelete, func(r messenger.Result) {
 		_ = r.Arguments[0]   // the id of the client session that used to be listening
 		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
 		idString := fmt.Sprint(id)
@@ -280,7 +281,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		args := make([]interface{}, 0)
 		args = append(args, entry)
 
-		err = lm.Messenger.Publish(topic, args, nil, nil)
+		err = lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -310,7 +311,7 @@ func (lm *LogManager) Write(containerName string, logType LogType, text string) 
 	args := make([]interface{}, 0)
 	args = append(args, entry)
 
-	err := lm.Messenger.Publish(topic, args, nil, nil)
+	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
 	if err != nil {
 		return err
 	}

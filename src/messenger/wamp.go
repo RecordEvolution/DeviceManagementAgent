@@ -8,6 +8,7 @@ import (
 
 	"reagent/common"
 	"reagent/config"
+	"reagent/messenger/topics"
 
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/wamp"
@@ -83,11 +84,11 @@ func NewWamp(config config.Config) (*WampSession, error) {
 	return &WampSession{client: client, config: config}, nil
 }
 
-func (wampSession *WampSession) Publish(topic string, args []interface{}, kwargs common.Dict, options common.Dict) error {
-	return wampSession.client.Publish(topic, wamp.Dict(options), args, wamp.Dict(kwargs))
+func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error {
+	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
-func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options common.Dict) error {
+func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result), options common.Dict) error {
 	handler := func(event *wamp.Event) {
 		cbEventMap := Result{
 			Subscription: uint64(event.Subscription),
@@ -99,25 +100,25 @@ func (wampSession *WampSession) Subscribe(topic string, cb func(Result), options
 		cb(cbEventMap)
 	}
 
-	return wampSession.client.Subscribe(topic, handler, wamp.Dict(options))
+	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
 }
 
 func (wampSession *WampSession) GetConfig() config.Config {
 	return wampSession.config
 }
 
-func (wampSession *WampSession) SubscriptionID(topic string) (id uint64, ok bool) {
-	subID, ok := wampSession.client.SubscriptionID(topic)
+func (wampSession *WampSession) SubscriptionID(topic topics.Topic) (id uint64, ok bool) {
+	subID, ok := wampSession.client.SubscriptionID(string(topic))
 	return uint64(subID), ok
 }
-func (wampSession *WampSession) RegistrationID(topic string) (id uint64, ok bool) {
-	subID, ok := wampSession.client.RegistrationID(topic)
+func (wampSession *WampSession) RegistrationID(topic topics.Topic) (id uint64, ok bool) {
+	subID, ok := wampSession.client.RegistrationID(string(topic))
 	return uint64(subID), ok
 }
 
 func (wampSession *WampSession) Call(
 	ctx context.Context,
-	topic string,
+	topic topics.Topic,
 	args []interface{},
 	kwargs common.Dict,
 	options common.Dict,
@@ -133,7 +134,7 @@ func (wampSession *WampSession) Call(
 		progCb(cbResultMap)
 	}
 
-	result, err := wampSession.client.Call(ctx, topic, wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+	result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
 
 	if err != nil {
 		return Result{}, err
@@ -149,7 +150,7 @@ func (wampSession *WampSession) Call(
 	return callResultMap, nil
 }
 
-func (wampSession *WampSession) Register(topic string, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error {
+func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Result{
@@ -166,7 +167,7 @@ func (wampSession *WampSession) Register(topic string, cb func(ctx context.Conte
 		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
 	}
 
-	err := wampSession.client.Register(topic, invocationHandler, wamp.Dict(options))
+	err := wampSession.client.Register(string(topic), invocationHandler, wamp.Dict(options))
 	if err != nil {
 		return err
 	}
