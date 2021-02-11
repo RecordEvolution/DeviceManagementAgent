@@ -184,7 +184,7 @@ func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.
 		"release_build":         app.ReleaseBuild,
 	}}
 
-	_, err := sc.Messenger.Call(ctx, topics.TopicSetActualAppOnDeviceState, payload, nil, nil, nil)
+	_, err := sc.Messenger.Call(ctx, topics.SetActualAppOnDeviceState, payload, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 	ctx := context.Background()
 	config := sc.Messenger.GetConfig()
 	args := []interface{}{common.Dict{"device_key": config.ReswarmConfig.DeviceKey}}
-	result, err := sc.Messenger.Call(ctx, topics.TopicGetRequestedAppStates, args, nil, nil, nil)
+	result, err := sc.Messenger.Call(ctx, topics.GetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
 		return []common.TransitionPayload{}, err
 	}
@@ -241,7 +241,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 func (sc *StateUpdater) GetRegistryToken(callerID uint64) (string, error) {
 	ctx := context.Background()
 	args := []interface{}{common.Dict{"callerID": callerID}}
-	resp, err := sc.Messenger.Call(ctx, topics.TopicGetRegistryToken, args, nil, nil, nil)
+	resp, err := sc.Messenger.Call(ctx, topics.GetRegistryToken, args, nil, nil, nil)
 	if err != nil {
 		return "", err
 	}

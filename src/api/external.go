@@ -29,12 +29,12 @@ type RegistrationHandler = func(ctx context.Context, response messenger.Result) 
 
 func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 	return map[topics.Topic]RegistrationHandler{
-		topics.TopicRequestAppState:        ex.requestAppStateHandler,
-		topics.TopicWriteToFile:            ex.writeToFileHandler,
-		topics.TopicHandshake:              ex.deviceHandshakeHandler,
-		topics.TopicContainerImages:        ex.getImagesHandler,
-		topics.TopicRequestTerminalSession: ex.requestTerminalSessHandler,
-		topics.TopicStartTerminalSession:   ex.startTerminalSessHandler,
+		topics.RequestAppState:        ex.requestAppStateHandler,
+		topics.WriteToFile:            ex.writeToFileHandler,
+		topics.Handshake:              ex.deviceHandshakeHandler,
+		topics.ContainerImages:        ex.getImagesHandler,
+		topics.RequestTerminalSession: ex.requestTerminalSessHandler,
+		topics.StartTerminalSession:   ex.startTerminalSessHandler,
 	}
 }
 

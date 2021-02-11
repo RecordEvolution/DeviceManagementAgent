@@ -112,7 +112,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 		topic := lm.buildTopic(containerName)
 
 		ctx := context.Background()
-		result, err := lm.Messenger.Call(ctx, topics.TopicMetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
+		result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 func (lm *LogManager) Init() error {
 	lm.ActiveLogs = make(map[string]*LogSubscription)
 
-	err := lm.Messenger.Subscribe(topics.TopicMetaEventSubOnCreate, func(r messenger.Result) {
+	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
 		subscriptionArg := r.Arguments[1] // the id of the subscription that was created
 		subscription, ok := subscriptionArg.(map[string]interface{})
@@ -168,7 +168,7 @@ func (lm *LogManager) Init() error {
 
 	}, nil)
 
-	err = lm.Messenger.Subscribe(topics.TopicMetaEventSubOnDelete, func(r messenger.Result) {
+	err = lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) {
 		_ = r.Arguments[0]   // the id of the client session that used to be listening
 		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
 		idString := fmt.Sprint(id)
