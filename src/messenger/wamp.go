@@ -124,18 +124,21 @@ func (wampSession *WampSession) Call(
 	options common.Dict,
 	progCb func(Result)) (Result, error) {
 
-	handler := func(result *wamp.Result) {
-		cbResultMap := Result{
-			Request:     uint64(result.Request),
-			Details:     common.Dict(result.Details),
-			Arguments:   []interface{}(result.Arguments),
-			ArgumentsKw: common.Dict(result.ArgumentsKw),
+	var handler func(result *wamp.Result)
+
+	if progCb != nil {
+		handler = func(result *wamp.Result) {
+			cbResultMap := Result{
+				Request:     uint64(result.Request),
+				Details:     common.Dict(result.Details),
+				Arguments:   []interface{}(result.Arguments),
+				ArgumentsKw: common.Dict(result.ArgumentsKw),
+			}
+			progCb(cbResultMap)
 		}
-		progCb(cbResultMap)
 	}
 
 	result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
-
 	if err != nil {
 		return Result{}, err
 	}
@@ -148,6 +151,10 @@ func (wampSession *WampSession) Call(
 	}
 
 	return callResultMap, nil
+}
+
+func (wampSession *WampSession) GetSessionID() uint64 {
+	return uint64(wampSession.client.ID())
 }
 
 func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error {
@@ -173,6 +180,14 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 	}
 
 	return nil
+}
+
+func (wampSession *WampSession) Unregister(topic topics.Topic) error {
+	return wampSession.client.Unregister(string(topic))
+}
+
+func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
+	return wampSession.client.Unsubscribe(string(topic))
 }
 
 func (wampSession *WampSession) Close() error {

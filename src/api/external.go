@@ -35,6 +35,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.ContainerImages:        ex.getImagesHandler,
 		topics.RequestTerminalSession: ex.requestTerminalSessHandler,
 		topics.StartTerminalSession:   ex.startTerminalSessHandler,
+		topics.StopTerminalSession:    ex.stopTerminalSession,
 	}
 }
 

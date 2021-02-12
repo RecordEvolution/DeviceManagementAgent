@@ -33,6 +33,9 @@ type Messenger interface {
 	Call(ctx context.Context, topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict, progCb func(Result)) (Result, error)
 	SubscriptionID(topic topics.Topic) (id uint64, ok bool)
 	RegistrationID(topic topics.Topic) (id uint64, ok bool)
+	Unregister(topic topics.Topic) error
+	Unsubscribe(topic topics.Topic) error
+	GetSessionID() uint64
 	GetConfig() config.Config
 	Close() error
 }

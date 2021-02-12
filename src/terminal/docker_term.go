@@ -11,17 +11,18 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"regexp"
+	"strings"
 
 	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 )
 
 type TerminalSession struct {
 	Session       *container.HijackedResponse
 	ContainerName string
 	SessionID     string
-	in            chan string
+	inputChan     chan string
+	errorChan     chan error
 	DataTopic     string
 	WriteTopic    string
 	ResizeTopic   string
@@ -39,6 +40,7 @@ func NewSession(containerName string, serialNumber string, hijackedResponse *con
 func (termSess *TerminalSession) init(serialNumber string) *TerminalSession {
 	sessionID := uuid.NewString()
 	inChan := make(chan string, 5)
+	errorChan := make(chan error, 2)
 
 	// topic that can be called to write data
 	writeTopic := common.BuildExternalApiTopic(serialNumber, fmt.Sprintf("term_write.%s.%s", termSess.ContainerName, sessionID))
@@ -53,7 +55,8 @@ func (termSess *TerminalSession) init(serialNumber string) *TerminalSession {
 	termSess.ResizeTopic = resizeTopic
 
 	termSess.SessionID = sessionID
-	termSess.in = inChan
+	termSess.inputChan = inChan
+	termSess.errorChan = errorChan
 
 	return termSess
 }
@@ -107,8 +110,6 @@ func (tm *TerminalManager) registerResizeTopic(termSess *TerminalSession) error 
 			}
 		}
 
-		logging.PrettyPrintDebug(payload)
-
 		heightKw := payload["height"]
 		widthKw := payload["width"]
 
@@ -151,7 +152,7 @@ func (tm *TerminalManager) registerWriteTopic(termSess *TerminalSession) error {
 			}
 		}
 
-		termSess.in <- data
+		termSess.inputChan <- data
 
 		return messenger.InvokeResult{}
 	}, nil)
@@ -172,12 +173,20 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 	// read incoming (WAMP) data from the channel and write it to the attached terminal
 	go func() {
+		defer termSess.Session.Conn.Close() // will close both read and write if goroutine breaks
+
+	exit:
 		for {
 			select {
-			case incomingData := <-termSess.in:
+			case incomingData, ok := <-termSess.inputChan: // will break if channel is closed
+				if !ok {
+					break exit
+				}
+
 				_, err := termSess.Session.Conn.Write([]byte(incomingData))
 				if err != nil {
-					log.Debug().Stack().Err(err).Msg("error")
+					termSess.errorChan <- err
+					return
 				}
 			}
 		}
@@ -186,14 +195,14 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 	// read outgoing data from the channel and 'publish' it (WAMP) to a given topic
 	go func() {
 		ctx := context.Background()
-		defer termSess.Session.Conn.Close()
-
 		buf := make([]byte, 32*1024)
+
+	exit:
 		for {
 			nr, er := termSess.Session.Reader.Read(buf)
 			if er != nil {
 				err = er
-				break
+				break exit
 			}
 
 			if nr > 0 {
@@ -201,13 +210,16 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, nil, nil)
 				if er != nil {
 					err = er
-					break
+					break exit
 				}
 			}
 		}
 
 		if err != nil {
-			log.Error().Err(err).Msg("error occured during publish")
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				termSess.errorChan <- err
+			}
+			return
 		}
 	}()
 
@@ -215,6 +227,8 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 }
 
 func (tm *TerminalManager) getSession(sessionID string) (*TerminalSession, error) {
+	logging.PrettyPrintDebug(tm.ActiveSessions)
+
 	aTSession := tm.ActiveSessions[sessionID]
 
 	if aTSession == nil {
@@ -231,6 +245,45 @@ func (tm *TerminalManager) ResizeTerminal(sessionID string, dimension container.
 
 	ctx := context.Background()
 	return tm.Container.ResizeExecContainer(ctx, termSession.Session.ExecID, dimension)
+}
+
+func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
+	// closes both reader and writer goroutine
+	close(session.inputChan)
+
+	_, ok := tm.Messenger.RegistrationID(topics.Topic(session.ResizeTopic))
+	if ok {
+		err := tm.Messenger.Unregister(topics.Topic(session.ResizeTopic))
+		if err != nil {
+			return err
+		}
+	}
+
+	_, ok = tm.Messenger.RegistrationID(topics.Topic(session.WriteTopic))
+	if ok {
+		err := tm.Messenger.Unregister(topics.Topic(session.WriteTopic))
+		if err != nil {
+			return err
+		}
+	}
+
+	delete(tm.ActiveSessions, session.SessionID)
+
+	return nil
+}
+
+func (tm *TerminalManager) StopTerminalSession(sessionID string) error {
+	session, err := tm.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+
+	err = tm.cleanupSession(session)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (tm *TerminalManager) StartTerminalSession(sessionID string) error {
@@ -264,11 +317,14 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 
 func NewManager(messenger messenger.Messenger, container container.Container) TerminalManager {
 	sessionsMap := make(map[string]*TerminalSession)
-	return TerminalManager{
+
+	manager := TerminalManager{
 		ActiveSessions: sessionsMap,
 		Messenger:      messenger,
 		Container:      container,
 	}
+
+	return manager
 }
 
 func (tm *TerminalManager) RequestTerminalSession(containerName string) (*TerminalSession, error) {
