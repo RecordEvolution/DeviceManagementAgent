@@ -202,11 +202,12 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {
 	return []string{
-		fmt.Sprintf("SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
+		fmt.Sprintf("DEVICE_SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
 		fmt.Sprintf("ENV=%s", environment),
-		fmt.Sprintf("DEVICE_KEY=%s", config.ReswarmConfig.DeviceKey),
-		fmt.Sprintf("SWARM_KEY=%s", config.ReswarmConfig.SwarmKey),
+		fmt.Sprintf("DEVICE_KEY=%d", config.ReswarmConfig.DeviceKey),
+		fmt.Sprintf("SWARM_KEY=%d", config.ReswarmConfig.SwarmKey),
 		fmt.Sprintf("DEVICE_SECRET=%s", config.ReswarmConfig.Secret),
+		fmt.Sprintf("DEVICE_NAME=%s", config.ReswarmConfig.Name),
 		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", config.ReswarmConfig.DeviceEndpointURL),
 	}
 }

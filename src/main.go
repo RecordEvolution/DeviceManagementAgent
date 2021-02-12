@@ -36,14 +36,14 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to initalize SQLite database")
 	}
 
-	messenger, err := messenger.NewWamp(generalConfig)
+	messenger, err := messenger.NewWamp(&generalConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
 
 	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
 
-	container, _ := container.NewDocker(generalConfig)
+	container, _ := container.NewDocker(&generalConfig)
 
 	stateUpdater := apps.StateUpdater{
 		StateStorer: stateStorer,
