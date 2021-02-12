@@ -18,14 +18,15 @@ import (
 )
 
 type TerminalSession struct {
-	Session       *container.HijackedResponse
-	ContainerName string
-	SessionID     string
-	inputChan     chan string
-	errorChan     chan error
-	DataTopic     string
-	WriteTopic    string
-	ResizeTopic   string
+	Session        *container.HijackedResponse
+	ContainerName  string
+	SessionID      string
+	RegistrationID uint64
+	inputChan      chan string
+	errorChan      chan error
+	DataTopic      string
+	WriteTopic     string
+	ResizeTopic    string
 }
 
 func NewSession(containerName string, serialNumber string, hijackedResponse *container.HijackedResponse) *TerminalSession {
@@ -286,11 +287,16 @@ func (tm *TerminalManager) StopTerminalSession(sessionID string) error {
 	return nil
 }
 
-func (tm *TerminalManager) StartTerminalSession(sessionID string) error {
+func (tm *TerminalManager) StartTerminalSession(sessionID string, registrationID uint64) error {
 	session, err := tm.getSession(sessionID)
 	if err != nil {
 		return err
 	}
+
+	// if the registration gets unregistered without stop_terminal_session being called, we need to be able to identify session
+	// this registration ID will be used to identify the active session and clean it up (cannot use client ID since it can be null)
+	// we cannot (yet) lookup registration information of unregistered events, this is why we need the registration ID as an identifier
+	session.RegistrationID = registrationID
 
 	err = tm.initTerminalMessagingChannels(session)
 	if err != nil {
@@ -315,7 +321,28 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 	return termSession, nil
 }
 
-func NewManager(messenger messenger.Messenger, container container.Container) TerminalManager {
+func (tm *TerminalManager) initUnregisterWatcher() error {
+	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) {
+		metaRegistrationID := r.Arguments[1]
+
+		for _, session := range tm.ActiveSessions {
+			if session.RegistrationID == metaRegistrationID {
+				go tm.cleanupSession(session)
+
+				return
+			}
+		}
+
+	}, nil)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func InitManager(messenger messenger.Messenger, container container.Container) (TerminalManager, error) {
 	sessionsMap := make(map[string]*TerminalSession)
 
 	manager := TerminalManager{
@@ -324,7 +351,12 @@ func NewManager(messenger messenger.Messenger, container container.Container) Te
 		Container:      container,
 	}
 
-	return manager
+	err := manager.initUnregisterWatcher()
+	if err != nil {
+		return TerminalManager{}, err
+	}
+
+	return manager, nil
 }
 
 func (tm *TerminalManager) RequestTerminalSession(containerName string) (*TerminalSession, error) {

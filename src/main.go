@@ -78,7 +78,10 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to run sync")
 	}
 
-	terminalManager := terminal.NewManager(messenger, container)
+	terminalManager, err := terminal.InitManager(messenger, container)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed init terminal manager")
+	}
 
 	external := api.External{
 		StateMachine:    &stateMachine,

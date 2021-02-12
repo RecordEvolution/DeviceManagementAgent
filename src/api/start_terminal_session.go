@@ -24,7 +24,13 @@ func (ex *External) startTerminalSessHandler(ctx context.Context, response messe
 		return nil, errors.New("failed to parse sessionID")
 	}
 
-	err := ex.TerminalManager.StartTerminalSession(sessionID)
+	registrationIDKw := payload["registrationID"]
+	registrationID, ok := registrationIDKw.(uint64)
+	if !ok {
+		return nil, errors.New("failed to parse registrationID")
+	}
+
+	err := ex.TerminalManager.StartTerminalSession(sessionID, registrationID)
 	if err != nil {
 		return nil, err
 	}
