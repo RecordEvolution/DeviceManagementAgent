@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"reagent/common"
 	"reagent/container"
-	"reagent/logging"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"regexp"
@@ -228,8 +227,6 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 }
 
 func (tm *TerminalManager) getSession(sessionID string) (*TerminalSession, error) {
-	logging.PrettyPrintDebug(tm.ActiveSessions)
-
 	aTSession := tm.ActiveSessions[sessionID]
 
 	if aTSession == nil {

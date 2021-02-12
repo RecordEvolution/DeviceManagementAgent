@@ -231,6 +231,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 		payload.PresentVersion = deviceSyncState.PresentVersion
 		payload.Version = deviceSyncState.PresentVersion
 		payload.NewestVersion = deviceSyncState.NewestVersion
+		payload.EnvironmentVariables = deviceSyncState.Environment
 
 		appPayloads = append(appPayloads, payload)
 	}

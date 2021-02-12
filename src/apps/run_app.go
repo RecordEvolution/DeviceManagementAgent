@@ -41,9 +41,13 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		}
 	}
 
+	config := sm.Container.GetConfig()
+	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
+	environmentVariables := buildProdEnvironmentVariables(defaultEnvironmentVariables, payload.EnvironmentVariables)
+
 	containerConfig := container.Config{
 		Image:   fullImageNameWithTag,
-		Env:     []string{},
+		Env:     environmentVariables,
 		Labels:  map[string]string{"real": "True"},
 		Volumes: map[string]struct{}{},
 		Tty:     true,
@@ -69,11 +73,10 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
-		} else {
-			containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Prod)
-			if err != nil {
-				return err
-			}
+		}
+		containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Prod)
+		if err != nil {
+			return err
 		}
 	} else {
 		containerID = cont.ID
@@ -198,6 +201,10 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	return nil
+}
+
+func buildProdEnvironmentVariables(defaultEnvironmentVariables []string, payloadEnvironmentVariables map[string]interface{}) []string {
+	return append(defaultEnvironmentVariables, common.EnvironmentVarsToStringArray((payloadEnvironmentVariables))...)
 }
 
 func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {

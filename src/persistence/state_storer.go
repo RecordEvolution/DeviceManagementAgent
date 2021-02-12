@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
@@ -253,12 +254,13 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 		var version string
 		var presentVersion string
 		var newestVersion string
+		var environmentVariablesString string
 		var currentState common.AppState
 		var requestedState common.AppState
 		// var callerAuthID string
 
 		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
 		if err != nil {
 			return nil, err
 		}
@@ -267,6 +269,16 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 		payload.Version = version
 		payload.NewestVersion = newestVersion
 		payload.PresentVersion = presentVersion
+
+		environmentVariables := make(map[string]interface{})
+		if environmentVariablesString != "" {
+			err := json.Unmarshal([]byte(environmentVariablesString), &environmentVariables)
+			if err != nil {
+				return nil, err
+			}
+
+			payload.EnvironmentVariables = environmentVariables
+		}
 
 		payloads = append(payloads, payload)
 	}
@@ -308,9 +320,11 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var newestVersion string
 	var currentState common.AppState
 	var requestedState common.AppState
+	var environmentVariablesString string
+	var environmentVariables map[string]interface{}
 	// var callerAuthID string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -321,10 +335,18 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	}
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, releaseKey, newReleaseKey, ast.config)
-
 	payload.Version = version
 	payload.NewestVersion = newestVersion
 	payload.PresentVersion = presentVersion
+
+	if environmentVariablesString != "" {
+		err := json.Unmarshal([]byte(environmentVariablesString), &environmentVariablesString)
+		if err != nil {
+			return common.TransitionPayload{}, err
+		}
+
+		payload.EnvironmentVariables = environmentVariables
+	}
 
 	if err != nil {
 		return common.TransitionPayload{}, err
@@ -349,8 +371,15 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 
 		defer upsertStatement.Close()
 
+		environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)
+		if err != nil {
+			return err
+		}
+
+		environmentsJSONString := string(environmentsJSONBytes)
+
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -369,6 +398,8 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		return err
 	}
 
+	defer upsertStatement.Close()
+
 	if payload.CurrentState == "" {
 		state, err := ast.GetAppState(payload.AppKey, payload.Stage)
 		if err != nil {
@@ -378,19 +409,17 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 		payload.CurrentState = state.State
 	}
 
+	environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)
+	if err != nil {
+		return err
+	}
+
+	environmentsJSONString := string(environmentsJSONBytes)
+
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString,
 		time.Now().Format(time.RFC3339),
 	)
-
-	if err != nil {
-		return err
-	}
-
-	err = upsertStatement.Close()
-	if err != nil {
-		return err
-	}
 
 	if err != nil {
 		return err

@@ -24,6 +24,17 @@ func BuildExternalApiTopic(serialNumber string, topic string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
 }
 
+func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string {
+	stringArray := make([]string, 0)
+
+	for key, entry := range environmentsMap {
+		value := entry.(map[string]interface{})["value"]
+		stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, fmt.Sprint(value)))
+	}
+
+	return stringArray
+}
+
 func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, config *config.Config) {
 	publishContainer := BuildContainerName("pub", appKey, appName)
 	devContainerName := BuildContainerName(DEV, appKey, appName)

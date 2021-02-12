@@ -51,6 +51,7 @@ type TransitionPayload struct {
 	PresentImageName     string
 	RegistryImageName    StageBasedResult
 	ContainerName        StageBasedResult
+	EnvironmentVariables map[string]interface{}
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string
@@ -83,32 +84,33 @@ func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey u
 }
 
 type DeviceSyncResponse struct {
-	DeviceKey              int         `json:"device_key"`
-	SwarmKey               int         `json:"swarm_key"`
-	AccountKey             int         `json:"account_key"`
-	SerialNumber           string      `json:"serial_number"`
-	AppName                string      `json:"app_name"`
-	Name                   string      `json:"name"` // device name
-	Status                 string      `json:"status"`
-	Architecture           string      `json:"architecture"`
-	Address                string      `json:"address"`
-	ReleaseKey             int         `json:"release_key"`
-	NewReleaseKey          int         `json:"new_release_key"`
-	DeviceToAppKey         int         `json:"device_to_app_key"`
-	CurrentState           string      `json:"current_state"`
-	Stage                  string      `json:"stage"`
-	ContainerName          string      `json:"container_name"`
-	RequestUpdate          bool        `json:"request_update"`
-	TargetState            string      `json:"target_state"`
-	ManuallyRequestedState string      `json:"manually_requested_state"`
-	InheritFromGroup       interface{} `json:"inherit_from_group"`
-	RequestorAccountKey    int         `json:"requestor_account_key"`
-	PresentVersion         string      `json:"present_version"`
-	PresentImageName       string      `json:"present_image_name"`
-	NewImageName           string      `json:"new_image_name"`
-	NewestVersion          string      `json:"newest_version"`
-	Description            string      `json:"description"`
-	AppKey                 uint64      `json:"app_key"`
+	DeviceKey              int                    `json:"device_key"`
+	SwarmKey               int                    `json:"swarm_key"`
+	AccountKey             int                    `json:"account_key"`
+	SerialNumber           string                 `json:"serial_number"`
+	AppName                string                 `json:"app_name"`
+	Name                   string                 `json:"name"` // device name
+	Status                 string                 `json:"status"`
+	Architecture           string                 `json:"architecture"`
+	Address                string                 `json:"address"`
+	ReleaseKey             int                    `json:"release_key"`
+	NewReleaseKey          int                    `json:"new_release_key"`
+	DeviceToAppKey         int                    `json:"device_to_app_key"`
+	Environment            map[string]interface{} `json:"environment"`
+	CurrentState           string                 `json:"current_state"`
+	Stage                  string                 `json:"stage"`
+	ContainerName          string                 `json:"container_name"`
+	RequestUpdate          bool                   `json:"request_update"`
+	TargetState            string                 `json:"target_state"`
+	ManuallyRequestedState string                 `json:"manually_requested_state"`
+	InheritFromGroup       interface{}            `json:"inherit_from_group"`
+	RequestorAccountKey    int                    `json:"requestor_account_key"`
+	PresentVersion         string                 `json:"present_version"`
+	PresentImageName       string                 `json:"present_image_name"`
+	NewImageName           string                 `json:"new_image_name"`
+	NewestVersion          string                 `json:"newest_version"`
+	Description            string                 `json:"description"`
+	AppKey                 uint64                 `json:"app_key"`
 }
 
 // type AppStateResponse struct {

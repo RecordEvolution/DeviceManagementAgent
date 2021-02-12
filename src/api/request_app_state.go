@@ -50,6 +50,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	newReleaseKeyKw := kwargs["new_release_key"]
 	currentStateKw := kwargs["current_state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
+	environmentKw := kwargs["environment"]
 	// dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
 	presentVersionKw := kwargs["present_version"]
@@ -69,6 +70,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var newestVersion string
 	var requestUpdate bool
 	var ok bool
+	var environment map[string]interface{}
 
 	// TODO: can be simplified with parser function, but unneccessary
 	if appKeyKw != nil {
@@ -173,6 +175,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if environmentKw != nil {
+		environment, ok = environmentKw.(map[string]interface{})
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse environment")
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -198,6 +207,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	// Version that is currently on the device
 	payload.PresentVersion = presentVersion
 
+	payload.EnvironmentVariables = environment
 	// registryToken is added before we transition state and is not part of the response payload
 	return payload, nil
 }
