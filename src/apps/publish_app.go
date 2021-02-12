@@ -9,7 +9,17 @@ import (
 )
 
 func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common.App) error {
-	err := sm.buildDevApp(payload, app, true)
+	err := sm.LogManager.Write(payload.PublishContainerName, logging.BUILD, fmt.Sprintf("Initializing publish process for %s...", app.AppName))
+	if err != nil {
+		return err
+	}
+
+	err = sm.buildDevApp(payload, app, true)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.PublishContainerName, logging.BUILD, "App build has finished, Starting to publish...")
 	if err != nil {
 		return err
 	}

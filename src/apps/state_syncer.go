@@ -17,6 +17,8 @@ func (su *StateSyncer) Sync() error {
 		return err
 	}
 
+	log.Info().Msgf("Checking current app states for %d apps..", len(payloads))
+
 	for i := range payloads {
 
 		token, err := su.StateUpdater.GetRegistryToken(payloads[i].RequestorAccountKey)

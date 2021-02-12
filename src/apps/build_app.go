@@ -66,12 +66,17 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName.Dev, logging.BUILD, reader)
+	topicForLogStream := payload.ContainerName.Dev
+	if releaseBuild {
+		topicForLogStream = payload.PublishContainerName
+	}
+
+	err = sm.LogManager.Stream(topicForLogStream, logging.BUILD, reader)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("%s", "Image built successfully"))
+	err = sm.LogManager.Write(topicForLogStream, logging.BUILD, fmt.Sprintf("%s", "Image built successfully"))
 	if err != nil {
 		return err
 	}
