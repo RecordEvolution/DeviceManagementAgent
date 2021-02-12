@@ -19,7 +19,7 @@ import (
 
 type WampSession struct {
 	client *client.Client
-	config config.Config
+	config *config.Config
 }
 
 type wampLogWrapper struct {
@@ -48,7 +48,7 @@ func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config config.Config) (*WampSession, error) {
+func NewWamp(config *config.Config) (*WampSession, error) {
 	ctx := context.Background()
 	reswarmConfig := config.ReswarmConfig
 
@@ -103,7 +103,7 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result), o
 	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
 }
 
-func (wampSession *WampSession) GetConfig() config.Config {
+func (wampSession *WampSession) GetConfig() *config.Config {
 	return wampSession.config
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reagent/common"
+	"reagent/config"
 	"reagent/errdefs"
 	"reagent/logging"
 
@@ -107,9 +108,12 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
+	config := sm.Container.GetConfig()
+	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
+
 	containerConfig := container.Config{
 		Image:        payload.RegistryImageName.Dev,
-		Env:          []string{},
+		Env:          defaultEnvironmentVariables,
 		Labels:       map[string]string{"real": "True"},
 		Volumes:      map[string]struct{}{},
 		AttachStdin:  true,
@@ -194,4 +198,15 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	return nil
+}
+
+func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {
+	return []string{
+		fmt.Sprintf("SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
+		fmt.Sprintf("ENV=%s", environment),
+		fmt.Sprintf("DEVICE_KEY=%s", config.ReswarmConfig.DeviceKey),
+		fmt.Sprintf("SWARM_KEY=%s", config.ReswarmConfig.SwarmKey),
+		fmt.Sprintf("DEVICE_SECRET=%s", config.ReswarmConfig.Secret),
+		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", config.ReswarmConfig.DeviceEndpointURL),
+	}
 }

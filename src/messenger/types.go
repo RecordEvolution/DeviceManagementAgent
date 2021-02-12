@@ -36,6 +36,6 @@ type Messenger interface {
 	Unregister(topic topics.Topic) error
 	Unsubscribe(topic topics.Topic) error
 	GetSessionID() uint64
-	GetConfig() config.Config
+	GetConfig() *config.Config
 	Close() error
 }

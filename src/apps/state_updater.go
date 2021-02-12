@@ -224,7 +224,7 @@ func (sc *StateUpdater) getRemoteRequestedAppStates() ([]common.TransitionPayloa
 			common.AppState(deviceSyncState.TargetState),
 			uint64(deviceSyncState.ReleaseKey),
 			uint64(deviceSyncState.NewReleaseKey),
-			&config,
+			config,
 		)
 
 		payload.RequestUpdate = deviceSyncState.RequestUpdate
