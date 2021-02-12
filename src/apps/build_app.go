@@ -51,42 +51,27 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 
 	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RegistryImageName.Dev}, Dockerfile: "Dockerfile"})
 	if err != nil {
-		var errorMessage string
+		errorMessage := err.Error()
 		if errdefs.IsDockerfileCannotBeEmpty(err) {
-			errorMessage = "The Dockerfile cannot be empty, please fill out your Dockerfile."
+			errorMessage = "The Dockerfile cannot be empty, please fill out your Dockerfile"
 		} else if errdefs.IsDockerfileIsMissing(err) {
-			errorMessage = "Could not find a Dockerfile, please create a Dockerfile in the root of your project."
+			errorMessage = "Could not find a Dockerfile, please create a Dockerfile in the root of your project"
 		}
 
-		if errorMessage != "" {
-			messageErr := sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, errorMessage)
-			if messageErr != nil {
-				return messageErr
-			}
-
-			return err
+		messageErr := sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, errorMessage)
+		if messageErr != nil {
+			return messageErr
 		}
 
 		return err
 	}
 
 	err = sm.LogManager.Stream(payload.ContainerName.Dev, logging.BUILD, reader)
-
-	buildFailed := false
 	if err != nil {
-		if errdefs.IsBuildFailed(err) {
-			buildFailed = true
-		} else {
-			return err
-		}
+		return err
 	}
 
-	buildResultMessage := "Image built successfully"
-	if buildFailed {
-		buildResultMessage = "Image build failed to complete"
-	}
-
-	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("%s", buildResultMessage))
+	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("%s", "Image built successfully"))
 	if err != nil {
 		return err
 	}
