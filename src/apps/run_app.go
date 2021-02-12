@@ -159,7 +159,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
 		if err != nil {
-			return err
+			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
+			// still useful, and will wait if it's still not removed
+			if !errdefs.IsContainerNotFound(err) {
+				return err
+			}
 		}
 
 	}

@@ -25,14 +25,43 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	err = sm.Container.StopContainerByName(ctx, payload.ContainerName.Prod, 0)
+	// err = sm.Container.StopContainerByName(ctx, payload.ContainerName.Prod, 0)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// _, err = sm.Container.WaitForContainerByName(ctx, payload.ContainerName.Prod, container.WaitConditionNotRunning)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// for now to resolve the issue regarding env variables, we should remove the container on stop
+	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+	if err != nil {
+		if !errdefs.IsContainerNotFound(err) {
+			return err
+		}
+	}
+
+	err = sm.setState(app, common.STOPPING)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.Container.WaitForContainerByName(ctx, payload.ContainerName.Prod, container.WaitConditionNotRunning)
+	err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
 	if err != nil {
-		return err
+		if !errdefs.IsContainerRemovalAlreadyInProgress(err) && !errdefs.IsContainerNotFound(err) {
+			return err
+		}
+	}
+
+	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	if err != nil {
+		// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
+		// still useful, and will wait if it's still not removed
+		if !errdefs.IsContainerNotFound(err) {
+			return err
+		}
 	}
 
 	err = sm.setState(app, common.PRESENT)
@@ -67,11 +96,14 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		}
 	}
 
-	// doesn't seem to work
-	// _, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
-	// if err != nil {
-	// 	return err
-	// }
+	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	if err != nil {
+		// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
+		// still useful, and will wait if it's still not removed
+		if !errdefs.IsContainerNotFound(err) {
+			return err
+		}
+	}
 
 	err = sm.setState(app, common.PRESENT)
 	if err != nil {
