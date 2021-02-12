@@ -29,3 +29,13 @@ func IsRegistrationHandlerFailed(err error) bool {
 	_, ok := err.(ErrContainerRemovalAlreadyInProgress)
 	return ok
 }
+
+func IsDockerfileCannotBeEmpty(err error) bool {
+	_, ok := err.(ErrDockerfileCannotBeEmpty)
+	return ok
+}
+
+func IsDockerfileIsMissing(err error) bool {
+	_, ok := err.(ErrDockerfileIsMissing)
+	return ok
+}

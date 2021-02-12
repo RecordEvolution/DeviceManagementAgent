@@ -609,8 +609,13 @@ func (docker *Docker) Build(ctx context.Context, pathToTar string, options types
 	}
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)
-
 	if err != nil {
+		if strings.Contains(err.Error(), "the Dockerfile (Dockerfile) cannot be empty") {
+			return nil, errdefs.DockerfileCannotBeEmpty(err)
+		}
+		if strings.Contains(err.Error(), "Cannot locate specified Dockerfile: Dockerfile") {
+			return nil, errdefs.DockerfileIsMissing(err)
+		}
 		return nil, err
 	}
 

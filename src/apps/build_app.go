@@ -51,6 +51,22 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 
 	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RegistryImageName.Dev}, Dockerfile: "Dockerfile"})
 	if err != nil {
+		var errorMessage string
+		if errdefs.IsDockerfileCannotBeEmpty(err) {
+			errorMessage = "The Dockerfile cannot be empty, please fill out your Dockerfile."
+		} else if errdefs.IsDockerfileIsMissing(err) {
+			errorMessage = "Could not find a Dockerfile, please create a Dockerfile in the root of your project."
+		}
+
+		if errorMessage != "" {
+			messageErr := sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, errorMessage)
+			if messageErr != nil {
+				return messageErr
+			}
+
+			return err
+		}
+
 		return err
 	}
 

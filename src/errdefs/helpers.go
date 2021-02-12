@@ -123,3 +123,47 @@ func RegistrationHandlerFailed(err error, URI string) error {
 
 	return ErrRegistrationHandlerFailed{err, URI}
 }
+
+/*-----------*/
+
+type ErrDockerfileCannotBeEmpty struct {
+	error
+}
+
+func (e ErrDockerfileCannotBeEmpty) Cause() error {
+	return e.error
+}
+
+func (e ErrDockerfileCannotBeEmpty) Unwrap() error {
+	return e.error
+}
+
+func DockerfileCannotBeEmpty(err error) error {
+	if err == nil || IsDockerfileCannotBeEmpty(err) {
+		return err
+	}
+
+	return ErrDockerfileCannotBeEmpty{err}
+}
+
+/*-----------*/
+
+type ErrDockerfileIsMissing struct {
+	error
+}
+
+func (e ErrDockerfileIsMissing) Cause() error {
+	return e.error
+}
+
+func (e ErrDockerfileIsMissing) Unwrap() error {
+	return e.error
+}
+
+func DockerfileIsMissing(err error) error {
+	if err == nil || IsDockerfileIsMissing(err) {
+		return err
+	}
+
+	return ErrDockerfileIsMissing{err}
+}
