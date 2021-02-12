@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
 )
 
 type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
@@ -136,14 +137,18 @@ func (sm *StateMachine) findApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) UpdateAppState(payload common.TransitionPayload, app *common.App) error {
+func (sm *StateMachine) updateRequestedAppState(payload common.TransitionPayload, app *common.App) error {
+	if payload.RequestedState != "" {
+		app.RequestedState = payload.RequestedState
+	}
+
+	return sm.setState(app, app.CurrentState)
+}
+
+func (sm *StateMachine) updateCurrentAppState(payload common.TransitionPayload, app *common.App) error {
 	// apply these from payload if the app already exists
 	if payload.CurrentState != "" {
 		app.CurrentState = payload.CurrentState
-	}
-
-	if payload.RequestedState != "" {
-		app.RequestedState = payload.RequestedState
 	}
 
 	if payload.PresentVersion != "" {
@@ -172,6 +177,7 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 			Stage:               payload.Stage,
 			Version:             payload.PresentVersion,
 			RequestUpdate:       payload.RequestUpdate,
+			Semaphore:           semaphore.NewWeighted(1),
 		}
 		// It is possible that there is already a current app state
 		// if we receive a sync request from the remote database
@@ -202,22 +208,30 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return err
 	}
 
-	// ensure multiple transitions in parallel for the same app are not possible
+	// should ALWAYS update the requested state even when we're transitioning
+	// so we can transition to the latest state at a later time
+	err = sm.updateRequestedAppState(payload, app)
+	if err != nil {
+		return err
+	}
+
 	if app.IsTransitioning() {
 		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
 	}
 
 	// Update the app data with the provided payload
-	err = sm.UpdateAppState(payload, app)
+	err = sm.updateCurrentAppState(payload, app)
 	if err != nil {
+		app.UnlockTransition()
 		return err
 	}
 
 	// If appState is already up to date we should do nothing
 	// It's possible to go from a built/published state to a built/published state since both represent a present state
 	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate && app.CurrentState != common.BUILT && app.CurrentState != common.PUBLISHED {
-		log.Warn().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
+		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
+		app.UnlockTransition()
 		return nil
 	}
 
@@ -229,16 +243,15 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 	}
 
 	if transitionFunc == nil {
-		log.Warn().Msgf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+		log.Debug().Msgf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+		app.UnlockTransition()
 		return nil
 	}
 
-	log.Info().Msgf("Executing transition from %s to %s", app.CurrentState, payload.RequestedState)
-
 	errChannel := make(chan error)
 	go func() {
-		app.BeginTransition()
-		err := transitionFunc(payload, app)
+		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		err = transitionFunc(payload, app)
 
 		// If anything goes wrong with the transition function
 		// we should set the state change to FAILED
@@ -257,11 +270,11 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		errChannel <- err
 
 		// transition has finished
-		app.FinishTransition()
+		app.UnlockTransition()
 
 		// Verify if app has the latest requested state
 		// TODO: properly handle it when verifying fails
-		err = sm.StateUpdater.VerifyState(app, sm.RequestAppState)
+		sm.StateUpdater.VerifyState(app, sm.RequestAppState)
 	}()
 
 	go func() {

@@ -321,7 +321,6 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	var currentState common.AppState
 	var requestedState common.AppState
 	var environmentVariablesString string
-	var environmentVariables map[string]interface{}
 	// var callerAuthID string
 
 	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
@@ -339,8 +338,9 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	payload.NewestVersion = newestVersion
 	payload.PresentVersion = presentVersion
 
+	environmentVariables := make(map[string]interface{})
 	if environmentVariablesString != "" {
-		err := json.Unmarshal([]byte(environmentVariablesString), &environmentVariablesString)
+		err := json.Unmarshal([]byte(environmentVariablesString), &environmentVariables)
 		if err != nil {
 			return common.TransitionPayload{}, err
 		}

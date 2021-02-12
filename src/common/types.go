@@ -1,6 +1,12 @@
 package common
 
-import "reagent/config"
+import (
+	"errors"
+	"reagent/config"
+
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
+)
 
 type Dict map[string]interface{}
 type App struct {
@@ -15,21 +21,19 @@ type App struct {
 	RequestUpdate       bool
 	ReleaseBuild        bool
 	Version             string
-	transitioning       bool
+	Semaphore           *semaphore.Weighted
 }
 
-func (a *App) IsTransitioning() bool {
-	return a.transitioning
-}
-
-func (a *App) BeginTransition() {
-	a.transitioning = true
-}
-
-func (a *App) FinishTransition() {
-	if a.transitioning {
-		a.transitioning = false
+func (app *App) IsTransitioning() bool {
+	if app.Semaphore == nil {
+		log.Error().Err(errors.New("no sempahore initialized"))
+		return false
 	}
+	return !app.Semaphore.TryAcquire(1)
+}
+
+func (app *App) UnlockTransition() {
+	app.Semaphore.Release(1)
 }
 
 type StageBasedResult struct {
