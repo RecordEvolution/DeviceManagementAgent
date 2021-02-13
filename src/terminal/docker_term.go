@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/google/uuid"
 )
 
@@ -100,14 +99,11 @@ func (tm *TerminalManager) getShell(containerName string) (string, error) {
 }
 
 func (tm *TerminalManager) registerResizeTopic(termSess *TerminalSession) error {
-	return tm.Messenger.Register(topics.Topic(termSess.ResizeTopic), func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+	return tm.Messenger.Register(topics.Topic(termSess.ResizeTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
 		payloadArg := invocation.Arguments[0]
 		payload, ok := payloadArg.(map[string]interface{})
 		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"error": "failed to parse data"},
-				Err:         string(wamp.ErrInvalidURI),
-			}
+			return nil, errors.New("failed to parse args")
 		}
 
 		heightKw := payload["height"]
@@ -115,46 +111,34 @@ func (tm *TerminalManager) registerResizeTopic(termSess *TerminalSession) error 
 
 		height, ok := heightKw.(uint64)
 		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"error": "failed to parse height"},
-				Err:         string(wamp.ErrCanceled),
-			}
+			return nil, errors.New("failed to parse height")
 		}
 
 		width, ok := widthKw.(uint64)
 		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"error": "failed to parse width"},
-				Err:         string(wamp.ErrCanceled),
-			}
+			return nil, errors.New("failed to parse width")
 		}
 
 		err := tm.ResizeTerminal(termSess.SessionID, container.TtyDimension{Height: uint(height), Width: uint(width)})
 		if err != nil {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"error": err.Error()},
-				Err:         string(wamp.ErrCanceled),
-			}
+			return nil, err
 		}
 
-		return messenger.InvokeResult{}
+		return &messenger.InvokeResult{}, nil
 	}, nil)
 }
 
 func (tm *TerminalManager) registerWriteTopic(termSess *TerminalSession) error {
-	return tm.Messenger.Register(topics.Topic(termSess.WriteTopic), func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
+	return tm.Messenger.Register(topics.Topic(termSess.WriteTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
 		dataArg := invocation.Arguments[0]
 		data, ok := dataArg.(string)
 		if !ok {
-			return messenger.InvokeResult{
-				ArgumentsKw: common.Dict{"cause": "failed to parse data"},
-				Err:         string(wamp.ErrInvalidURI),
-			}
+			return nil, errors.New("failed to parse args")
 		}
 
 		termSess.inputChan <- data
 
-		return messenger.InvokeResult{}
+		return &messenger.InvokeResult{}, nil
 	}, nil)
 }
 
@@ -319,17 +303,18 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 }
 
 func (tm *TerminalManager) initUnregisterWatcher() error {
-	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) {
+	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) error {
 		metaRegistrationID := r.Arguments[1]
 
 		for _, session := range tm.ActiveSessions {
 			if session.RegistrationID == metaRegistrationID {
 				go tm.cleanupSession(session)
 
-				return
+				return nil
 			}
 		}
 
+		return nil
 	}, nil)
 
 	if err != nil {

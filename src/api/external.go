@@ -46,22 +46,6 @@ func (ex *External) RegisterAll() {
 	for topic, handler := range topicHandlerMap {
 		// will register all topics, e.g.: re.mgmt.request_app_state
 		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
-		ex.Messenger.Register(topics.Topic(fullTopic), wrapWithErrorHandler(handler), nil)
-	}
-}
-
-func wrapWithErrorHandler(registrationHandler RegistrationHandler) func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
-	return func(ctx context.Context, invocation messenger.Result) messenger.InvokeResult {
-		invokeResult, err := registrationHandler(ctx, invocation)
-		if err != nil {
-			return messenger.InvokeResult{
-				Err: "wamp.error.canceled",
-				Arguments: []interface{}{
-					common.Dict{"error": err.Error()},
-				},
-			}
-		}
-
-		return *invokeResult
+		ex.Messenger.Register(topics.Topic(fullTopic), handler, nil)
 	}
 }

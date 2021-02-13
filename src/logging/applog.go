@@ -132,12 +132,12 @@ func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState)
 func (lm *LogManager) Init() error {
 	lm.ActiveLogs = make(map[string]*LogSubscription)
 
-	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) {
+	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
 		subscriptionArg := r.Arguments[1] // the id of the subscription that was created
 		subscription, ok := subscriptionArg.(map[string]interface{})
 		if !ok {
-			return
+			return errors.New("failed to parse subscription args")
 		}
 
 		uri := fmt.Sprint(subscription["uri"])
@@ -145,7 +145,8 @@ func (lm *LogManager) Init() error {
 
 		// ignore any non log subscriptions
 		if !strings.HasPrefix(uri, "reswarm.logs.") {
-			return
+			return nil
+
 		}
 
 		topicSplit := strings.Split(uri, ".")
@@ -154,40 +155,40 @@ func (lm *LogManager) Init() error {
 
 		// if the request is not for my device
 		if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
-			return
+			return nil
+
 		}
 
 		idString := fmt.Sprint(id)
 		if lm.ActiveLogs[idString] != nil {
 			// this shouldn't happen if the subscriptions are properly removed
-			log.Warn().Msg("The subscription somehow already exists, this should never happen")
-			return
+			return errors.New("The subscription somehow already exists, this should never happen")
 		}
 
 		lm.createLogTask(idString, containerName)
 
+		return nil
 	}, nil)
 
-	err = lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) {
+	err = lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) error {
 		_ = r.Arguments[0]   // the id of the client session that used to be listening
 		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
 		idString := fmt.Sprint(id)
 
 		if lm.ActiveLogs[idString] == nil {
-			return
+			return nil
 		}
 
 		activeSubscription := lm.ActiveLogs[idString]
 
 		if activeSubscription.Stream == nil {
-			log.Print("stream was empty, nothing to close")
+			log.Info().Msg("stream was empty, nothing to close")
 		} else {
 			// cancel the io stream that is active
 			// TODO: figure out way to handle errors inside a subscription callback, however this error would be rare
 			err := activeSubscription.Stream.Close()
 			if err != nil {
-				log.Print("error occured while trying to close stream")
-				return
+				return errors.New("error occured while trying to close stream")
 			}
 
 			log.Print("Closed active stream for", activeSubscription.ContainerName)
@@ -195,6 +196,8 @@ func (lm *LogManager) Init() error {
 
 		// remove entry from active logs map
 		delete(lm.ActiveLogs, idString)
+
+		return nil
 	}, nil)
 
 	if err != nil {

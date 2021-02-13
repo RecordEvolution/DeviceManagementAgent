@@ -88,7 +88,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
-func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result), options common.Dict) error {
+func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
 	handler := func(event *wamp.Event) {
 		cbEventMap := Result{
 			Subscription: uint64(event.Subscription),
@@ -97,7 +97,10 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result), o
 			Arguments:    []interface{}(event.Arguments),
 			ArgumentsKw:  common.Dict(event.ArgumentsKw),
 		}
-		cb(cbEventMap)
+		err := cb(cbEventMap)
+		if err != nil {
+			log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
+		}
 	}
 
 	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
@@ -157,7 +160,7 @@ func (wampSession *WampSession) GetSessionID() uint64 {
 	return uint64(wampSession.client.ID())
 }
 
-func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) InvokeResult, options common.Dict) error {
+func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error {
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Result{
@@ -167,11 +170,23 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 			Arguments:    invocation.Arguments,
 			ArgumentsKw:  common.Dict(invocation.ArgumentsKw),
 		}
-		resultMap := cb(ctx, cbInvocationMap)
-		kwargs := resultMap.ArgumentsKw
-		err := resultMap.Err
 
-		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs), Err: wamp.URI(err)}
+		resultMap, invokeErr := cb(ctx, cbInvocationMap)
+		if invokeErr != nil {
+			// Global error logging for any Registered WAMP topics
+			log.Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
+
+			return client.InvokeResult{
+				Err: wamp.URI("wamp.error.canceled"), // TODO: parse Error URI from error
+				Args: wamp.List{
+					wamp.Dict{"error": invokeErr.Error()},
+				},
+			}
+		}
+
+		kwargs := resultMap.ArgumentsKw
+
+		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs)}
 	}
 
 	err := wampSession.client.Register(string(topic), invocationHandler, wamp.Dict(options))
@@ -199,9 +214,3 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 		return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
 	}
 }
-
-// func DeviceHandshake(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-// 	nowis := time.Now().String()
-// 	deviceid := "813e9e53-fe1f-4a27-a1bc-a97e8846a5a2"
-// 	return client.InvokeResult{Args: wamp.List{nowis, deviceid}}
-// }
