@@ -5,8 +5,8 @@ import (
 )
 
 type StateSyncer struct {
-	StateMachine StateMachine
-	StateUpdater StateUpdater
+	StateMachine *StateMachine
+	StateUpdater *StateUpdater
 }
 
 func (su *StateSyncer) Sync() error {

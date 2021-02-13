@@ -15,11 +15,22 @@ import (
 type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common.App) error
 
 type StateMachine struct {
-	StateObserver StateObserver
-	StateUpdater  StateUpdater
+	StateObserver *StateObserver
+	StateUpdater  *StateUpdater
 	Container     container.Container
 	LogManager    *logging.LogManager
 	appStates     []*common.App
+}
+
+func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, updater *StateUpdater) StateMachine {
+	appStates := make([]*common.App, 0)
+	return StateMachine{
+		StateObserver: observer,
+		StateUpdater:  updater,
+		Container:     container,
+		LogManager:    logManager,
+		appStates:     appStates,
+	}
 }
 
 var cancelableTransitions = []common.AppState{common.BUILDING, common.PUBLISHING, common.DOWNLOADING}
@@ -59,9 +70,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHED:   sm.publishApp,
 		},
 		common.FAILED: {
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     sm.recoverFailToPresentHandler,
 			common.RUNNING:     nil,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   nil,
@@ -88,6 +99,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     sm.runApp,
+			common.PRESENT:     nil,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 		},
@@ -152,9 +164,11 @@ func (sm *StateMachine) findApp(appKey uint64, stage common.Stage) *common.App {
 }
 
 func (sm *StateMachine) updateCurrentAppState(payload common.TransitionPayload, app *common.App) error {
-	// apply these from payload if the app already exists
-	if payload.CurrentState != "" {
-		app.CurrentState = payload.CurrentState
+	// only allow these special transitions to set the current app state from payload
+	if payload.RequestedState == common.BUILDING || payload.RequestedState == common.PUBLISHING {
+		if payload.CurrentState != "" {
+			app.CurrentState = payload.CurrentState
+		}
 	}
 
 	if payload.PresentVersion != "" {
@@ -234,6 +248,11 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 		// send potential error to errChannel
 		// if error = nil, the transition has completed successfully
 		errChannel <- err
+	}()
+
+	go func() {
+		err := <-errChannel
+		close(errChannel)
 
 		// if we weren't locked in this transition we can skip unlocking
 		if !skipUnlock {
@@ -241,18 +260,13 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 			app.UnlockTransition()
 		}
 
-		// Verify if app has the latest requested state
-		// TODO: properly handle it when verifying fails
-		sm.StateUpdater.VerifyState(app, sm.RequestAppState)
-	}()
-
-	go func() {
-		err := <-errChannel
-		close(errChannel)
-
 		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
 		if err == nil {
 			log.Info().Msgf("Successfully finished transaction function:", funcName)
+
+			// Verify if app has the latest requested state
+			// TODO: properly handle it when verifying fails
+			sm.StateUpdater.VerifyState(app, sm.RequestAppState)
 			return
 		}
 

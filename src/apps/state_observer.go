@@ -5,7 +5,7 @@ import (
 )
 
 type StateObserver struct {
-	StateUpdater StateUpdater
+	StateUpdater *StateUpdater
 }
 
 // Notify verifies a changed state in the StateMachine and stores it in the database

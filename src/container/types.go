@@ -74,6 +74,7 @@ type Container interface {
 	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
 	WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForContainerByName(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
+	WaitUntilRunning(ctx context.Context, containerID string) error
 	StartContainer(ctx context.Context, containerID string) error
 	GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error)
 	RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error

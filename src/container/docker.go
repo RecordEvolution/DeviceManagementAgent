@@ -517,6 +517,39 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	return resp.ID, nil
 }
 
+func (docker *Docker) InspectContainer(ctx context.Context, containerName string) (types.ContainerJSON, error) {
+	container, err := docker.GetContainer(ctx, containerName)
+	if err != nil {
+		return types.ContainerJSON{}, err
+	}
+
+	return docker.client.ContainerInspect(ctx, container.ID)
+}
+
+func (docker *Docker) WaitUntilRunning(ctx context.Context, containerID string) error {
+	errChan := make(chan error, 1)
+
+	go func() {
+		for {
+			inspectResult, err := docker.client.ContainerInspect(ctx, containerID)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			if inspectResult.State.Running {
+				errChan <- nil
+				return
+			}
+		}
+	}()
+
+	select {
+	case err := <-errChan:
+		return err
+	}
+}
+
 // TODO: make more generic
 //
 // StartContainer creates and starts a specific container

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"reagent/common"
-
-	"github.com/rs/zerolog/log"
 )
 
 func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *common.App) error {
@@ -16,10 +14,8 @@ func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *commo
 	buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
 	ctx := context.Background()
 
-	err := sm.Container.CancelBuild(ctx, buildID)
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("cancel build err")
-	}
+	// ignore potential error
+	_ = sm.Container.CancelBuild(ctx, buildID)
 
 	return sm.setState(app, common.REMOVED)
 }

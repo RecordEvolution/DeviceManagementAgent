@@ -53,7 +53,7 @@ func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.
 	}
 
 	if requestedStatePayload.RequestedState != app.CurrentState {
-		log.Printf("App (%d, %s) is not in latest state, transitioning to %s...", app.AppKey, app.Stage, requestedStatePayload.RequestedState)
+		log.Printf("App (%d, %s) is not in latest state (%s), transitioning to %s...", app.AppKey, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
 
 		// TODO: get token only when neccessary
 		token, err := sc.GetRegistryToken(requestedStatePayload.RequestorAccountKey)

@@ -87,6 +87,11 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
+	err = sm.Container.WaitUntilRunning(ctx, containerID)
+	if err != nil {
+		return err
+	}
+
 	err = sm.LogManager.Write(payload.ContainerName.Prod, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
@@ -181,6 +186,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	err = sm.Container.StartContainer(ctx, newContainerID)
+	if err != nil {
+		return err
+	}
+
+	err = sm.Container.WaitUntilRunning(ctx, newContainerID)
 	if err != nil {
 		return err
 	}

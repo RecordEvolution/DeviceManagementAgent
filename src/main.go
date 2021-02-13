@@ -60,7 +60,7 @@ func main() {
 	}
 
 	stateObserver := apps.StateObserver{
-		StateUpdater: stateUpdater,
+		StateUpdater: &stateUpdater,
 	}
 
 	logManager := logging.LogManager{
@@ -68,16 +68,11 @@ func main() {
 		Container: container,
 	}
 
-	stateMachine := apps.StateMachine{
-		StateObserver: stateObserver,
-		StateUpdater:  stateUpdater,
-		Container:     container,
-		LogManager:    &logManager,
-	}
+	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &stateUpdater)
 
 	stateSyncer := apps.StateSyncer{
-		StateMachine: stateMachine,
-		StateUpdater: stateUpdater,
+		StateMachine: &stateMachine,
+		StateUpdater: &stateUpdater,
 	}
 
 	err = stateSyncer.Sync()

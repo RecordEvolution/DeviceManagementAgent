@@ -317,7 +317,7 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		return err
 	}
 
-	// TODO: store logs in db
+	// TODO: store build/pull logs in db
 	return nil
 }
 
