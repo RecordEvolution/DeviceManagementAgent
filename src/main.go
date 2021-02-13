@@ -42,6 +42,7 @@ func main() {
 	}
 
 	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
+	system.SetupDisconnectTestament(messenger)
 
 	container, _ := container.NewDocker(&generalConfig)
 

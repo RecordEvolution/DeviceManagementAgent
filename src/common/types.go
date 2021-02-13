@@ -26,7 +26,7 @@ type App struct {
 
 func (app *App) IsTransitioning() bool {
 	if app.Semaphore == nil {
-		log.Error().Err(errors.New("no sempahore initialized"))
+		log.Error().Err(errors.New("no semaphore initialized"))
 		return false
 	}
 	return !app.Semaphore.TryAcquire(1)

@@ -27,6 +27,7 @@ type External struct {
 // RegistrationHandler is the handler that gets executed whenever a registered topic gets called.
 type RegistrationHandler = func(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error)
 
+//! dynamically created registrations (terminal / logger) can be found in their respective packages
 func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 	return map[topics.Topic]RegistrationHandler{
 		topics.RequestAppState:        ex.requestAppStateHandler,
@@ -39,7 +40,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 	}
 }
 
-// RegisterAll registers all the static RPCs/Subscriptions exposed by the reagent
+// RegisterAll registers all the static topics exposed by the reagent
 func (ex *External) RegisterAll() {
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 	topicHandlerMap := ex.getTopicHandlerMap()
