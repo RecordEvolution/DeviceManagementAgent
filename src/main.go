@@ -41,8 +41,15 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
 
-	system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
-	system.SetupDisconnectTestament(messenger)
+	err = messenger.SetupTestament()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	}
+
+	err = system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
 
 	container, _ := container.NewDocker(&generalConfig)
 

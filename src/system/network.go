@@ -68,24 +68,3 @@ func UpdateRemoteDeviceStatus(messenger messenger.Messenger, status DeviceStatus
 
 	return err
 }
-
-// SetupDisconnectTestament will setup the device's testament
-// This function is meant to be called everytime a WAMP connection is established
-func SetupDisconnectTestament(messenger messenger.Messenger) error {
-	ctx := context.Background()
-
-	config := messenger.GetConfig()
-	args := []interface{}{
-		common.Dict{
-			"swarm_key":  config.ReswarmConfig.SwarmKey,
-			"device_key": config.ReswarmConfig.DeviceKey,
-		},
-	}
-
-	_, err := messenger.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}

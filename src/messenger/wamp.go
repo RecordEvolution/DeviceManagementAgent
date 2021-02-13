@@ -205,6 +205,32 @@ func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
 	return wampSession.client.Unsubscribe(string(topic))
 }
 
+// SetupTestament will setup the device's testament
+// This function is meant to be called everytime a WAMP connection is established
+func (wampSession *WampSession) SetupTestament() error {
+	ctx := context.Background()
+
+	config := wampSession.GetConfig()
+
+	// https://github.com/gammazero/nexus/blob/v3/router/realm.go#L1042 on how to form payload
+	args := []interface{}{
+		topics.SetDeviceTestament,
+		[]interface{}{
+			common.Dict{
+				"swarm_key":  config.ReswarmConfig.SwarmKey,
+				"device_key": config.ReswarmConfig.DeviceKey,
+			},
+		},
+		common.Dict{},
+	}
+	_, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (wampSession *WampSession) Close() error {
 	return wampSession.client.Close()
 }
