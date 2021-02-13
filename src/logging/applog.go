@@ -304,6 +304,19 @@ func (lm *LogManager) Stream(containerName string, logType LogType, reader io.Re
 		messages = append(messages, message)
 	}
 
+	err := reader.Close()
+	if err != nil {
+		return err
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			return errdefs.DockerBuildCanceled(err)
+		}
+		return err
+	}
+
 	// TODO: store logs in db
 	return nil
 }

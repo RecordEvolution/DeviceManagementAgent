@@ -133,7 +133,7 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 	if err != nil {
 		return err
 	}
-	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
+	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage, app.RequestedState)
 	if err != nil {
 		return err
 	}

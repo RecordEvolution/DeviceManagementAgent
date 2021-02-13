@@ -11,7 +11,7 @@ const QuerySelectRequestedStateByAppKeyAndStage = `SELECT app_name, app_key, sta
 manually_requested_state, requestor_account_key, release_key, new_release_key, environment_variables FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
 const QuerySelectAppStateByAppKeyAndStage = `SELECT app_name, app_key, version, release_key, stage, state, timestamp FROM AppStates WHERE app_key = ? AND stage = ?`
 
-const QueryUpdateRequestedAppStateCurrentStateByAppKeyAndStage = `UPDATE RequestedAppStates SET current_state = ?, present_version = ?, release_key = ? WHERE app_key = ? AND stage = ?`
+const QueryUpdateRequestedAppStateCurrentStateByAppKeyAndStage = `UPDATE RequestedAppStates SET current_state = ?, present_version = ?, release_key = ?, manually_requested_state = ? WHERE app_key = ? AND stage = ?`
 const QueryUpdateAppStateByAppKeyAndStage = `UPDATE AppStates SET state = ?, version = ?, release_key = ? WHERE app_key = ? AND stage = ?`
 const QueryUpdateDeviceState = `UPDATE DeviceStates SET device_status = ?, interface_type = ?`
 

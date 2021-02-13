@@ -22,6 +22,17 @@ type StateMachine struct {
 	appStates     []*common.App
 }
 
+var cancelableTransitions = []common.AppState{common.BUILDING, common.PUBLISHING, common.DOWNLOADING}
+
+func (sm *StateMachine) isCancelable(app *common.App) bool {
+	for _, transition := range cancelableTransitions {
+		if app.CurrentState == transition {
+			return true
+		}
+	}
+	return false
+}
+
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
@@ -36,6 +47,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.RUNNING:   sm.runApp,
 			common.BUILT:     sm.buildApp,
 			common.PUBLISHED: sm.publishApp,
+		},
+		common.BUILDING: {
+			common.REMOVED: sm.cancelBuild,
 		},
 		common.PRESENT: {
 			common.REMOVED:     sm.removeApp,
@@ -137,14 +151,6 @@ func (sm *StateMachine) findApp(appKey uint64, stage common.Stage) *common.App {
 	return nil
 }
 
-func (sm *StateMachine) updateRequestedAppState(payload common.TransitionPayload, app *common.App) error {
-	if payload.RequestedState != "" {
-		app.RequestedState = payload.RequestedState
-	}
-
-	return sm.setState(app, app.CurrentState)
-}
-
 func (sm *StateMachine) updateCurrentAppState(payload common.TransitionPayload, app *common.App) error {
 	// apply these from payload if the app already exists
 	if payload.CurrentState != "" {
@@ -199,7 +205,60 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 
 	}
 
+	if payload.RequestedState != "" {
+		app.RequestedState = payload.RequestedState
+	}
+
 	return app, nil
+}
+
+func (sm *StateMachine) executeTransition(app *common.App, payload common.TransitionPayload, transitionFunc TransitionFunc, skipUnlock bool) {
+	errChannel := make(chan error)
+
+	go func() {
+		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		err := transitionFunc(payload, app)
+
+		// If anything goes wrong with the transition function
+		// we should set the state change to FAILED
+		// This will in turn update the in memory state and the local database state
+		// which will in turn update the remote database as well
+		if err != nil {
+			setStateErr := sm.setState(app, common.FAILED)
+			if setStateErr != nil {
+				// wrap errors into one
+				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
+			}
+		}
+
+		// send potential error to errChannel
+		// if error = nil, the transition has completed successfully
+		errChannel <- err
+
+		// if we weren't locked in this transition we can skip unlocking
+		if !skipUnlock {
+			// allow next state transition
+			app.UnlockTransition()
+		}
+
+		// Verify if app has the latest requested state
+		// TODO: properly handle it when verifying fails
+		sm.StateUpdater.VerifyState(app, sm.RequestAppState)
+	}()
+
+	go func() {
+		err := <-errChannel
+		close(errChannel)
+
+		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
+		if err == nil {
+			log.Info().Msgf("Successfully finished transaction function:", funcName)
+			return
+		}
+
+		log.Error().Msgf("An error occured during transition from %s to %s using %s", app.CurrentState, payload.RequestedState, funcName)
+		log.Error().Err(err).Msg("The current app state will has been set to FAILED")
+	}()
 }
 
 func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error {
@@ -208,13 +267,17 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return err
 	}
 
-	// should ALWAYS update the requested state even when we're transitioning
-	// so we can transition to the latest state at a later time
-	err = sm.updateRequestedAppState(payload, app)
-	if err != nil {
-		return err
+	// allow canceling state transitions to perform a transition
+	if sm.isCancelable(app) {
+		// only allow cancelation with certain states
+		if payload.RequestedState == common.REMOVED && app.CurrentState == common.BUILDING {
+			transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+			sm.executeTransition(app, payload, transitionFunc, true)
+			return nil
+		}
 	}
 
+	// prevent concurrent state transitions for same app
 	if app.IsTransitioning() {
 		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
@@ -248,48 +311,6 @@ func (sm *StateMachine) RequestAppState(payload common.TransitionPayload) error 
 		return nil
 	}
 
-	errChannel := make(chan error)
-	go func() {
-		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
-		err = transitionFunc(payload, app)
-
-		// If anything goes wrong with the transition function
-		// we should set the state change to FAILED
-		// This will in turn update the in memory state and the local database state
-		// which will in turn update the remote database as well
-		if err != nil {
-			setStateErr := sm.setState(app, common.FAILED)
-			if setStateErr != nil {
-				// wrap errors into one
-				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
-			}
-		}
-
-		// send potential error to errChannel
-		// if error = nil, the transition has completed successfully
-		errChannel <- err
-
-		// transition has finished
-		app.UnlockTransition()
-
-		// Verify if app has the latest requested state
-		// TODO: properly handle it when verifying fails
-		sm.StateUpdater.VerifyState(app, sm.RequestAppState)
-	}()
-
-	go func() {
-		err := <-errChannel
-		close(errChannel)
-
-		funcName := runtime.FuncForPC(reflect.ValueOf(transitionFunc).Pointer()).Name()
-		if err == nil {
-			log.Info().Msgf("Successfully finished transaction function:", funcName)
-			return
-		}
-
-		log.Error().Msgf("An error occured during transition from %s to %s using %s", app.CurrentState, payload.RequestedState, funcName)
-		log.Error().Err(err).Msg("The current app state will has been set to FAILED")
-	}()
-
+	sm.executeTransition(app, payload, transitionFunc, false)
 	return nil
 }

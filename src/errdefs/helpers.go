@@ -167,3 +167,25 @@ func DockerfileIsMissing(err error) error {
 
 	return ErrDockerfileIsMissing{err}
 }
+
+/*-----------*/
+
+type ErrDockerBuildCanceled struct {
+	error
+}
+
+func (e ErrDockerBuildCanceled) Cause() error {
+	return e.error
+}
+
+func (e ErrDockerBuildCanceled) Unwrap() error {
+	return e.error
+}
+
+func DockerBuildCanceled(err error) error {
+	if err == nil || IsDockerBuildCanceled(err) {
+		return err
+	}
+
+	return ErrDockerBuildCanceled{err}
+}

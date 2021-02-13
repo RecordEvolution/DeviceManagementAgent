@@ -22,17 +22,26 @@ import (
 )
 
 // Docker container implentation using the Docker API
+
+type DockerBuild struct {
+	BuildID string
+	Stream  io.ReadCloser
+}
+
 type Docker struct {
-	client *client.Client
-	config *config.Config
+	client       *client.Client
+	config       *config.Config
+	activeBuilds map[string]*DockerBuild
 }
 
 func NewDocker(config *config.Config) (*Docker, error) {
 	client, err := newDockerClient()
+	activeBuilds := make(map[string]*DockerBuild)
+
 	if err != nil {
 		return nil, err
 	}
-	return &Docker{client: client, config: config}, nil
+	return &Docker{client: client, config: config, activeBuilds: activeBuilds}, nil
 }
 
 // For now stick only with Docker as implementation
@@ -592,7 +601,18 @@ func (docker *Docker) RemoveImageByID(ctx context.Context, imageID string, optio
 }
 
 func (docker *Docker) CancelBuild(ctx context.Context, buildID string) error {
-	return docker.client.BuildCancel(ctx, buildID)
+	if docker.activeBuilds[buildID] == nil {
+		return errors.New("no active build was found")
+	}
+
+	activeBuild := docker.activeBuilds[buildID]
+	err := activeBuild.Stream.Close()
+	if err != nil {
+		return err
+	}
+
+	delete(docker.activeBuilds, buildID)
+	return nil
 }
 
 func (docker *Docker) Tag(ctx context.Context, source string, target string) error {
@@ -619,5 +639,14 @@ func (docker *Docker) Build(ctx context.Context, pathToTar string, options types
 		return nil, err
 	}
 
-	return buildResponse.Body, nil
+	reader := buildResponse.Body
+
+	if options.BuildID != "" {
+		docker.activeBuilds[options.BuildID] = &DockerBuild{
+			BuildID: options.BuildID,
+			Stream:  reader,
+		}
+	}
+
+	return reader, nil
 }

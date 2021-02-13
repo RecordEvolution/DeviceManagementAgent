@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
@@ -12,17 +13,15 @@ import (
 )
 
 func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.App) error {
-	if payload.Stage == common.DEV {
-		err := sm.buildDevApp(payload, app, false)
-		if err != nil {
-			return err
-		}
+	if payload.Stage != common.DEV {
+		return errors.New("can only build dev apps")
 	}
-	return nil
+
+	return sm.buildDevApp(payload, app, false)
 }
 
 func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
-	ctx := context.Background() // TODO: store context in memory for build cancellation
+	ctx := context.Background()
 
 	sm.setState(app, common.REMOVED)
 
@@ -49,7 +48,19 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	reader, err := sm.Container.Build(ctx, filePath, types.ImageBuildOptions{Tags: []string{payload.RegistryImageName.Dev}, Dockerfile: "Dockerfile"})
+	buildOptions := types.ImageBuildOptions{
+		Tags:       []string{payload.RegistryImageName.Dev},
+		Dockerfile: "Dockerfile",
+		BuildID:    common.BuildDockerBuildID(app.AppKey, app.AppName),
+	}
+
+	topicForLogStream := payload.ContainerName.Dev
+	if releaseBuild {
+		topicForLogStream = payload.PublishContainerName
+	}
+
+	// Need to make sure we close this reader later on
+	reader, err := sm.Container.Build(ctx, filePath, buildOptions)
 	if err != nil {
 		errorMessage := err.Error()
 		if errdefs.IsDockerfileCannotBeEmpty(err) {
@@ -58,7 +69,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			errorMessage = "Could not find a Dockerfile, please create a Dockerfile in the root of your project"
 		}
 
-		messageErr := sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, errorMessage)
+		messageErr := sm.LogManager.Write(topicForLogStream, logging.BUILD, errorMessage)
 		if messageErr != nil {
 			return messageErr
 		}
@@ -66,25 +77,27 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	topicForLogStream := payload.ContainerName.Dev
-	if releaseBuild {
-		topicForLogStream = payload.PublishContainerName
+	var buildMessage string
+	streamErr := sm.LogManager.Stream(topicForLogStream, logging.BUILD, reader)
+	if streamErr != nil {
+		if errdefs.IsDockerBuildCanceled(streamErr) {
+			buildMessage = "The build stream was canceled"
+			writeErr := sm.LogManager.Write(topicForLogStream, logging.BUILD, buildMessage)
+			if writeErr != nil {
+				return writeErr
+			}
+			// a canceled build will transition to 'REMOVED|Another State' so no need to return the error
+			return nil
+		}
+
+		return streamErr
 	}
 
-	err = sm.LogManager.Stream(topicForLogStream, logging.BUILD, reader)
+	buildMessage = "Image built successfully"
+	err = sm.LogManager.Write(topicForLogStream, logging.BUILD, buildMessage)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.Write(topicForLogStream, logging.BUILD, fmt.Sprintf("%s", "Image built successfully"))
-	if err != nil {
-		return err
-	}
-
-	err = sm.setState(app, common.BUILT)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return sm.setState(app, common.BUILT)
 }

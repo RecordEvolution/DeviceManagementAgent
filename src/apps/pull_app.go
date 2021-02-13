@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/container"
@@ -13,7 +14,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 
 	if payload.Stage == common.DEV {
 		// cannot pull dev apps from registry
-		return nil
+		return errors.New("cannot pull dev apps")
 	}
 
 	err := sm.setState(app, common.DOWNLOADING)

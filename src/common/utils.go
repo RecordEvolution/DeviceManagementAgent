@@ -24,6 +24,10 @@ func BuildExternalApiTopic(serialNumber string, topic string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
 }
 
+func BuildDockerBuildID(appKey uint64, appName string) string {
+	return fmt.Sprintf("build_%d_%s", appKey, appName)
+}
+
 func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string {
 	stringArray := make([]string, 0)
 

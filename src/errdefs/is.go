@@ -39,3 +39,8 @@ func IsDockerfileIsMissing(err error) bool {
 	_, ok := err.(ErrDockerfileIsMissing)
 	return ok
 }
+
+func IsDockerBuildCanceled(err error) bool {
+	_, ok := err.(ErrDockerBuildCanceled)
+	return ok
+}
