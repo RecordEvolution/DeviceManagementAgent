@@ -11,8 +11,10 @@ import (
 	"reagent/messenger/topics"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 type TerminalSession struct {
@@ -25,6 +27,14 @@ type TerminalSession struct {
 	DataTopic      string
 	WriteTopic     string
 	ResizeTopic    string
+	once           sync.Once
+}
+
+func (termSess *TerminalSession) Close() {
+	termSess.once.Do(func() {
+		close(termSess.inputChan)
+		close(termSess.errorChan)
+	})
 }
 
 func NewSession(containerName string, serialNumber string, hijackedResponse *container.HijackedResponse) *TerminalSession {
@@ -157,6 +167,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 	// read incoming (WAMP) data from the channel and write it to the attached terminal
 	go func() {
+		defer log.Debug().Msgf("term writer goroutine for %s has exited", termSess.ContainerName)
 		defer termSess.Session.Conn.Close() // will close both read and write if goroutine breaks
 
 	exit:
@@ -170,7 +181,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 				_, err := termSess.Session.Conn.Write([]byte(incomingData))
 				if err != nil {
 					termSess.errorChan <- err
-					return
+					break exit
 				}
 			}
 		}
@@ -178,6 +189,8 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 	// read outgoing data from the channel and 'publish' it (WAMP) to a given topic
 	go func() {
+		defer log.Debug().Msgf("term reader goroutine for %s has exited", termSess.ContainerName)
+
 		ctx := context.Background()
 		buf := make([]byte, 32*1024)
 
@@ -197,6 +210,11 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 					break exit
 				}
 			}
+		}
+
+		if err.Error() == "EOF" {
+			tm.cleanupSession(termSess)
+			return
 		}
 
 		if err != nil {
@@ -230,8 +248,18 @@ func (tm *TerminalManager) ResizeTerminal(sessionID string, dimension container.
 }
 
 func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
+
+	// has already been cleaned up
+	if session == nil || tm.ActiveSessions[session.SessionID] == nil {
+		return nil
+	}
+
 	// closes both reader and writer goroutine
-	close(session.inputChan)
+	session.Close()
+
+	// is ok if this errors
+	payload := []interface{}{[]byte("TERMINAL_EOF")}
+	_, _ = tm.Messenger.Call(context.Background(), topics.Topic(session.DataTopic), payload, nil, nil, nil)
 
 	_, ok := tm.Messenger.RegistrationID(topics.Topic(session.ResizeTopic))
 	if ok {
@@ -249,7 +277,10 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 		}
 	}
 
+	log.Debug().Msgf("cleaned up terminal session for %s", session.ContainerName)
+
 	delete(tm.ActiveSessions, session.SessionID)
+	session = nil
 
 	return nil
 }
