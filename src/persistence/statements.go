@@ -21,6 +21,11 @@ const QueryInsertDeviceStateHistoryEntry = `INSERT INTO DeviceStateHistory(inter
 
 const QueryUpsertRequestedStateEntry = `INSERT INTO RequestedAppStates(app_name, app_key, stage, version, present_version, newest_version, current_state, manually_requested_state, requestor_account_key, release_key, new_release_key, request_update, environment_variables, timestamp)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set
+present_version = excluded.present_version,
+newest_version = excluded.newest_version,
+release_key = excluded.release_key,
+environment_variables = excluded.environment_variables,
+new_release_key = excluded.new_release_key,
 manually_requested_state=excluded.manually_requested_state,
 current_state=excluded.current_state,
 request_update=excluded.request_update`

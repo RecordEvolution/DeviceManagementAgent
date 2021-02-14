@@ -155,6 +155,11 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 	return sc.StateStorer.GetRequestedStates()
 }
 
+func (sc *StateUpdater) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
+	return sc.StateStorer.UpdateAppState(app, stateToSet)
+}
+
+// UpdateAppState updates both the remote and local app state, if updating the remote app state fails it does not return an error.
 func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
 	err := sc.UpdateRemoteAppState(app, stateToSet)
 	log.Printf("Set remote state to %s for %s (%s)", stateToSet, app.AppName, app.Stage)
@@ -163,7 +168,7 @@ func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppSta
 		log.Warn().Stack().Err(err).Msg("Failed to update remote app state")
 	}
 
-	return sc.StateStorer.UpdateAppState(app, stateToSet)
+	return sc.UpdateLocalAppState(app, stateToSet)
 }
 
 func (sc *StateUpdater) UpdateRemoteAppState(app *common.App, stateToSet common.AppState) error {

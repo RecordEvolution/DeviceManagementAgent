@@ -44,7 +44,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	if payload.NewestVersion != app.Version {
 		app.Version = payload.NewestVersion
 		app.ReleaseKey = payload.NewReleaseKey
-		app.RequestUpdate = true
+		app.RequestUpdate = true // set flag to make backend aware we updated
 	}
 
 	err = sm.setState(app, common.PRESENT)

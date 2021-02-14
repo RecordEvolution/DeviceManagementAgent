@@ -25,7 +25,6 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	ctx := context.Background()
 
 	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
-
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
 	if err != nil {
 		if errdefs.IsImageNotFound(err) {

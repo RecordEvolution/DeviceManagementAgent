@@ -42,6 +42,8 @@ func (sqlite *AppStateStorer) Init() error {
 
 func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
+	defer selectStatement.Close()
+
 	if err != nil {
 		return err
 	}
@@ -55,24 +57,6 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 		}
 
 		return ast.insertAppState(app)
-	}
-
-	if app.RequestUpdate {
-		// It looks like the requestUpdate failed, we should enable this flag on this app's requestedState
-		// so when it reconnects, it can try to let the database know it is now a different version as the remote database
-		// note: this is only neccessary because we do not force users to update to the latest version
-		// The database will then check if this version is actually the latest version, if not it will request another update
-
-		requestedState, err := ast.GetRequestedState(app)
-		if err != nil {
-			return err
-		}
-
-		requestedState.RequestUpdate = true
-		err = ast.UpsertRequestedStateChange(requestedState)
-		if err != nil {
-			return err
-		}
 	}
 
 	var curState string
@@ -128,17 +112,21 @@ func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppSt
 		return err
 	}
 
-	// Update requested app states current state
-	updateStatement, err = ast.db.Prepare(QueryUpdateRequestedAppStateCurrentStateByAppKeyAndStage) // Prepare statement.
-	if err != nil {
-		return err
-	}
-	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage, app.RequestedState)
+	// Update RequestedAppState
+	requestedState, err := ast.GetRequestedState(app)
 	if err != nil {
 		return err
 	}
 
-	err = updateStatement.Close()
+	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
+	// note: this is only neccessary because we do not force users to update to the latest version
+	// The database will then check if this version is actually the latest version, if not it will request another update
+	requestedState.RequestUpdate = app.RequestUpdate
+	requestedState.CurrentState = newState
+	requestedState.RequestedState = app.RequestedState
+	requestedState.PresentVersion = app.Version
+	requestedState.ReleaseKey = app.ReleaseKey
+	err = ast.UpsertRequestedStateChange(requestedState)
 	if err != nil {
 		return err
 	}
@@ -288,6 +276,8 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 
 func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.TransitionPayload, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectRequestedStateByAppKeyAndStage)
+	defer preppedStatement.Close()
+
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}

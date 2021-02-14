@@ -17,3 +17,13 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 	}
 	return nil
 }
+
+// NotifyLocalOnly is used to update the local app state with the remote app state
+func (so *StateObserver) NotifyLocalOnly(app *common.App, achievedState common.AppState) error {
+	// doublecheck if state is actually achievable and set the state in the database
+	err := so.StateUpdater.UpdateLocalAppState(app, achievedState)
+	if err != nil {
+		return err
+	}
+	return nil
+}

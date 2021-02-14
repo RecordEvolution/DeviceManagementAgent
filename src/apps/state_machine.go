@@ -144,6 +144,15 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	return stateTransitionMap[prevState][nextState]
 }
 
+func (sm *StateMachine) setLocalState(app *common.App, state common.AppState) error {
+	err := sm.StateObserver.NotifyLocalOnly(app, state)
+	if err != nil {
+		return err
+	}
+	app.CurrentState = state
+	return nil
+}
+
 func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	err := sm.StateObserver.Notify(app, state)
 	if err != nil {
@@ -164,8 +173,8 @@ func (sm *StateMachine) findApp(appKey uint64, stage common.Stage) *common.App {
 }
 
 func (sm *StateMachine) updateCurrentAppState(payload common.TransitionPayload, app *common.App) error {
-	// only allow these special transitions to set the current app state from payload
-	if payload.RequestedState == common.BUILDING || payload.RequestedState == common.PUBLISHING {
+	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
+	if app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED {
 		if payload.CurrentState != "" {
 			app.CurrentState = payload.CurrentState
 		}
@@ -175,7 +184,7 @@ func (sm *StateMachine) updateCurrentAppState(payload common.TransitionPayload, 
 		app.Version = payload.PresentVersion
 	}
 
-	return sm.setState(app, app.CurrentState)
+	return sm.setLocalState(app, app.CurrentState)
 }
 
 // GetOrInitAppState gets the state of an app that is currently in memory. If an app state does not exist with given key and stage, it will create a new entry. This entry will be stored in memory and in the local database
@@ -208,9 +217,9 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 		}
 
 		// If app does not exist in database, it will be added
-		// + remote app state will be updated if it received one from the database
-		// TODO: since the remote database state is already set whenever we received a currentState, we do not need to update the remote app state again
-		err := sm.setState(app, app.CurrentState)
+		// FIXME: no need to set local database state since we already have the most up to date local state (we update from remote before this ever gets called)
+		// instead we should just populate the state machine with the local data, or have the state machine directly read from the database
+		err := sm.setLocalState(app, app.CurrentState)
 		if err != nil {
 			return nil, err
 		}
@@ -219,6 +228,7 @@ func (sm *StateMachine) GetOrInitAppState(payload common.TransitionPayload) (*co
 
 	}
 
+	// always update the local app's requestedState using the transition payload
 	if payload.RequestedState != "" {
 		app.RequestedState = payload.RequestedState
 	}

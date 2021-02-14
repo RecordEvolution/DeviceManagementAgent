@@ -136,7 +136,18 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	if releaseKeyKw != nil {
 		releaseKey, ok = releaseKeyKw.(uint64)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
+			releaseKeyString, ok := releaseKeyKw.(string)
+			if !ok {
+				return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
+			}
+
+			// due to a bug the release key can be stored as string...
+			parsedReleaseKey, err := strconv.ParseUint(releaseKeyString, 10, 64)
+			if err != nil {
+				return common.TransitionPayload{}, err
+			}
+
+			releaseKey = parsedReleaseKey
 		}
 	}
 
