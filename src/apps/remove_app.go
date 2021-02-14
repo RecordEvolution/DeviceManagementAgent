@@ -4,6 +4,8 @@ import (
 	"context"
 	"reagent/common"
 	"reagent/errdefs"
+
+	"github.com/docker/docker/api/types/container"
 )
 
 func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.App) error {
@@ -35,13 +37,14 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 			}
 		}
 
-		// doesn't seem to work
-		// _, err := sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
-		// if err != nil {
-		// 	if !errdefs.IsContainerNotFound(err) {
-		// 		return err
-		// 	}
-		// }
+		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		if err != nil {
+			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
+			// still useful, and will wait if it's still not removed
+			if !errdefs.IsContainerNotFound(err) {
+				return err
+			}
+		}
 	}
 
 	err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Dev, options)
@@ -72,13 +75,14 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 			}
 		}
 
-		// doesn't seem to work
-		// _, err := sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
-		// if err != nil {
-		// 	if !errdefs.IsContainerNotFound(err) {
-		// 		return err
-		// 	}
-		// }
+		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		if err != nil {
+			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
+			// still useful, and will wait if it's still not removed
+			if !errdefs.IsContainerNotFound(err) {
+				return err
+			}
+		}
 	}
 
 	err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Prod, options)

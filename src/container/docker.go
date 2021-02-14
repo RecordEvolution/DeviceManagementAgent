@@ -571,9 +571,13 @@ func (docker *Docker) RemoveImagesByName(ctx context.Context, imageName string, 
 	}
 
 	for _, image := range images {
-		err := docker.RemoveImageByID(ctx, image.ID, options)
-		if err != nil {
-			return err
+		for _, repoTag := range image.RepoTags {
+			if repoTag != "" {
+				err := docker.RemoveImage(ctx, repoTag, options)
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -600,11 +604,11 @@ func (docker *Docker) RemoveImageByName(ctx context.Context, imageName string, t
 
 	image := images[0]
 
-	return docker.RemoveImageByID(ctx, image.ID, options)
+	return docker.RemoveImage(ctx, image.ID, options)
 }
 
 // RemoveImage removes an image from the host
-func (docker *Docker) RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error {
+func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error {
 	forceKw := options["force"]
 	pruneChildrenKw := options["pruneChildren"]
 

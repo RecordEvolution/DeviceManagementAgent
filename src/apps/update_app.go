@@ -15,7 +15,7 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	}
 
 	// Stop running containers of the app + remove all old images
-	err := sm.removeApp(payload, app)
+	err := sm.removeProdApp(payload, app)
 	if err != nil {
 		return err
 	}

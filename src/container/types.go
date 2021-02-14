@@ -77,7 +77,7 @@ type Container interface {
 	WaitUntilRunning(ctx context.Context, containerID string) error
 	StartContainer(ctx context.Context, containerID string) error
 	GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error)
-	RemoveImageByID(ctx context.Context, imageID string, options map[string]interface{}) error
+	RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
 	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
