@@ -139,7 +139,7 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	return nil
 }
 
-func (sm *StateMachine) executeTransition(app *common.App, payload common.TransitionPayload, transitionFunc TransitionFunc, skipUnlock bool) chan error {
+func (sm *StateMachine) executeTransition(app *common.App, payload common.TransitionPayload, transitionFunc TransitionFunc) chan error {
 	errChannel := make(chan error)
 
 	go func() {
@@ -171,7 +171,7 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 
 func (sm *StateMachine) CancelTransition(app *common.App, payload common.TransitionPayload) chan error {
 	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
-	return sm.executeTransition(app, payload, transitionFunc, true)
+	return sm.executeTransition(app, payload, transitionFunc)
 }
 
 func (sm *StateMachine) PerformTransition(app *common.App, payload common.TransitionPayload) chan error {
@@ -187,5 +187,5 @@ func (sm *StateMachine) PerformTransition(app *common.App, payload common.Transi
 		return nil
 	}
 
-	return sm.executeTransition(app, payload, transitionFunc, false)
+	return sm.executeTransition(app, payload, transitionFunc)
 }
