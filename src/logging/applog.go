@@ -106,6 +106,8 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) {
 
 // ReviveDeadLogs will iterate over all apps that are running and check if it has an active logger subscription. If a subscription exists, it will publish the container logs.
 func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
+	log.Info().Msg("Checking for alive log subscriptions")
+
 	for _, app := range appStates {
 		containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
 		topic := lm.buildTopic(containerName)
@@ -118,7 +120,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 
 		id := result.Arguments[0]
 		if id == nil {
-			log.Printf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
+			log.Debug().Msgf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
 			continue
 		}
 

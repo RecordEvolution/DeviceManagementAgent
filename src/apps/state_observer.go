@@ -82,8 +82,6 @@ func parseContainerName(containerName string) (common.Stage, uint64, string, err
 }
 
 func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appName string) {
-	log.Debug().Msgf("an observer for %s (%s) was removed", appName, stage)
-
 	containerName := common.BuildContainerName(stage, appKey, appName)
 	observer := so.activeObservers[containerName]
 
@@ -97,8 +95,6 @@ func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appNa
 
 func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
-
-	log.Debug().Msgf("an observer for %s (%s) was added", appName, stage)
 
 	if so.activeObservers[containerName] == nil {
 		errC := so.observeAppState(stage, appKey, appName)

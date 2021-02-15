@@ -99,7 +99,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		return err
 	}
 
-	log.Warn().Msgf("requested state according to verify: %s", requestedStatePayload.RequestedState)
+	log.Info().Msgf("Latest requested state (verify): %s", requestedStatePayload.RequestedState)
 
 	// TODO: what to do when the app transition fails? How do we handle that?
 	if app.CurrentState == common.FAILED {
