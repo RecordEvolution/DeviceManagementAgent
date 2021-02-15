@@ -50,7 +50,7 @@ func (am *AppManager) RequestAppState(app *common.App, payload common.Transition
 	// need to call this after we have secured the lock
 	// to not change the actual state in the middle of an ongoing transition
 	// this is necessary because some state transitions require a change of actual state (BUILD & PUBLISH)
-	err := am.UpdateCurrentAppState(app, payload)
+	err := am.UpdateCurrentAppStateWithPayload(app, payload)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 	return nil
 }
 
-func (am *AppManager) UpdateCurrentAppState(app *common.App, payload common.TransitionPayload) error {
+func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload common.TransitionPayload) error {
 	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
 	if app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED {
 		if payload.CurrentState != "" {
