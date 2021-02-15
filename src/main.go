@@ -59,12 +59,7 @@ func main() {
 		Container: container,
 	}
 
-	stateObserver := apps.StateObserver{
-		Container:    container,
-		StateUpdater: &stateUpdater,
-	}
-
-	stateObserver.ObserveAppState()
+	stateObserver := apps.NewObserver(container, &stateUpdater)
 
 	logManager := logging.LogManager{
 		Messenger: messenger,
@@ -101,6 +96,14 @@ func main() {
 	}
 
 	err = appManager.Sync()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to sync")
+	}
+
+	err = stateObserver.ObserveAppStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
+	}
 
 	logManager.Init()
 	logManager.ReviveDeadLogs(apps)

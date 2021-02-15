@@ -64,6 +64,10 @@ func (am *AppManager) RequestAppState(app *common.App, payload common.Transition
 	payload.RegisteryToken = token
 
 	errC := am.StateMachine.PerformTransition(app, payload)
+	if errC == nil {
+		// not yet implemented or nullified state transition
+		return nil
+	}
 
 	// block till transition has finished
 	select {

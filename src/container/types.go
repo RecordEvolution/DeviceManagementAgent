@@ -53,13 +53,28 @@ type HijackedResponse struct {
 	ExecID string
 }
 
+type ContainerState struct {
+	Status     string // String representation of the container state. Can be one of "created", "running", "paused", "restarting", "removing", "exited", or "dead"
+	Running    bool
+	Paused     bool
+	Restarting bool
+	OOMKilled  bool
+	Dead       bool
+	Pid        int
+	ExitCode   int
+	Error      string
+	StartedAt  string
+	FinishedAt string
+}
+
 // Container generic interface for a Container API
 type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
-	ObserveAllContainerStatus(ctx context.Context) (<-chan events.Message, <-chan error)
+	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
+	ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
 	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
 	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)

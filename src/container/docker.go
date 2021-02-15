@@ -50,6 +50,13 @@ func newDockerClient() (*client.Client, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
+func (docker *Docker) ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error) {
+	eventFilters := filters.NewArgs()
+	eventFilters.Add("type", "container")
+
+	return docker.client.Events(ctx, types.EventsOptions{Filters: eventFilters})
+}
+
 // TODO: simplifiy option parsing
 //
 // ListContainers lists containers on the host
@@ -518,20 +525,29 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	return resp.ID, nil
 }
 
-func (docker *Docker) ObserveAllContainerStatus(ctx context.Context) (<-chan events.Message, <-chan error) {
-	eventFilters := filters.NewArgs()
-	eventFilters.Add("type", "container")
-
-	options := types.EventsOptions{Filters: eventFilters}
-	return docker.client.Events(ctx, options)
-}
-
-func (docker *Docker) GetContainerStatus(ctx context.Context, containerName string) (string, error) {
+func (docker *Docker) GetContainerState(ctx context.Context, containerName string) (ContainerState, error) {
 	res, err := docker.client.ContainerInspect(ctx, containerName)
 	if err != nil {
-		return "", err
+		if strings.Contains(err.Error(), "No such container") {
+			return ContainerState{}, errdefs.ContainerNotFound(err)
+		}
+		return ContainerState{}, err
 	}
-	return res.State.Status, nil
+
+	state := res.State
+	return ContainerState{
+		Status:     state.Status,
+		Running:    state.Running,
+		Paused:     state.Paused,
+		Restarting: state.Restarting,
+		OOMKilled:  state.OOMKilled,
+		Dead:       state.Dead,
+		Pid:        state.Pid,
+		ExitCode:   state.ExitCode,
+		Error:      state.Error,
+		StartedAt:  state.StartedAt,
+		FinishedAt: state.FinishedAt,
+	}, nil
 }
 
 func (docker *Docker) WaitUntilRunning(ctx context.Context, containerID string) error {

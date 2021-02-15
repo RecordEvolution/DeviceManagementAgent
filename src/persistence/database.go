@@ -182,6 +182,15 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 		return &common.App{}, err
 	}
 
+	requestedState, err := ast.GetRequestedState(appState)
+	if err != nil {
+		return &common.App{}, err
+	}
+
+	// neccessary to update remote app state (need to know e.g. who to publish updates to)
+	appState.RequestorAccountKey = requestedState.RequestorAccountKey
+	appState.RequestedState = requestedState.RequestedState
+
 	return appState, nil
 }
 
