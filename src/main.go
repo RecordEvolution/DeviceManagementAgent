@@ -54,9 +54,9 @@ func main() {
 	container, _ := container.NewDocker(&generalConfig)
 
 	stateUpdater := apps.StateUpdater{
-		StateStorer: stateStorer,
-		Messenger:   messenger,
-		Container:   container,
+		Database:  stateStorer,
+		Messenger: messenger,
+		Container: container,
 	}
 
 	stateObserver := apps.StateObserver{
@@ -81,14 +81,13 @@ func main() {
 	}
 
 	external := api.External{
-		StateMachine:    &stateMachine,
 		Config:          &generalConfig,
 		LogManager:      &logManager,
 		TerminalManager: &terminalManager,
 		StateUpdater:    &stateUpdater,
 		AppManager:      &appManager,
 		Messenger:       messenger,
-		StateStorer:     stateStorer,
+		Database:        stateStorer,
 	}
 
 	external.RegisterAll()

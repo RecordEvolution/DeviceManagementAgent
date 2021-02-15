@@ -17,9 +17,9 @@ import (
 )
 
 type StateUpdater struct {
-	StateStorer persistence.StateStorer
-	Messenger   messenger.Messenger
-	Container   container.Container
+	Database  persistence.Database
+	Messenger messenger.Messenger
+	Container container.Container
 }
 
 // UpdateLocalRequestedStates will call the remote database to update all its locally stored requested app states
@@ -30,7 +30,7 @@ func (sc *StateUpdater) UpdateLocalRequestedStates() error {
 		return err
 	}
 
-	err = sc.StateStorer.BulkUpsertRequestedStateChanges(appStateChanges)
+	err = sc.Database.BulkUpsertRequestedStateChanges(appStateChanges)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func parseExitCodeFromStatus(status string) string {
 func (su *StateUpdater) UpdateRemoteAppStates() error {
 	ctx := context.Background()
 	containers, err := su.Container.ListContainers(ctx, nil)
-	localStates, err := su.StateStorer.GetAppStates()
+	localStates, err := su.Database.GetAppStates()
 
 	if err != nil {
 		return err
@@ -118,11 +118,11 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 		}
 	}
 
-	return sc.StateStorer.GetRequestedStates()
+	return sc.Database.GetRequestedStates()
 }
 
 func (sc *StateUpdater) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
-	return sc.StateStorer.UpsertAppState(app, stateToSet)
+	return sc.Database.UpsertAppState(app, stateToSet)
 }
 
 // UpdateAppState updates both the remote and local app state, if updating the remote app state fails it does not return an error.

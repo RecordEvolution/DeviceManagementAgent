@@ -27,7 +27,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 
 	config := sm.Container.GetConfig()
 	fileDir := config.CommandLineArguments.AppBuildsDirectory
-	fileName := payload.AppName + config.CommandLineArguments.CompressedBuildExtension
+	fileName := payload.AppName + "." + config.CommandLineArguments.CompressedBuildExtension
 	filePath := fileDir + "/" + fileName
 
 	// need to specify that this is a release build on remote update

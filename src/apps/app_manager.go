@@ -90,7 +90,7 @@ func (am *AppManager) RequestAppState(app *common.App, payload common.Transition
 func (am *AppManager) VerifyState(app *common.App) error {
 	log.Printf("Verifying if app (%d, %s) is in latest state...", app.AppKey, app.Stage)
 
-	requestedStatePayload, err := am.StateUpdater.StateStorer.GetRequestedState(app)
+	requestedStatePayload, err := am.StateUpdater.Database.GetRequestedState(app)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		// we confirmed the release in the backend and can put the state to PRESENT now
 		if builtOrPublishedToPresent {
 			app.CurrentState = common.PRESENT // also set in memory
-			am.StateUpdater.StateStorer.UpsertAppState(app, common.PRESENT)
+			am.StateUpdater.Database.UpsertAppState(app, common.PRESENT)
 			return nil
 		}
 
@@ -136,7 +136,7 @@ func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload 
 		app.Version = payload.PresentVersion
 	}
 
-	err := am.StateUpdater.StateStorer.UpsertAppState(app, app.CurrentState)
+	err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) (*comm
 		}
 
 		// Insert the newly created app state data into the database
-		err := am.StateUpdater.StateStorer.UpsertAppState(app, app.CurrentState)
+		err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +178,7 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) (*comm
 
 	// always update the  app's requestedState using the transition payload
 	app.RequestedState = payload.RequestedState
-	err := am.StateUpdater.StateStorer.UpsertRequestedStateChange(payload)
+	err := am.StateUpdater.Database.UpsertRequestedStateChange(payload)
 	if err != nil {
 		return nil, err
 	}

@@ -16,8 +16,7 @@ import (
 // It contains all the functionality available in the reagent.
 type External struct {
 	Messenger       messenger.Messenger
-	StateStorer     persistence.StateStorer
-	StateMachine    *apps.StateMachine
+	Database        persistence.Database
 	StateUpdater    *apps.StateUpdater
 	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager

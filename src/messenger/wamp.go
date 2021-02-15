@@ -206,7 +206,7 @@ func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
 }
 
 // SetupTestament will setup the device's testament
-// This function is meant to be called everytime a WAMP connection is established
+// This function is meant to be called once on agent start
 func (wampSession *WampSession) SetupTestament() error {
 	ctx := context.Background()
 

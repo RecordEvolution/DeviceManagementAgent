@@ -5,42 +5,54 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/system"
-	"runtime"
 	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/rs/zerolog/log"
 )
 
-type AppStateStorer struct {
+type AppStateDatabase struct {
 	db     *sql.DB
 	config *config.Config
 }
 
-func NewSQLiteDb(config *config.Config) (*AppStateStorer, error) {
-	const databaseFileName = "reagent.db"
+func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
+	databaseFileName := config.CommandLineArguments.DatabaseFileName
 	db, err := sql.Open("sqlite3", "./"+databaseFileName)
 	if err != nil {
 		return nil, err
 	}
-	return &AppStateStorer{db: db, config: config}, nil
+	return &AppStateDatabase{db: db, config: config}, nil
 }
 
-func (sqlite *AppStateStorer) Close() error {
+func (sqlite *AppStateDatabase) Close() error {
 	return sqlite.db.Close()
 }
 
-func (sqlite *AppStateStorer) Init() error {
-	_, b, _, _ := runtime.Caller(0)
-	basepath := filepath.Dir(b)
-	return sqlite.executeFromFile(basepath + "/init-script.sql")
+func (sqlite *AppStateDatabase) Init() error {
+	scriptsDir := sqlite.config.CommandLineArguments.DatabaseScriptsDirectory
+	files, err := ioutil.ReadDir(scriptsDir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		scriptFilePath := scriptsDir + "/" + file.Name()
+		log.Debug().Msgf("Executing Database script with path: %s", scriptFilePath)
+		err := sqlite.executeFromFile(scriptFilePath)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
-func (ast *AppStateStorer) UpsertAppState(app *common.App, newState common.AppState) error {
+func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	defer selectStatement.Close()
 
@@ -134,7 +146,7 @@ func (ast *AppStateStorer) UpsertAppState(app *common.App, newState common.AppSt
 	return nil
 }
 
-func (ast *AppStateStorer) GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error) {
+func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error) {
 
 	preppedStatement, err := ast.db.Prepare(QuerySelectAppStateByAppKeyAndStage)
 	if err != nil {
@@ -172,7 +184,7 @@ func (ast *AppStateStorer) GetAppState(appKey uint64, stage common.Stage) (Persi
 	return appState, nil
 }
 
-func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
+func (ast *AppStateDatabase) GetAppStates() ([]PersistentAppState, error) {
 	rows, err := ast.db.Query(QuerySelectAllAppStates)
 
 	if err != nil {
@@ -197,7 +209,7 @@ func (ast *AppStateStorer) GetAppStates() ([]PersistentAppState, error) {
 	return pAppState, nil
 }
 
-func (ast *AppStateStorer) insertAppState(app *common.App) error {
+func (ast *AppStateDatabase) insertAppState(app *common.App) error {
 	insertStatement, err := ast.db.Prepare(QueryInsertAppStateEntry) // Prepare statement.
 	if err != nil {
 		return err
@@ -215,15 +227,15 @@ func (ast *AppStateStorer) insertAppState(app *common.App) error {
 	return nil
 }
 
-func (ast *AppStateStorer) UpdateDeviceStatus(status system.DeviceStatus) error {
+func (ast *AppStateDatabase) UpdateDeviceStatus(status system.DeviceStatus) error {
 	return ast.updateDeviceState(status, "")
 }
 
-func (ast *AppStateStorer) UpdateNetworkInterface(intf system.NetworkInterface) error {
+func (ast *AppStateDatabase) UpdateNetworkInterface(intf system.NetworkInterface) error {
 	return ast.updateDeviceState("", intf)
 }
 
-func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, error) {
+func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, error) {
 	rows, err := ast.db.Query(QuerySelectAllRequestedStates)
 
 	if err != nil {
@@ -274,7 +286,7 @@ func (ast *AppStateStorer) GetRequestedStates() ([]common.TransitionPayload, err
 	return payloads, nil
 }
 
-func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.TransitionPayload, error) {
+func (ast *AppStateDatabase) GetRequestedState(app *common.App) (common.TransitionPayload, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectRequestedStateByAppKeyAndStage)
 	defer preppedStatement.Close()
 
@@ -345,7 +357,7 @@ func (ast *AppStateStorer) GetRequestedState(app *common.App) (common.Transition
 	return payload, nil
 }
 
-func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error {
+func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error {
 	tx, err := ast.db.Begin()
 	if err != nil {
 		return err
@@ -382,7 +394,7 @@ func (ast *AppStateStorer) BulkUpsertRequestedStateChanges(payloads []common.Tra
 	return tx.Commit()
 }
 
-func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionPayload) error {
+func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.TransitionPayload) error {
 	upsertStatement, err := ast.db.Prepare(QueryUpsertRequestedStateEntry) // Prepare statement.
 	if err != nil {
 		return err
@@ -418,7 +430,7 @@ func (ast *AppStateStorer) UpsertRequestedStateChange(payload common.TransitionP
 	return nil
 }
 
-func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
+func (ast *AppStateDatabase) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectAllDeviceState)
 	if err != nil {
 		return err
@@ -509,7 +521,7 @@ func (ast *AppStateStorer) updateDeviceState(newStatus system.DeviceStatus, newI
 	return nil
 }
 
-func (ast *AppStateStorer) executeFromFile(filePath string) error {
+func (ast *AppStateDatabase) executeFromFile(filePath string) error {
 	file, err := ioutil.ReadFile(filePath)
 
 	if err != nil {

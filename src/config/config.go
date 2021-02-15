@@ -39,6 +39,8 @@ type CommandLineArguments struct {
 	DebugMessaging           bool
 	LogFileLocation          string
 	ConfigFileLocation       string
+	DatabaseScriptsDirectory string
+	DatabaseFileName         string
 }
 
 type Config struct {
@@ -50,9 +52,11 @@ func GetCliArguments() *CommandLineArguments {
 	logFile := flag.String("logFile", "/Users/ruben/Desktop/reagent.log",
 		"Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", false, "sets the log level to debug")
+	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
+	dbScriptsLocation := flag.String("initScripts", "database/update-scripts", "sets the location where database update scripts exist")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	appsBuildDirectory := flag.String("appsDirectory", "/Users/ruben/Desktop", "sets the directory where app build files will be stored")
-	compressedBuildExtension := flag.String("compressedBuildExtension", ".tgz", "sets the extension used to decompress the transfered build files")
+	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension used to decompress the transfered build files")
 	cfgFile := flag.String("config", "./demo_demo_swarm_TestDevice.reswarm",
 		"Configuration file of IoT device running on localhost")
 
@@ -65,6 +69,8 @@ func GetCliArguments() *CommandLineArguments {
 		DebugMessaging:           *debugMessaging,
 		LogFileLocation:          *logFile,
 		ConfigFileLocation:       *cfgFile,
+		DatabaseFileName:         *databaseFileName,
+		DatabaseScriptsDirectory: *dbScriptsLocation,
 	}
 
 	return &cliArgs

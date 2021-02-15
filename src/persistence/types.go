@@ -15,7 +15,7 @@ type PersistentAppState struct {
 	Timestamp  string
 }
 
-type StateStorer interface {
+type Database interface {
 	Init() error // responsible for creating tables etc.
 	UpsertAppState(app *common.App, newState common.AppState) error
 	UpdateDeviceStatus(system.DeviceStatus) error
