@@ -517,13 +517,30 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	return resp.ID, nil
 }
 
-func (docker *Docker) InspectContainer(ctx context.Context, containerName string) (types.ContainerJSON, error) {
-	container, err := docker.GetContainer(ctx, containerName)
-	if err != nil {
-		return types.ContainerJSON{}, err
-	}
+func (docker *Docker) ObserveAllContainerStatus(ctx context.Context) error {
+	eventFilters := filters.NewArgs()
+	eventFilters.Add("type", "container")
 
-	return docker.client.ContainerInspect(ctx, container.ID)
+	options := types.EventsOptions{Filters: eventFilters}
+	eventC, errC := docker.client.Events(ctx, options)
+
+	for {
+		select {
+		case event := <-eventC:
+			common.PrettyPrintDebug(event)
+			break
+		case err := <-errC:
+			return err
+		}
+	}
+}
+
+func (docker *Docker) GetContainerStatus(ctx context.Context, containerName string) (string, error) {
+	res, err := docker.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return "", err
+	}
+	return res.State.Status, nil
 }
 
 func (docker *Docker) WaitUntilRunning(ctx context.Context, containerID string) error {

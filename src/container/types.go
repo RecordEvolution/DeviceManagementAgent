@@ -58,6 +58,7 @@ type Container interface {
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
+	ObserveAllContainerStatus(ctx context.Context) error
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
 	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
 	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)

@@ -19,6 +19,7 @@ type External struct {
 	StateStorer     persistence.StateStorer
 	StateMachine    *apps.StateMachine
 	StateUpdater    *apps.StateUpdater
+	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager
 	LogManager      *logging.LogManager
 	Config          *config.Config

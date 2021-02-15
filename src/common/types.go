@@ -24,7 +24,7 @@ type App struct {
 	Semaphore           *semaphore.Weighted
 }
 
-func (app *App) IsTransitioning() bool {
+func (app *App) SecureLock() bool {
 	if app.Semaphore == nil {
 		log.Error().Err(errors.New("no semaphore initialized"))
 		return false
@@ -32,8 +32,17 @@ func (app *App) IsTransitioning() bool {
 	return !app.Semaphore.TryAcquire(1)
 }
 
-func (app *App) UnlockTransition() {
+func (app *App) Unlock() {
 	app.Semaphore.Release(1)
+}
+
+func (app *App) IsCancelable() bool {
+	for _, transition := range CancelableTransitions {
+		if app.CurrentState == transition {
+			return true
+		}
+	}
+	return false
 }
 
 type StageBasedResult struct {

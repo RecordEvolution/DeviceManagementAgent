@@ -4,6 +4,8 @@ package common
 type AppState string
 type Stage string
 
+var CancelableTransitions = []AppState{BUILDING, PUBLISHING, DOWNLOADING}
+
 const (
 	PRESENT     AppState = "PRESENT"
 	REMOVED     AppState = "REMOVED"

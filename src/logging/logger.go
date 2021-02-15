@@ -1,9 +1,9 @@
 package logging
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"reagent/common"
 	"reagent/config"
 
 	"github.com/rs/zerolog"
@@ -29,31 +29,10 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 
-	prettyArgs, err := format(*cliArgs)
+	prettyArgs, err := common.PrettyFormat(*cliArgs)
 	if err != nil {
 		prettyArgs = fmt.Sprintf("%+v", *cliArgs)
 	}
 
 	log.Debug().Msgf("REAgent CLI Arguments:\n %s", prettyArgs)
-}
-
-func PrettyPrintDebug(data interface{}) {
-	pretty, err := format(data)
-	if err != nil {
-		pretty = fmt.Sprintf("%+v", pretty)
-	}
-
-	log.Debug().Msg(pretty)
-}
-
-func format(data interface{}) (string, error) {
-	var p []byte
-	//    var err := error
-	p, err := json.MarshalIndent(data, "", "\t")
-	if err != nil {
-		fmt.Println(err)
-		return "", err
-	}
-
-	return string(p), nil
 }

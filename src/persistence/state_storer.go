@@ -40,7 +40,7 @@ func (sqlite *AppStateStorer) Init() error {
 	return sqlite.executeFromFile(basepath + "/init-script.sql")
 }
 
-func (ast *AppStateStorer) UpdateAppState(app *common.App, newState common.AppState) error {
+func (ast *AppStateStorer) UpsertAppState(app *common.App, newState common.AppState) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	defer selectStatement.Close()
 

@@ -17,7 +17,7 @@ type PersistentAppState struct {
 
 type StateStorer interface {
 	Init() error // responsible for creating tables etc.
-	UpdateAppState(app *common.App, newState common.AppState) error
+	UpsertAppState(app *common.App, newState common.AppState) error
 	UpdateDeviceStatus(system.DeviceStatus) error
 	UpdateNetworkInterface(system.NetworkInterface) error
 	UpsertRequestedStateChange(payload common.TransitionPayload) error

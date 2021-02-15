@@ -69,13 +69,7 @@ func main() {
 	}
 
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &stateUpdater)
-
-	stateSyncer := apps.StateSyncer{
-		StateMachine: &stateMachine,
-		StateUpdater: &stateUpdater,
-	}
-
-	err = stateSyncer.Sync()
+	appManager := apps.NewAppManager(&stateMachine, &stateUpdater)
 
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to run sync")
@@ -92,16 +86,21 @@ func main() {
 		LogManager:      &logManager,
 		TerminalManager: &terminalManager,
 		StateUpdater:    &stateUpdater,
+		AppManager:      &appManager,
 		Messenger:       messenger,
 		StateStorer:     stateStorer,
 	}
 
 	external.RegisterAll()
 
+	// container.ObserveAllContainerStatus(context.Background())
+
 	appStates, err := stateStorer.GetAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
 	}
+
+	err = appManager.Sync()
 
 	logManager.Init()
 	logManager.ReviveDeadLogs(appStates)

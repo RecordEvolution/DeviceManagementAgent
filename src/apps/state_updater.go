@@ -38,40 +38,6 @@ func (sc *StateUpdater) UpdateLocalRequestedStates() error {
 	return nil
 }
 
-func (sc *StateUpdater) VerifyState(app *common.App, action func(payload common.TransitionPayload) error) error {
-	log.Printf("Verifying if app (%d, %s) is in latest state...", app.AppKey, app.Stage)
-
-	requestedStatePayload, err := sc.StateStorer.GetRequestedState(app)
-	if err != nil {
-		return err
-	}
-
-	// TODO: what to do when the app transition fails? How do we handle that?
-	if app.CurrentState == common.FAILED {
-		log.Print("App transition finished in a failed state")
-		return nil
-	}
-
-	if requestedStatePayload.RequestedState != app.CurrentState {
-		log.Printf("App (%d, %s) is not in latest state (%s), transitioning to %s...", app.AppKey, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
-
-		// TODO: get token only when neccessary
-		token, err := sc.GetRegistryToken(requestedStatePayload.RequestorAccountKey)
-		if err != nil {
-			return err
-		}
-
-		requestedStatePayload.RegisteryToken = token
-		err = action(requestedStatePayload)
-		if err != nil {
-			return err
-		}
-	}
-
-	log.Printf("App (%d, %s) is in latest state!", app.AppKey, app.Stage)
-	return nil
-}
-
 func (sc *StateUpdater) containerStateToAppState(containerState string, status string) (common.AppState, error) {
 	switch containerState {
 	case "running":
@@ -156,7 +122,7 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 }
 
 func (sc *StateUpdater) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
-	return sc.StateStorer.UpdateAppState(app, stateToSet)
+	return sc.StateStorer.UpsertAppState(app, stateToSet)
 }
 
 // UpdateAppState updates both the remote and local app state, if updating the remote app state fails it does not return an error.

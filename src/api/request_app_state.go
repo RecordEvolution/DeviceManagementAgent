@@ -15,23 +15,12 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	// TODO: only fetch token when it's required
-	// Before executing the state transition, fetch a registry token when required
-	token, err := ex.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
+	app, err := ex.AppManager.CreateOrUpdateApp(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	err = ex.StateStorer.UpsertRequestedStateChange(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	payload.RegisteryToken = token
-	err = ex.StateMachine.RequestAppState(payload)
-	if err != nil {
-		return nil, err
-	}
+	go ex.AppManager.RequestAppState(app, payload)
 
 	return &messenger.InvokeResult{}, nil
 }

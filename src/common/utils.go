@@ -1,9 +1,12 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"reagent/config"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 func BuildContainerName(stage Stage, appKey uint64, appName string) string {
@@ -63,4 +66,25 @@ func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, co
 		Dev:  devRegImageName,
 		Prod: prodRegImageName,
 	}
+}
+
+func PrettyPrintDebug(data interface{}) {
+	pretty, err := PrettyFormat(data)
+	if err != nil {
+		pretty = fmt.Sprintf("%+v", pretty)
+	}
+
+	log.Debug().Msg(pretty)
+}
+
+func PrettyFormat(data interface{}) (string, error) {
+	var p []byte
+	//    var err := error
+	p, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+
+	return string(p), nil
 }
