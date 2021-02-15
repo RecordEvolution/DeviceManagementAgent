@@ -9,7 +9,7 @@ SRC := main.go
 
 # compiler and options
 GOC := go
-BFL := #-v
+BFL := -a -v
 
 # adjust environment for build
 #
@@ -23,8 +23,10 @@ BFL := #-v
 CGO := 1
 GOS := linux
 ARC := amd64
-ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC)
-# GOARM=5
+#CCC := arm-linux-gnueabihf-gcc
+#CPP := arm-linux-gnueabihf-g++
+ENV := CGO_ENABLED=$(CGO) GOOS=$(GOS) GOARCH=$(ARC) GOARM=5
+#CC=$(CCC) CXX=$(CPP)
 
 # include platform name/architecture into executable's name
 EXEF := $(EXE)-$(GOS)-$(ARC)
@@ -53,6 +55,7 @@ show-build-env :
 
 clean :
 	rm -f $(EXEF)
+	go clean
 
 clean-all : clean
 	make -C src/logging/ clean
