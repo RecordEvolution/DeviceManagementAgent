@@ -60,8 +60,11 @@ func main() {
 	}
 
 	stateObserver := apps.StateObserver{
+		Container:    container,
 		StateUpdater: &stateUpdater,
 	}
+
+	stateObserver.ObserveAppState()
 
 	logManager := logging.LogManager{
 		Messenger: messenger,
@@ -92,9 +95,7 @@ func main() {
 
 	external.RegisterAll()
 
-	// container.ObserveAllContainerStatus(context.Background())
-
-	appStates, err := stateStorer.GetAppStates()
+	apps, err := stateStorer.GetAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
 	}
@@ -102,7 +103,7 @@ func main() {
 	err = appManager.Sync()
 
 	logManager.Init()
-	logManager.ReviveDeadLogs(appStates)
+	logManager.ReviveDeadLogs(apps)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)

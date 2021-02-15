@@ -114,7 +114,11 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		// we confirmed the release in the backend and can put the state to PRESENT now
 		if builtOrPublishedToPresent {
 			app.CurrentState = common.PRESENT // also set in memory
-			am.StateUpdater.Database.UpsertAppState(app, common.PRESENT)
+			_, err := am.StateUpdater.Database.UpsertAppState(app, common.PRESENT)
+			if err != nil {
+				return err
+			}
+
 			return nil
 		}
 
@@ -136,7 +140,7 @@ func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload 
 		app.Version = payload.PresentVersion
 	}
 
-	err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
+	_, err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
 	if err != nil {
 		return err
 	}
@@ -168,11 +172,12 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) (*comm
 		}
 
 		// Insert the newly created app state data into the database
-		err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
+		timestamp, err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
 		if err != nil {
 			return nil, err
 		}
 
+		app.LastUpdated = timestamp
 		am.apps = append(am.apps, app)
 	}
 

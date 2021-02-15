@@ -9,6 +9,8 @@ import (
 )
 
 type Dict map[string]interface{}
+type Timestamp string
+
 type App struct {
 	AppKey              uint64
 	DeviceToAppKey      uint64
@@ -22,6 +24,7 @@ type App struct {
 	ReleaseBuild        bool
 	Version             string
 	Semaphore           *semaphore.Weighted
+	LastUpdated         Timestamp
 }
 
 func (app *App) SecureLock() bool {

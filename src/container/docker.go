@@ -16,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
@@ -517,22 +518,12 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	return resp.ID, nil
 }
 
-func (docker *Docker) ObserveAllContainerStatus(ctx context.Context) error {
+func (docker *Docker) ObserveAllContainerStatus(ctx context.Context) (<-chan events.Message, <-chan error) {
 	eventFilters := filters.NewArgs()
 	eventFilters.Add("type", "container")
 
 	options := types.EventsOptions{Filters: eventFilters}
-	eventC, errC := docker.client.Events(ctx, options)
-
-	for {
-		select {
-		case event := <-eventC:
-			common.PrettyPrintDebug(event)
-			break
-		case err := <-errC:
-			return err
-		}
-	}
+	return docker.client.Events(ctx, options)
 }
 
 func (docker *Docker) GetContainerStatus(ctx context.Context, containerName string) (string, error) {

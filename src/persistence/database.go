@@ -52,20 +52,20 @@ func (sqlite *AppStateDatabase) Init() error {
 	return nil
 }
 
-func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.AppState) error {
+func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.AppState) (common.Timestamp, error) {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	defer selectStatement.Close()
-
 	if err != nil {
-		return err
+		return "", err
 	}
+
 	rows, err := selectStatement.Query(app.AppKey, app.Stage)
 	hasResult := rows.Next() // only get first result since there should only be one
 
 	if hasResult == false {
 		err := rows.Close()
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		return ast.insertAppState(app)
@@ -76,58 +76,60 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	var curReleaseKey uint64
 	err = rows.Scan(&curState, &curVersion, &curReleaseKey)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
 		err := rows.Close()
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		// Silently do nothing if state is already the same
-		return nil
+		return "", nil
 	}
 
 	err = rows.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// First add new entry in history
 	insertStatement, err := ast.db.Prepare(QueryInsertAppStateHistoryEntry) // Prepare statement.
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, curState, time.Now().Format(time.RFC3339))
+
+	historyTimestamp := time.Now().Format(time.RFC3339)
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, curState, historyTimestamp)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = insertStatement.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Update current app state
 	updateStatement, err := ast.db.Prepare(QueryUpdateAppStateByAppKeyAndStage) // Prepare statement.
 	if err != nil {
-		return err
+		return "", err
 	}
 	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = updateStatement.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Update RequestedAppState
 	requestedState, err := ast.GetRequestedState(app)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
@@ -140,65 +142,64 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	requestedState.ReleaseKey = app.ReleaseKey
 	err = ast.UpsertRequestedStateChange(requestedState)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return common.Timestamp(historyTimestamp), nil
 }
 
-func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error) {
-
+func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*common.App, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectAppStateByAppKeyAndStage)
 	if err != nil {
-		return PersistentAppState{}, err
+		return &common.App{}, err
 	}
 
 	rows, err := preppedStatement.Query(appKey, stage)
 
 	if err != nil {
-		return PersistentAppState{}, err
+		return &common.App{}, err
 	}
 
 	hasRow := rows.Next()
 	if !hasRow {
 		err := rows.Close()
 		if err != nil {
-			return PersistentAppState{}, err
+			return &common.App{}, err
 		}
 
-		return PersistentAppState{}, fmt.Errorf("no app state was found for app key: %d and stage: %s", appKey, stage)
+		return &common.App{}, fmt.Errorf("no app state was found for app key: %d and stage: %s", appKey, stage)
 	}
 
-	appState := PersistentAppState{}
-	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Version, &appState.ReleaseKey, &appState.Stage, &appState.State, &appState.Timestamp)
+	appState := &common.App{}
+	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Version, &appState.ReleaseKey, &appState.Stage, &appState.CurrentState, &appState.LastUpdated)
 
 	if err != nil {
-		return PersistentAppState{}, err
+		return &common.App{}, err
 	}
 
 	err = rows.Close()
 	if err != nil {
-		return PersistentAppState{}, err
+		return &common.App{}, err
 	}
 
 	return appState, nil
 }
 
-func (ast *AppStateDatabase) GetAppStates() ([]PersistentAppState, error) {
+func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
 	rows, err := ast.db.Query(QuerySelectAllAppStates)
 
 	if err != nil {
 		return nil, err
 	}
 
-	pAppState := []PersistentAppState{}
+	apps := []*common.App{}
 	for rows.Next() {
-		s := PersistentAppState{}
-		err = rows.Scan(&s.AppName, &s.AppKey, &s.Version, &s.ReleaseKey, &s.Stage, &s.State, &s.Timestamp)
+		app := &common.App{}
+		err = rows.Scan(&app.AppName, &app.AppKey, &app.Version, &app.ReleaseKey, &app.Stage, &app.CurrentState, &app.LastUpdated)
 		if err != nil {
 			return nil, err
 		}
-		pAppState = append(pAppState, s)
+		apps = append(apps, app)
 	}
 
 	err = rows.Close()
@@ -206,25 +207,28 @@ func (ast *AppStateDatabase) GetAppStates() ([]PersistentAppState, error) {
 		return nil, err
 	}
 
-	return pAppState, nil
+	return apps, nil
 }
 
-func (ast *AppStateDatabase) insertAppState(app *common.App) error {
+// insertAppState inserts a new AppState entry into the database and returns the timestamp
+func (ast *AppStateDatabase) insertAppState(app *common.App) (common.Timestamp, error) {
 	insertStatement, err := ast.db.Prepare(QueryInsertAppStateEntry) // Prepare statement.
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, app.CurrentState, time.Now().Format(time.RFC3339))
+
+	timestamp := time.Now().Format(time.RFC3339)
+	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, app.CurrentState, timestamp)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = insertStatement.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return common.Timestamp(timestamp), nil
 }
 
 func (ast *AppStateDatabase) UpdateDeviceStatus(status system.DeviceStatus) error {
@@ -402,13 +406,15 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 
 	defer upsertStatement.Close()
 
+	// if the payload we received from the backend/database does not include a current state
+	// TODO: test if this is still relevant --> I don't think so since we always send full state now
 	if payload.CurrentState == "" {
-		state, err := ast.GetAppState(payload.AppKey, payload.Stage)
+		app, err := ast.GetAppState(payload.AppKey, payload.Stage)
 		if err != nil {
 			return err
 		}
 
-		payload.CurrentState = state.State
+		payload.CurrentState = app.CurrentState
 	}
 
 	environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)

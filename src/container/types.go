@@ -10,6 +10,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/network"
 )
 
@@ -58,7 +59,7 @@ type Container interface {
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	CancelBuild(ctx context.Context, buildID string) error
-	ObserveAllContainerStatus(ctx context.Context) error
+	ObserveAllContainerStatus(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
 	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
 	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)

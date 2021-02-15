@@ -5,25 +5,15 @@ import (
 	"reagent/system"
 )
 
-type PersistentAppState struct {
-	AppName    string
-	AppKey     int
-	ReleaseKey int
-	Version    string
-	Stage      common.Stage
-	State      common.AppState
-	Timestamp  string
-}
-
 type Database interface {
 	Init() error // responsible for creating tables etc.
-	UpsertAppState(app *common.App, newState common.AppState) error
+	UpsertAppState(app *common.App, newState common.AppState) (common.Timestamp, error)
 	UpdateDeviceStatus(system.DeviceStatus) error
 	UpdateNetworkInterface(system.NetworkInterface) error
 	UpsertRequestedStateChange(payload common.TransitionPayload) error
 	BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error
-	GetAppState(appKey uint64, stage common.Stage) (PersistentAppState, error)
-	GetAppStates() ([]PersistentAppState, error)
+	GetAppState(appKey uint64, stage common.Stage) (*common.App, error)
+	GetAppStates() ([]*common.App, error)
 	GetRequestedState(app *common.App) (common.TransitionPayload, error)
 	GetRequestedStates() ([]common.TransitionPayload, error)
 	Close() error

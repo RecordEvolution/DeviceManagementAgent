@@ -94,7 +94,7 @@ func (su *StateUpdater) UpdateRemoteAppStates() error {
 				continue
 			}
 
-			databaseAppState := localState.State
+			databaseAppState := localState.CurrentState
 			containerAppState, err := su.containerStateToAppState(container.State, container.Status)
 			if err != nil {
 				return err
@@ -121,12 +121,16 @@ func (sc *StateUpdater) GetLatestRequestedStates(fetchRemote bool) ([]common.Tra
 	return sc.Database.GetRequestedStates()
 }
 
-func (sc *StateUpdater) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
+func (sc *StateUpdater) UpdateLocalAppState(app *common.App, stateToSet common.AppState) (common.Timestamp, error) {
 	return sc.Database.UpsertAppState(app, stateToSet)
 }
 
+func (sc *StateUpdater) UpdateAppStateByKeyAndStage(appKey uint64, stage common.Stage) {
+	// app, err := sc.Database.GetAppState(appKey, stage)
+}
+
 // UpdateAppState updates both the remote and local app state, if updating the remote app state fails it does not return an error.
-func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) error {
+func (sc *StateUpdater) UpdateAppState(app *common.App, stateToSet common.AppState) (common.Timestamp, error) {
 	err := sc.UpdateRemoteAppState(app, stateToSet)
 	log.Printf("Set remote state to %s for %s (%s)", stateToSet, app.AppName, app.Stage)
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/messenger/topics"
-	"reagent/persistence"
 	"strings"
 	"time"
 
@@ -106,7 +105,7 @@ func (lm *LogManager) emitStream(subscription *LogSubscription) {
 }
 
 // ReviveDeadLogs will iterate over all apps that are running and check if it has an active logger subscription. If a subscription exists, it will publish the container logs.
-func (lm *LogManager) ReviveDeadLogs(appStates []persistence.PersistentAppState) error {
+func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 	for _, app := range appStates {
 		containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
 		topic := lm.buildTopic(containerName)
