@@ -52,11 +52,13 @@ func (am *AppStore) GetApp(appKey uint64, stage common.Stage) (*common.App, erro
 		return nil, err
 	}
 
+	// app was also not found in database
+	if app == nil {
+		return nil, nil
+	}
+
 	app.Semaphore = semaphore.NewWeighted(1)
 	am.apps = append(am.apps, app)
-
-	// not sure if we should handle it if it's not found in the database either?
-	// shouldn't occur
 
 	return app, nil
 }
