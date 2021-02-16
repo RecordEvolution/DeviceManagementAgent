@@ -15,12 +15,12 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	app, err := ex.AppManager.CreateOrUpdateApp(payload)
+	err = ex.AppManager.CreateOrUpdateApp(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	go ex.AppManager.RequestAppState(app, payload)
+	go ex.AppManager.RequestAppState(payload)
 
 	return &messenger.InvokeResult{}, nil
 }

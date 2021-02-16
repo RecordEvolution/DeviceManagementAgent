@@ -13,17 +13,15 @@ type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common
 
 type StateMachine struct {
 	StateObserver *StateObserver
-	StateUpdater  *StateUpdater
 	Container     container.Container
 	LogManager    *logging.LogManager
 	appStates     []*common.App
 }
 
-func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, updater *StateUpdater) StateMachine {
+func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver) StateMachine {
 	appStates := make([]*common.App, 0)
 	return StateMachine{
 		StateObserver: observer,
-		StateUpdater:  updater,
 		Container:     container,
 		LogManager:    logManager,
 		appStates:     appStates,
@@ -59,9 +57,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: nil,
 			common.PRESENT:     sm.recoverFailToPresentHandler,
-			common.RUNNING:     nil,
+			common.RUNNING:     sm.recoverFailToRunningHandler,
 			common.BUILT:       sm.buildApp,
-			common.PUBLISHED:   nil,
+			common.PUBLISHED:   sm.publishApp,
 		},
 		common.BUILT: {
 			common.REMOVED:     sm.removeApp,
@@ -135,7 +133,6 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 	if err != nil {
 		return err
 	}
-	app.CurrentState = state
 	return nil
 }
 

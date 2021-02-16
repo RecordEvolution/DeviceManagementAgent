@@ -30,8 +30,8 @@ func main() {
 		CommandLineArguments: cliArgs,
 	}
 
-	stateStorer, _ := persistence.NewSQLiteDb(&generalConfig)
-	err = stateStorer.Init()
+	database, _ := persistence.NewSQLiteDb(&generalConfig)
+	err = database.Init()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to initalize SQLite database")
 	}
@@ -53,21 +53,17 @@ func main() {
 
 	container, _ := container.NewDocker(&generalConfig)
 
-	stateUpdater := apps.StateUpdater{
-		Database:  stateStorer,
-		Messenger: messenger,
-		Container: container,
-	}
+	appStore := apps.NewAppStore(database, messenger)
 
-	stateObserver := apps.NewObserver(container, &stateUpdater)
+	stateObserver := apps.NewObserver(container, &appStore)
 
 	logManager := logging.LogManager{
 		Messenger: messenger,
 		Container: container,
 	}
 
-	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &stateUpdater)
-	appManager := apps.NewAppManager(&stateMachine, &stateUpdater)
+	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
+	appManager := apps.NewAppManager(&stateMachine, &appStore)
 
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to run sync")
@@ -82,20 +78,20 @@ func main() {
 		Config:          &generalConfig,
 		LogManager:      &logManager,
 		TerminalManager: &terminalManager,
-		StateUpdater:    &stateUpdater,
 		AppManager:      &appManager,
 		Messenger:       messenger,
-		Database:        stateStorer,
+		Database:        database,
 	}
 
 	external.RegisterAll()
 
-	apps, err := stateStorer.GetAppStates()
+	apps, err := database.GetAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
 	}
 
 	err = appManager.Sync()
+
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}

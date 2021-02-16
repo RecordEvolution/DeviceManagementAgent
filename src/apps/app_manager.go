@@ -4,26 +4,27 @@ import (
 	"reagent/common"
 
 	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/semaphore"
 )
 
 type AppManager struct {
+	AppStore      *AppStore
 	StateMachine  *StateMachine
-	StateUpdater  *StateUpdater
 	StateObserver *StateObserver
-	apps          []*common.App
 }
 
-func NewAppManager(sm *StateMachine, su *StateUpdater) AppManager {
-	apps := make([]*common.App, 0)
+func NewAppManager(sm *StateMachine, as *AppStore) AppManager {
 	return AppManager{
 		StateMachine: sm,
-		StateUpdater: su,
-		apps:         apps,
+		AppStore:     as,
 	}
 }
 
-func (am *AppManager) RequestAppState(app *common.App, payload common.TransitionPayload) error {
+func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
+	app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+	if err != nil {
+		return err
+	}
+
 	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate {
 		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
 		return nil
@@ -44,34 +45,35 @@ func (am *AppManager) RequestAppState(app *common.App, payload common.Transition
 		return nil
 	}
 
-	// unlock the app on function exit
-	defer app.Unlock()
-
 	// need to call this after we have secured the lock
 	// to not change the actual state in the middle of an ongoing transition
 	// this is necessary because some state transitions require a change of actual state (BUILD & PUBLISH)
-	err := am.UpdateCurrentAppStateWithPayload(app, payload)
+	err = am.UpdateCurrentAppState(payload)
 	if err != nil {
+		app.Unlock()
 		return err
 	}
 
 	// before we transition, should request the token
-	token, err := am.StateUpdater.GetRegistryToken(payload.RequestorAccountKey)
+	token, err := am.AppStore.GetRegistryToken(payload.RequestorAccountKey)
 	if err != nil {
+		app.Unlock()
 		return err
 	}
-
 	payload.RegisteryToken = token
 
 	errC := am.StateMachine.PerformTransition(app, payload)
 	if errC == nil {
 		// not yet implemented or nullified state transition
+		app.Unlock()
 		return nil
 	}
 
 	// block till transition has finished
 	select {
 	case err := <-errC:
+		app.Unlock()
+
 		if err == nil {
 			log.Info().Msgf("Successfully finished transaction")
 			// Verify if app has the latest requested state
@@ -94,7 +96,7 @@ func (am *AppManager) RequestAppState(app *common.App, payload common.Transition
 func (am *AppManager) VerifyState(app *common.App) error {
 	log.Printf("Verifying if app (%d, %s) is in latest state...", app.AppKey, app.Stage)
 
-	requestedStatePayload, err := am.StateUpdater.Database.GetRequestedState(app)
+	requestedStatePayload, err := am.AppStore.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
@@ -107,8 +109,6 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		return nil
 	}
 
-	defer log.Printf("App (%d, %s) is in latest state!", app.AppKey, app.Stage)
-
 	if requestedStatePayload.RequestedState != app.CurrentState {
 		log.Printf("App (%d, %s) is not in latest state (%s), transitioning to %s...", app.AppKey, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
 
@@ -118,7 +118,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		// we confirmed the release in the backend and can put the state to PRESENT now
 		if builtOrPublishedToPresent {
 			app.CurrentState = common.PRESENT // also set in memory
-			_, err := am.StateUpdater.Database.UpsertAppState(app, common.PRESENT)
+			_, err := am.AppStore.UpdateLocalAppState(app, common.PRESENT)
 			if err != nil {
 				return err
 			}
@@ -126,13 +126,23 @@ func (am *AppManager) VerifyState(app *common.App) error {
 			return nil
 		}
 
-		go am.RequestAppState(app, requestedStatePayload)
+		go func() {
+			_ = am.RequestAppState(requestedStatePayload)
+			log.Debug().Msg("request app state finished")
+			// log.Printf("App (%d, %s) is in latest state!", app.AppKey, app.Stage)
+
+		}()
 	}
 
 	return nil
 }
 
-func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload common.TransitionPayload) error {
+func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) error {
+	app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+	if err != nil {
+		return err
+	}
+
 	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
 	if app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED {
 		if payload.CurrentState != "" {
@@ -144,7 +154,7 @@ func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload 
 		app.Version = payload.PresentVersion
 	}
 
-	_, err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
+	_, err = am.AppStore.UpdateLocalAppState(app, app.CurrentState)
 	if err != nil {
 		return err
 	}
@@ -152,53 +162,48 @@ func (am *AppManager) UpdateCurrentAppStateWithPayload(app *common.App, payload 
 	return nil
 }
 
-func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) (*common.App, error) {
-	app := am.getApp(payload.AppKey, payload.Stage)
+func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error {
+	app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+	if err != nil {
+		return err
+	}
 
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
-		app = &common.App{
-			AppKey:              payload.AppKey,
-			AppName:             payload.AppName,
-			CurrentState:        payload.CurrentState,
-			DeviceToAppKey:      payload.DeviceToAppKey,
-			ReleaseKey:          payload.ReleaseKey,
-			RequestorAccountKey: payload.RequestorAccountKey,
-			RequestedState:      payload.RequestedState,
-			Stage:               payload.Stage,
-			Version:             payload.PresentVersion,
-			RequestUpdate:       payload.RequestUpdate,
-			Semaphore:           semaphore.NewWeighted(1),
-		}
-
-		if payload.CurrentState == "" {
-			app.CurrentState = common.REMOVED
-		}
-
-		// Insert the newly created app state data into the database
-		timestamp, err := am.StateUpdater.Database.UpsertAppState(app, app.CurrentState)
+		app, err = am.AppStore.AddApp(payload)
 		if err != nil {
-			return nil, err
+			return err
 		}
-
-		app.LastUpdated = timestamp
-		am.apps = append(am.apps, app)
 	}
 
-	// always update the  app's requestedState using the transition payload
+	// Whenever a release confirmation gets requested, we shouldn't override the requestedState if it's not 'BUILT'
+	// For example: whenever the app state goes from FAILED -> RUNNING, it will attempt building with requestedState as 'RUNNING'
+	// this makes sure we don't override this requestedState to 'PRESENT'
+	if app.CurrentState == common.BUILT && app.RequestedState != common.BUILT {
+		return nil
+	}
+
+	// normally should always update the app's requestedState using the transition payload
 	app.RequestedState = payload.RequestedState
-	err := am.StateUpdater.Database.UpsertRequestedStateChange(payload)
+
+	err = am.AppStore.UpdateLocalRequestedState(payload)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return app, nil
+	return nil
 }
 
 func (am *AppManager) Sync() error {
 	log.Info().Msg("Device Sync Initialized...")
 
-	payloads, err := am.StateUpdater.GetLatestRequestedStates(true)
+	// first update the requestedStates that we have in the database
+	err := am.AppStore.UpdateRequestedStatesWithRemote()
+	if err != nil {
+		return err
+	}
+
+	payloads, err := am.AppStore.GetRequestedStates()
 	if err != nil {
 		return err
 	}
@@ -208,26 +213,22 @@ func (am *AppManager) Sync() error {
 	for i := range payloads {
 		payload := payloads[i]
 
-		// if the app doesn't exist yet, make sure it gets added to the local db
-		// also populates app manager with the current states
-		app, err := am.CreateOrUpdateApp(payload)
+		app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
 		if err != nil {
 			return err
 		}
 
-		// transition the app, if changed, to the latest state
-		go am.RequestAppState(app, payload)
-	}
-
-	return nil
-}
-
-func (am *AppManager) getApp(appKey uint64, stage common.Stage) *common.App {
-	for i := range am.apps {
-		state := am.apps[i]
-		if state.AppKey == appKey && state.Stage == stage {
-			return state
+		// if the app doesn't exist yet, make sure it gets added to the local db / memory
+		if app == nil {
+			_, err = am.AppStore.AddApp(payload)
+			if err != nil {
+				return err
+			}
 		}
+
+		// transition the app, if changed, to the latest state
+		go am.RequestAppState(payload)
 	}
+
 	return nil
 }

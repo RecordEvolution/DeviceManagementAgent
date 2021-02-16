@@ -17,7 +17,6 @@ import (
 type External struct {
 	Messenger       messenger.Messenger
 	Database        persistence.Database
-	StateUpdater    *apps.StateUpdater
 	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager
 	LogManager      *logging.LogManager

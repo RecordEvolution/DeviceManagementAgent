@@ -127,7 +127,7 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	}
 
 	// Update RequestedAppState
-	requestedState, err := ast.GetRequestedState(app)
+	requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
 		return "", err
 	}
@@ -167,11 +167,11 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 			return &common.App{}, err
 		}
 
-		return &common.App{}, fmt.Errorf("no app state was found for app key: %d and stage: %s", appKey, stage)
+		return nil, nil
 	}
 
-	appState := &common.App{}
-	err = rows.Scan(&appState.AppName, &appState.AppKey, &appState.Version, &appState.ReleaseKey, &appState.Stage, &appState.CurrentState, &appState.LastUpdated)
+	app := &common.App{}
+	err = rows.Scan(&app.AppName, &app.AppKey, &app.Version, &app.ReleaseKey, &app.Stage, &app.CurrentState, &app.LastUpdated)
 
 	if err != nil {
 		return &common.App{}, err
@@ -182,16 +182,17 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 		return &common.App{}, err
 	}
 
-	requestedState, err := ast.GetRequestedState(appState)
+	requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
 		return &common.App{}, err
 	}
 
 	// neccessary to update remote app state (need to know e.g. who to publish updates to)
-	appState.RequestorAccountKey = requestedState.RequestorAccountKey
-	appState.RequestedState = requestedState.RequestedState
+	app.RequestUpdate = requestedState.RequestUpdate
+	app.RequestorAccountKey = requestedState.RequestorAccountKey
+	app.RequestedState = requestedState.RequestedState
 
-	return appState, nil
+	return app, nil
 }
 
 func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
@@ -208,6 +209,16 @@ func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
+		if err != nil {
+			return nil, err
+		}
+
+		// neccessary to update remote app state (need to know e.g. who to publish updates to)
+		app.RequestorAccountKey = requestedState.RequestorAccountKey
+		app.RequestedState = requestedState.RequestedState
+		app.RequestUpdate = requestedState.RequestUpdate
 		apps = append(apps, app)
 	}
 
@@ -299,7 +310,7 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 	return payloads, nil
 }
 
-func (ast *AppStateDatabase) GetRequestedState(app *common.App) (common.TransitionPayload, error) {
+func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage) (common.TransitionPayload, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectRequestedStateByAppKeyAndStage)
 	defer preppedStatement.Close()
 
@@ -307,7 +318,7 @@ func (ast *AppStateDatabase) GetRequestedState(app *common.App) (common.Transiti
 		return common.TransitionPayload{}, err
 	}
 
-	rows, err := preppedStatement.Query(app.AppKey, app.Stage)
+	rows, err := preppedStatement.Query(aKey, aStage)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -320,12 +331,11 @@ func (ast *AppStateDatabase) GetRequestedState(app *common.App) (common.Transiti
 			return common.TransitionPayload{}, err
 		}
 
-		return common.TransitionPayload{}, fmt.Errorf("No requested state found for app_key: %d with stage: %s", app.AppKey, app.Stage)
+		return common.TransitionPayload{}, fmt.Errorf("No requested state found for app_key: %d with stage: %s", aKey, aStage)
 	}
 
 	var appName string
 	var appKey uint64
-	// var deviceToAppKey uint64
 	var requestorAccountKey uint64
 	var stage common.Stage
 	var version string
@@ -336,7 +346,6 @@ func (ast *AppStateDatabase) GetRequestedState(app *common.App) (common.Transiti
 	var currentState common.AppState
 	var requestedState common.AppState
 	var environmentVariablesString string
-	// var callerAuthID string
 
 	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
 	if err != nil {
