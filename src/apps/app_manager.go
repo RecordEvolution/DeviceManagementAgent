@@ -79,12 +79,12 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		app.Unlock()
 
 		if errdefs.IsNoActionTransition(err) {
-			log.Info().Msg("A no action transition was executed, nothing to do. Will also not verify")
+			log.Debug().Msg("App Manager: A no action transition was executed, nothing to do. Will also not verify")
 			return nil
 		}
 
 		if err == nil {
-			log.Info().Msgf("Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
+			log.Info().Msgf("App Manager: Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
 
 			// Verify if app has the latest requested state
 			// TODO: properly handle it when verifying fails
@@ -104,12 +104,12 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			setStateErr := am.StateObserver.Notify(app, common.FAILED)
 			if setStateErr != nil {
 				// wrap errors into one
-				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
+				err = fmt.Errorf("App Manager: Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
 			}
 		}
 
-		log.Error().Msgf("An error occured during transition from %s to %s", app.CurrentState, payload.RequestedState)
-		log.Error().Err(err).Msg("The current app state will has been set to FAILED")
+		log.Error().Msgf("App Manager: An error occured during transition from %s to %s", app.CurrentState, payload.RequestedState)
+		log.Error().Err(err).Msg("App Manager: The current app state will has been set to FAILED")
 	}
 
 	return nil

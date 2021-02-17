@@ -140,15 +140,6 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 	return listOfDict, nil
 }
 
-func (docker *Docker) InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
-	result, err := docker.client.ContainerInspect(ctx, containerID)
-	if client.IsErrNotFound(err) {
-		return types.ContainerJSON{}, errdefs.ContainerNotFound(err)
-	}
-
-	return result, err
-}
-
 func (docker *Docker) GetContainer(ctx context.Context, containerName string) (types.Container, error) {
 	filters := filters.NewArgs()
 	filters.Add("name", containerName)
@@ -548,7 +539,7 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 func (docker *Docker) GetContainerState(ctx context.Context, containerName string) (ContainerState, error) {
 	res, err := docker.client.ContainerInspect(ctx, containerName)
 	if err != nil {
-		if strings.Contains(err.Error(), "No such container") {
+		if client.IsErrNotFound(err) {
 			return ContainerState{}, errdefs.ContainerNotFound(err)
 		}
 		return ContainerState{}, err

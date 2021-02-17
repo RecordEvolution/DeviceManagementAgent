@@ -21,6 +21,7 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
+	sm.setState(app, common.DELETING)
 	options := map[string]interface{}{"force": true}
 	// check if the image has a running container
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
@@ -58,6 +59,7 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
+	sm.setState(app, common.DELETING)
 	options := map[string]interface{}{"force": true}
 
 	// check if the image has a running container

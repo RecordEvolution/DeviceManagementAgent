@@ -144,7 +144,7 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 	errChannel := make(chan error)
 
 	go func() {
-		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		log.Info().Msgf("State Machine: Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		err := transitionFunc(payload, app)
 
 		// send potential error to errChannel

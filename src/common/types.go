@@ -40,12 +40,7 @@ func (app *App) Unlock() {
 }
 
 func (app *App) IsCancelable() bool {
-	for _, transition := range CancelableTransitions {
-		if app.CurrentState == transition {
-			return true
-		}
-	}
-	return false
+	return IsCancelableState(app.CurrentState)
 }
 
 type StageBasedResult struct {

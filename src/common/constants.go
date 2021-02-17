@@ -1,10 +1,65 @@
 package common
 
+import "errors"
+
 // AppState states
 type AppState string
 type Stage string
 
-var CancelableTransitions = []AppState{BUILDING, PUBLISHING, DOWNLOADING}
+func IsCancelableState(appState AppState) bool {
+	switch appState {
+	case BUILDING, PUBLISHING, DOWNLOADING:
+		return true
+	}
+	return false
+}
+
+func IsTransientState(appState AppState) bool {
+	switch appState {
+	case BUILDING,
+		BUILT,
+		TRANSFERED,
+		DELETING,
+		TRANSFERING,
+		PUBLISHING,
+		PUBLISHED,
+		DOWNLOADING,
+		UPDATING,
+		STARTING:
+		return true
+	}
+	return false
+}
+
+func ContainerStateToAppState(containerState string, exitCode int) (AppState, error) {
+	unknownStateErr := errors.New("unkown state")
+
+	switch containerState {
+	case "running":
+		return RUNNING, nil
+	case "created":
+		return "", unknownStateErr
+	case "removing":
+		return STOPPING, nil
+	case "paused": // won't occur (as of writing)
+		return "", unknownStateErr
+	case "restarting":
+		return FAILED, nil
+	case "exited":
+		// 137 = SIGKILL received
+		// 0 = Normal exit without error
+		// if exitCode == 0 || exitCode == 137 {
+		// 	return PRESENT, nil
+		// }
+
+		// for now it's more clear to the user, that their container exited if we set it to failed
+		return FAILED, nil
+	case "dead":
+		return FAILED, nil
+	}
+
+	return "", unknownStateErr
+}
 
 const (
 	PRESENT     AppState = "PRESENT"

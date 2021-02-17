@@ -122,7 +122,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 
 		id := result.Arguments[0]
 		if id == nil {
-			log.Debug().Msgf("(%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
+			log.Debug().Msgf("Log Manager: (%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
 			continue
 		}
 
@@ -190,16 +190,16 @@ func (lm *LogManager) SetupEndpoints() error {
 		activeSubscription := lm.activeLogs[idString]
 
 		if activeSubscription.Stream == nil {
-			log.Info().Msg("stream was empty, nothing to close")
+			log.Info().Msg("Log Manager: stream was empty, nothing to close")
 		} else {
 			// cancel the io stream that is active
 			// TODO: figure out way to handle errors inside a subscription callback, however this error would be rare
 			err := activeSubscription.Stream.Close()
 			if err != nil {
-				return errors.New("error occured while trying to close stream")
+				return errors.New("Log Manager: error occured while trying to close stream")
 			}
 
-			log.Print("Closed active stream for", activeSubscription.ContainerName)
+			log.Print("Log Manager: Closed active stream for", activeSubscription.ContainerName)
 		}
 
 		// remove entry from active logs map

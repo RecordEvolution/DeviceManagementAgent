@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
@@ -68,7 +67,7 @@ func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appNa
 	if observer != nil {
 		close(observer.errChan)
 		delete(so.activeObservers, containerName)
-		log.Debug().Msgf("removed an observer for %s (%s)", appName, stage)
+		log.Debug().Msgf("State Observer: removed an observer for %s (%s)", appName, stage)
 	}
 	so.mapMutex.Unlock()
 }
@@ -79,6 +78,7 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	so.mapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
 		errC := so.observeAppState(stage, appKey, appName)
+		log.Debug().Msgf("State Observer: created an observer for %s (%s)", appName, stage)
 		so.activeObservers[containerName] = &AppStateObserver{
 			AppKey:  appKey,
 			AppName: appName,
@@ -107,7 +107,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			return err
 		}
 
-		container, err := so.Container.InspectContainer(ctx, containerName)
+		container, err := so.Container.GetContainerState(ctx, containerName)
 		if err != nil {
 			if errdefs.IsContainerNotFound(err) {
 
@@ -130,7 +130,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			}
 		}
 
-		appStateDeterminedByContainer, err := containerStateToAppState(container.State.Status, int(container.State.ExitCode))
+		appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 					return
 				}
 
-				// don't return error, we just finish
+				log.Debug().Msgf("State Observer: No container was found for %s, removing observer..", containerName)
 				return
 			}
 
@@ -198,7 +198,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			}
 
 			// check if correct and update database if needed
-			latestAppState, err := containerStateToAppState(state.Status, state.ExitCode)
+			latestAppState, err := common.ContainerStateToAppState(state.Status, state.ExitCode)
 			if err != nil {
 				errorC <- err
 				return
@@ -210,9 +210,9 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				return
 			}
 
-			if app.CurrentState != latestAppState && !isTransientState(app.CurrentState) && !isTransientState(latestAppState) {
-				log.Debug().Msgf("Observer: app (%s, %s) state is not up to date", appName, stage)
-				log.Debug().Msgf("Observer: app (%s, %s) updating from %s to %s", appName, stage, app.CurrentState, latestAppState)
+			if app.CurrentState != latestAppState && !common.IsTransientState(app.CurrentState) && !common.IsTransientState(latestAppState) {
+				log.Debug().Msgf("State Observer: app (%s, %s) state is not up to date", appName, stage)
+				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, app.CurrentState, latestAppState)
 
 				// update the app state
 				err := so.Notify(app, latestAppState)
@@ -279,49 +279,4 @@ func (so *StateObserver) ObserveAppStates() error {
 	_ = so.initObserverSpawner()
 
 	return err
-}
-
-func isTransientState(appState common.AppState) bool {
-	switch appState {
-	case common.BUILDING,
-		common.BUILT,
-		common.TRANSFERED,
-		common.TRANSFERING,
-		common.PUBLISHING,
-		common.PUBLISHED,
-		common.DOWNLOADING,
-		common.UPDATING,
-		common.DELETING,
-		common.STARTING:
-		return true
-	}
-	return false
-}
-
-func containerStateToAppState(containerState string, exitCode int) (common.AppState, error) {
-	unknownStateErr := errors.New("unkown state")
-
-	switch containerState {
-	case "running":
-		return common.RUNNING, nil
-	case "created":
-		return "", unknownStateErr
-	case "removing":
-		return common.STOPPING, nil
-	case "paused": // won't occur (as of writing)
-		return "", unknownStateErr
-	case "restarting":
-		return common.FAILED, nil
-	case "exited":
-		// 137 = SIGKILL received
-		// 0 = Normal exit without error
-		if exitCode == 0 || exitCode == 137 {
-			return common.PRESENT, nil
-		}
-		return common.FAILED, nil
-	case "dead":
-		return common.FAILED, nil
-	}
-
-	return "", unknownStateErr
 }
