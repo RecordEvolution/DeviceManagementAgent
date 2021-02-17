@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Reagent initialization in /etc/init.d/S99reagent
+# Reagent initialization in /etc/init.d/S97reagent
 
 # check for *.reswarm file in /boot directory
 reswmexst=$(ls /boot/ | grep -E ".reswarm" | head -n1)
@@ -14,21 +14,20 @@ fi
 
 # evtl. use CLI parameters given reswarm file
 # TODO
-
 appsDir=""
 cbldExt=""
 resfile=""
 debug=""
 logfile=""
 
-# provide architecture/platform (dependent executable name) in config file!!
-REAGENT=$(echo "reagent-linux-amd64")
+# use constant executable name (TODO: include version number and architecture)
+REAGENT="/opt/reagent/reagent-v0.1"
 
 case "$1" in
 
   start)
 
-    /usr/bin/$(REAGENT) -appsDirectory $(appsDir) -compressedBuildExtension $(cbldExt) -config $(resfile) -logfile $(logfile)
+    $(REAGENT) -appsDirectory $(appsDir) -compressedBuildExtension $(cbldExt) -config $(resfile) -logfile $(logfile)
     ;;
 
   stop)

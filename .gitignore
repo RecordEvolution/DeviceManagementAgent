@@ -27,3 +27,6 @@ reagent-*
 src/reagent
 
 reagent.db
+
+system-test
+

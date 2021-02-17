@@ -9,7 +9,7 @@ SRC := main.go
 
 # compiler and options
 GOC := go
-BFL := -a -v
+BFL := -v #-a -v
 
 # adjust environment for build
 #

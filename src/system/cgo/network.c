@@ -7,7 +7,7 @@
 #include <glib-object.h>
 
 int
-maintest (int argc, char *argv[])
+main (int argc, char *argv[])
 {
 	NMClient *client;
 

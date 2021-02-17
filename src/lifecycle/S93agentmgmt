@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# Agent manager initialization in /etc/init.d/S93agentmgmt
+
+# check for *.reswarm file in /boot directory
+reswmexst=$(ls /boot/ | grep -E ".reswarm" | head -n1)
+
+if [ -z ${reswmexst} ]; then
+  echo "no reswarm configuration file found => not going to run the agent manager"
+  exit 1
+else
+  echo "found reswarm file: ${reswmexst} => going to launch agent manager..."
+fi
+
+case "$1" in
+
+  start)
+
+    /usr/bin/manage-agent.sh
+    ;;
+
+  stop)
+
+    ;;
+
+  restart)
+
+    ;;
+
+  *)
+
+    echo "Usage: $0 start"
+    exit 1
+    ;;
+
+esac
