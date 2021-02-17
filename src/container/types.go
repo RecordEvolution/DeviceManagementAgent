@@ -17,13 +17,14 @@ import (
 
 // ContainerResult generic result for the container method ListContainers
 type ContainerResult struct { // More fields can be added if needed, needs to be as generic as possible in case we want to use other container implementations
-	ID      string
-	Names   []string
-	ImageID string
-	Labels  map[string]string
-	Status  string
-	State   string
-	Command string
+	ID       string
+	Names    []string
+	ImageID  string
+	Labels   map[string]string
+	Status   string
+	State    string
+	ExitCode int64
+	Command  string
 }
 
 type AuthConfig struct {

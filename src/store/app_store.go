@@ -1,4 +1,4 @@
-package apps
+package store
 
 import (
 	"context"

@@ -2,8 +2,11 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reagent/config"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -40,6 +43,50 @@ func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []stri
 	}
 
 	return stringArray
+}
+
+func ParseExitCodeFromContainerStatus(status string) (int64, error) {
+	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
+	exitCodeString := strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
+	exitCodeInt, err := strconv.ParseInt(exitCodeString, 10, 64)
+	if err != nil {
+		return -1, err
+	}
+
+	return exitCodeInt, nil
+}
+
+func ParseContainerName(containerName string) (Stage, uint64, string, error) {
+	if containerName == "" {
+		return "", 0, "", errors.New("container name is empty")
+	}
+
+	var stage Stage
+	var appKey uint64
+	var name string
+
+	containerSplit := strings.Split(containerName, "_")
+	if len(containerSplit) != 3 {
+		return "", 0, "", errors.New("invalid container name")
+	}
+
+	if containerSplit[0] == "dev" {
+		stage = DEV
+	} else if containerSplit[0] == "prod" {
+		stage = PROD
+	} else {
+		stage = ""
+	}
+
+	parsedAppKey, err := strconv.ParseUint(containerSplit[1], 10, 64)
+	if err != nil {
+		return "", 0, "", err
+	}
+	appKey = parsedAppKey
+
+	name = containerSplit[2]
+
+	return stage, appKey, name, nil
 }
 
 func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, config *config.Config) {

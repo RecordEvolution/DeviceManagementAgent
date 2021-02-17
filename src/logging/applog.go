@@ -132,7 +132,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 	return nil
 }
 
-func (lm *LogManager) Init() error {
+func (lm *LogManager) SetupWampSubscriptions() error {
 	lm.activeLogs = make(map[string]*LogSubscription)
 
 	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {

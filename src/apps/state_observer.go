@@ -6,8 +6,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
-	"strconv"
-	"strings"
+	"reagent/store"
 	"sync"
 	"time"
 
@@ -22,13 +21,13 @@ type AppStateObserver struct {
 }
 
 type StateObserver struct {
-	AppStore        *AppStore
+	AppStore        *store.AppStore
 	Container       container.Container
 	activeObservers map[string]*AppStateObserver
 	mapMutex        sync.Mutex
 }
 
-func NewObserver(container container.Container, appStore *AppStore) StateObserver {
+func NewObserver(container container.Container, appStore *store.AppStore) StateObserver {
 	return StateObserver{
 		Container:       container,
 		AppStore:        appStore,
@@ -61,40 +60,6 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 	return nil
 }
 
-func parseContainerName(containerName string) (common.Stage, uint64, string, error) {
-	if containerName == "" {
-		return "", 0, "", errors.New("container name is empty")
-	}
-
-	var stage common.Stage
-	var appKey uint64
-	var name string
-
-	containerSplit := strings.Split(containerName, "_")
-
-	if len(containerSplit) >= 1 && containerSplit[0] == "dev" {
-		stage = common.DEV
-	} else if len(containerSplit) >= 1 && containerSplit[0] == "prod" {
-		stage = common.PROD
-	} else {
-		stage = ""
-	}
-
-	if len(containerSplit) >= 2 {
-		parsedAppKey, err := strconv.ParseUint(containerSplit[1], 10, 64)
-		if err != nil {
-			return "", 0, "", err
-		}
-		appKey = parsedAppKey
-	}
-
-	if len(containerSplit) == 3 {
-		name = containerSplit[2]
-	}
-
-	return stage, appKey, name, nil
-}
-
 func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
 	so.mapMutex.Lock()
@@ -124,10 +89,69 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	so.mapMutex.Unlock()
 }
 
+// CorrectLocalAndUpdateRemoteAppStates ensures that the app state corresponds with the container status of the app.
+// Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely.
+func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
+	ctx := context.Background()
+	containers, err := so.Container.ListContainers(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	for _, container := range containers {
+		// Can be one of "created", "running", "paused", "restarting", "removing", "exited", or "dead"
+		for _, containerName := range container.Names {
+			stage, appKey, _, err := common.ParseContainerName(containerName)
+			if err != nil {
+				continue
+			}
+
+			app, err := so.AppStore.GetApp(appKey, stage)
+
+			if app == nil {
+				log.Debug().Msgf("found a container (%s) that does not have a corresponding app, skipping", containerName)
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			stateAppShouldBe, err := containerStatusToAppState(container.Status, int(container.ExitCode))
+
+			switch app.CurrentState {
+			case common.DOWNLOADING:
+			case common.TRANSFERING:
+			case common.BUILDING:
+				app.CurrentState = common.REMOVED
+				break
+			case common.PUBLISHING:
+			case common.STOPPING:
+			case common.STARTING:
+				app.CurrentState = stateAppShouldBe
+				break
+			default:
+				if app.CurrentState != stateAppShouldBe {
+					app.CurrentState = stateAppShouldBe
+				}
+			}
+
+			err = so.Notify(app, stateAppShouldBe)
+			if err != nil {
+				return err
+			}
+
+		}
+	}
+
+	return nil
+}
+
 func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
 	ctx := context.Background()
 	containerName := common.BuildContainerName(stage, appKey, appName)
 	errorC := make(chan error, 1)
+	pollingRate := time.Second * 2
 
 	go func() {
 		lastKnownStatus := "UKNOWN"
@@ -150,7 +174,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			// always executed the state check on init
 			if lastKnownStatus == state.Status {
 				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
-				time.Sleep(time.Second / 2)
+				time.Sleep(pollingRate)
 				continue
 			}
 
@@ -182,7 +206,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			// update the last recorded status
 			lastKnownStatus = state.Status
 
-			time.Sleep(time.Second / 2)
+			time.Sleep(pollingRate)
 		}
 	}()
 
@@ -202,7 +226,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 				switch event.Action {
 				case "create":
 					containerName := event.Actor.Attributes["name"]
-					stage, key, name, err := parseContainerName(containerName)
+					stage, key, name, err := common.ParseContainerName(containerName)
 					if err != nil {
 						errChan <- err
 						close(errChan)
@@ -257,15 +281,17 @@ func isTransientState(appState common.AppState) bool {
 }
 
 func containerStatusToAppState(containerStatus string, exitCode int) (common.AppState, error) {
+	unknownStateErr := errors.New("unkown state")
+
 	switch containerStatus {
 	case "running":
 		return common.RUNNING, nil
 	case "created":
-		return common.STARTING, nil
+		return "", unknownStateErr
 	case "removing":
 		return common.STOPPING, nil
 	case "paused": // won't occur (as of writing)
-		return common.STOPPED, nil
+		return "", unknownStateErr
 	case "restarting":
 		return common.FAILED, nil
 	case "exited":
@@ -277,5 +303,5 @@ func containerStatusToAppState(containerStatus string, exitCode int) (common.App
 		return common.FAILED, nil
 	}
 
-	return "", errors.New("unkown state")
+	return "", unknownStateErr
 }

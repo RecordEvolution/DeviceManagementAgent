@@ -11,6 +11,7 @@ import (
 	"reagent/logging"
 	"reagent/messenger"
 	"reagent/persistence"
+	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
 
@@ -25,15 +26,9 @@ func InitialSetup(
 	logManager *logging.LogManager,
 	stateObserver *apps.StateObserver,
 ) error {
-	err := system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
+	err := stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	}
-
-	external.RegisterAll()
-	apps, err := database.GetAppStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
+		log.Fatal().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
 
 	err = appManager.Sync()
@@ -41,13 +36,25 @@ func InitialSetup(
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}
 
+	apps, err := database.GetAppStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
+	}
+
 	err = stateObserver.ObserveAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
-	logManager.Init()
+	logManager.SetupWampSubscriptions()
 	logManager.ReviveDeadLogs(apps)
+
+	external.RegisterAll()
+
+	err = system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
 
 	return err
 }
@@ -84,7 +91,7 @@ func main() {
 
 	container, _ := container.NewDocker(&generalConfig)
 
-	appStore := apps.NewAppStore(database, messenger)
+	appStore := store.NewAppStore(database, messenger)
 
 	stateObserver := apps.NewObserver(container, &appStore)
 
@@ -96,7 +103,7 @@ func main() {
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 
-	terminalManager, err := terminal.InitManager(messenger, container)
+	terminalManager, err := terminal.NewTerminalManager(messenger, container)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed init terminal manager")
 	}
@@ -142,7 +149,7 @@ func main() {
 				if messenger.Connected() {
 					doneSignal = messenger.Done()
 
-					// rerun boot setup
+					// rerun setup
 					err = InitialSetup(&external, messenger, database, &appManager, &logManager, &stateObserver)
 					if err != nil {
 						log.Fatal().Stack().Err(err).Msg("failed to init")

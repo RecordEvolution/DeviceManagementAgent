@@ -114,6 +114,12 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 
 	listOfDict := make([]ContainerResult, 0)
 	for _, cont := range cList {
+
+		exitCode := int64(-1)
+		if cont.State == "exited" {
+			exitCode, err = common.ParseExitCodeFromContainerStatus(cont.Status)
+		}
+
 		dict := ContainerResult{
 			ID:      cont.ID,
 			Names:   cont.Names,
@@ -123,6 +129,11 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 			State:   cont.State,
 			Status:  cont.Status,
 		}
+
+		if exitCode != -1 {
+			dict.ExitCode = exitCode
+		}
+
 		listOfDict = append(listOfDict, dict)
 	}
 

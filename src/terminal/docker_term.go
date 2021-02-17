@@ -355,7 +355,7 @@ func (tm *TerminalManager) initUnregisterWatcher() error {
 	return nil
 }
 
-func InitManager(messenger messenger.Messenger, container container.Container) (TerminalManager, error) {
+func NewTerminalManager(messenger messenger.Messenger, container container.Container) (TerminalManager, error) {
 	sessionsMap := make(map[string]*TerminalSession)
 
 	manager := TerminalManager{

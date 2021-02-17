@@ -4,17 +4,18 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/store"
 
 	"github.com/rs/zerolog/log"
 )
 
 type AppManager struct {
-	AppStore      *AppStore
+	AppStore      *store.AppStore
 	StateMachine  *StateMachine
 	StateObserver *StateObserver
 }
 
-func NewAppManager(sm *StateMachine, as *AppStore, so *StateObserver) AppManager {
+func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver) AppManager {
 	return AppManager{
 		StateMachine:  sm,
 		StateObserver: so,
@@ -219,6 +220,8 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	return nil
 }
 
+// Sync is responsible for fetching any requested app states from the remote database.
+// The local database will be updated with the fetched requested states. In case an app state does exist yet locally, one will be created.
 func (am *AppManager) Sync() error {
 	log.Info().Msg("Device Sync Initialized...")
 
