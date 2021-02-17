@@ -172,6 +172,9 @@ func (am *AppStore) fetchRequestedAppStates() ([]common.TransitionPayload, error
 	ctx := context.Background()
 	config := am.messenger.GetConfig()
 	args := []interface{}{common.Dict{"device_key": config.ReswarmConfig.DeviceKey}}
+
+	log.Debug().Msgf("Fetching requested states for device with key: %d", config.ReswarmConfig.DeviceKey)
+
 	result, err := am.messenger.Call(ctx, topics.GetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
 		return []common.TransitionPayload{}, err

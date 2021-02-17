@@ -28,7 +28,7 @@ func NewStateMachine(container container.Container, logManager *logging.LogManag
 	}
 }
 
-func noActionTransitionFunc(TransitionPayload common.TransitionPayload, app *common.App) error {
+func (sm *StateMachine) noActionTransitionFunc(TransitionPayload common.TransitionPayload, app *common.App) error {
 	return errdefs.NoActionTransition()
 }
 
@@ -68,7 +68,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.BUILT: {
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.PRESENT:     noActionTransitionFunc,
+			common.PRESENT:     sm.noActionTransitionFunc,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -87,7 +87,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     sm.runApp,
-			common.PRESENT:     noActionTransitionFunc,
+			common.PRESENT:     sm.noActionTransitionFunc,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 		},

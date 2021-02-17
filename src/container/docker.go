@@ -140,6 +140,15 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 	return listOfDict, nil
 }
 
+func (docker *Docker) InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
+	result, err := docker.client.ContainerInspect(ctx, containerID)
+	if client.IsErrNotFound(err) {
+		return types.ContainerJSON{}, errdefs.ContainerNotFound(err)
+	}
+
+	return result, err
+}
+
 func (docker *Docker) GetContainer(ctx context.Context, containerName string) (types.Container, error) {
 	filters := filters.NewArgs()
 	filters.Add("name", containerName)

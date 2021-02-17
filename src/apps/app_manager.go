@@ -79,12 +79,12 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		app.Unlock()
 
 		if errdefs.IsNoActionTransition(err) {
-			log.Info().Msg("A no action transition was executed, nothing to do.")
+			log.Info().Msg("A no action transition was executed, nothing to do. Will also not verify")
 			return nil
 		}
 
 		if err == nil {
-			log.Info().Msgf("Successfully finished transaction for App (%d, %s)", app.AppKey, app.Stage)
+			log.Info().Msgf("Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
 
 			// Verify if app has the latest requested state
 			// TODO: properly handle it when verifying fails
@@ -116,7 +116,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 }
 
 func (am *AppManager) VerifyState(app *common.App) error {
-	log.Printf("Verifying if app (%d, %s) is in latest state...", app.AppKey, app.Stage)
+	log.Printf("Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
 
 	requestedStatePayload, err := am.AppStore.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
@@ -132,7 +132,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 	}
 
 	if requestedStatePayload.RequestedState != app.CurrentState {
-		log.Printf("App (%d, %s) is not in latest state (%s), transitioning to %s...", app.AppKey, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
+		log.Printf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
 
 		// transition again
 		go func() {
@@ -220,11 +220,24 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	return nil
 }
 
-// Sync is responsible for fetching any requested app states from the remote database.
-// The local database will be updated with the fetched requested states. In case an app state does exist yet locally, one will be created.
-func (am *AppManager) Sync() error {
-	log.Info().Msg("Device Sync Initialized...")
+// EvaluateRequestedStates iterates over all requested states found in the local database, and transitions were neccessary.
+func (am *AppManager) EvaluateRequestedStates() error {
+	payloads, err := am.AppStore.GetRequestedStates()
+	if err != nil {
+		return err
+	}
 
+	for i := range payloads {
+		payload := payloads[i]
+		go am.RequestAppState(payload)
+	}
+
+	return nil
+}
+
+// UpdateLocalRequestedAppStatesWithRemote is responsible for fetching any requested app states from the remote database.
+// The local database will be updated with the fetched requested states. In case an app state does exist yet locally, one will be created.
+func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 	// first update the requestedStates that we have in the database
 	err := am.AppStore.UpdateRequestedStatesWithRemote()
 	if err != nil {
@@ -236,7 +249,7 @@ func (am *AppManager) Sync() error {
 		return err
 	}
 
-	log.Info().Msgf("Checking current app states for %d apps..", len(payloads))
+	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(payloads))
 
 	for i := range payloads {
 		payload := payloads[i]
@@ -253,9 +266,6 @@ func (am *AppManager) Sync() error {
 				return err
 			}
 		}
-
-		// transition the app, if changed, to the latest state
-		go am.RequestAppState(payload)
 	}
 
 	return nil

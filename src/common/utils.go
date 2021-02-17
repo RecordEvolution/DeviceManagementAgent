@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
 )
@@ -61,12 +62,20 @@ func ParseContainerName(containerName string) (Stage, uint64, string, error) {
 		return "", 0, "", errors.New("container name is empty")
 	}
 
+	// cleanup container name
+	if string([]rune(containerName)[0]) == "/" {
+		// get index of the rune that == /
+		_, i := utf8.DecodeRuneInString(containerName)
+		// remove that rune from the string
+		containerName = containerName[i:]
+	}
+
 	var stage Stage
 	var appKey uint64
 	var name string
 
 	containerSplit := strings.Split(containerName, "_")
-	if len(containerSplit) != 3 {
+	if len(containerSplit) < 3 {
 		return "", 0, "", errors.New("invalid container name")
 	}
 
@@ -84,7 +93,8 @@ func ParseContainerName(containerName string) (Stage, uint64, string, error) {
 	}
 	appKey = parsedAppKey
 
-	name = containerSplit[2]
+	// also handles names like dev_6_net_data, aka 2 _'s at the end
+	name = strings.Join(containerSplit[2:], "_")
 
 	return stage, appKey, name, nil
 }

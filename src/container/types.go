@@ -91,6 +91,7 @@ type Container interface {
 	Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
+	InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error)
 	WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForContainerByName(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForRunning(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan struct{}, <-chan error)

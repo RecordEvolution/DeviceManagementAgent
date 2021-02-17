@@ -93,55 +93,74 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 // Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely.
 func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 	ctx := context.Background()
-	containers, err := so.Container.ListContainers(ctx, nil)
+
+	rStates, err := so.AppStore.GetRequestedStates()
 	if err != nil {
 		return err
 	}
 
-	for _, container := range containers {
-		// Can be one of "created", "running", "paused", "restarting", "removing", "exited", or "dead"
-		for _, containerName := range container.Names {
-			stage, appKey, _, err := common.ParseContainerName(containerName)
-			if err != nil {
-				continue
-			}
+	for _, rState := range rStates {
 
-			app, err := so.AppStore.GetApp(appKey, stage)
-
-			if app == nil {
-				log.Debug().Msgf("found a container (%s) that does not have a corresponding app, skipping", containerName)
-				return nil
-			}
-
-			if err != nil {
-				return err
-			}
-
-			stateAppShouldBe, err := containerStatusToAppState(container.Status, int(container.ExitCode))
-
-			switch app.CurrentState {
-			case common.DOWNLOADING:
-			case common.TRANSFERING:
-			case common.BUILDING:
-				app.CurrentState = common.REMOVED
-				break
-			case common.PUBLISHING:
-			case common.STOPPING:
-			case common.STARTING:
-				app.CurrentState = stateAppShouldBe
-				break
-			default:
-				if app.CurrentState != stateAppShouldBe {
-					app.CurrentState = stateAppShouldBe
-				}
-			}
-
-			err = so.Notify(app, stateAppShouldBe)
-			if err != nil {
-				return err
-			}
-
+		containerName := common.BuildContainerName(rState.Stage, rState.AppKey, rState.AppName)
+		app, err := so.AppStore.GetApp(rState.AppKey, rState.Stage)
+		if err != nil {
+			return err
 		}
+
+		container, err := so.Container.InspectContainer(ctx, containerName)
+		if err != nil {
+			if errdefs.IsContainerNotFound(err) {
+
+				// should set the app state to 'removed' if it wasn't already
+				if app.CurrentState != common.REMOVED && app.CurrentState != common.UNINSTALLED {
+					log.Debug().Msgf("State Correcter: irregular state was found for app %s (%s) that has no container on the device", rState.AppName, rState.Stage)
+					log.Debug().Msgf("State Correcter: app state for %s will be updated to %s", containerName, common.REMOVED)
+
+					err := so.Notify(app, common.REMOVED)
+					if err != nil {
+						return err
+					}
+				}
+
+				// should be all good iterate over next app
+				continue
+
+			} else {
+				return err
+			}
+		}
+
+		appStateDeterminedByContainer, err := containerStateToAppState(container.State.Status, int(container.State.ExitCode))
+		if err != nil {
+			return err
+		}
+
+		correctedAppState := app.CurrentState
+
+		switch app.CurrentState {
+		case common.DOWNLOADING,
+			common.TRANSFERING,
+			common.BUILDING:
+			correctedAppState = common.REMOVED
+		case common.PUBLISHING,
+			common.STOPPING,
+			common.STARTING:
+			correctedAppState = appStateDeterminedByContainer
+		default:
+			correctedAppState = appStateDeterminedByContainer
+		}
+
+		if correctedAppState == app.CurrentState {
+			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
+			return nil
+		}
+
+		log.Debug().Msgf("State Correcter: app state for %s will be updated to %s", containerName, correctedAppState)
+		err = so.Notify(app, correctedAppState)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil
@@ -179,7 +198,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			}
 
 			// check if correct and update database if needed
-			latestAppState, err := containerStatusToAppState(state.Status, state.ExitCode)
+			latestAppState, err := containerStateToAppState(state.Status, state.ExitCode)
 			if err != nil {
 				errorC <- err
 				return
@@ -257,7 +276,6 @@ func (so *StateObserver) ObserveAppStates() error {
 		so.addObserver(app.Stage, app.AppKey, app.AppName)
 	}
 
-	// TODO: handle potential errors
 	_ = so.initObserverSpawner()
 
 	return err
@@ -280,10 +298,10 @@ func isTransientState(appState common.AppState) bool {
 	return false
 }
 
-func containerStatusToAppState(containerStatus string, exitCode int) (common.AppState, error) {
+func containerStateToAppState(containerState string, exitCode int) (common.AppState, error) {
 	unknownStateErr := errors.New("unkown state")
 
-	switch containerStatus {
+	switch containerState {
 	case "running":
 		return common.RUNNING, nil
 	case "created":
@@ -295,7 +313,9 @@ func containerStatusToAppState(containerStatus string, exitCode int) (common.App
 	case "restarting":
 		return common.FAILED, nil
 	case "exited":
-		if exitCode == 0 {
+		// 137 = SIGKILL received
+		// 0 = Normal exit without error
+		if exitCode == 0 || exitCode == 137 {
 			return common.PRESENT, nil
 		}
 		return common.FAILED, nil

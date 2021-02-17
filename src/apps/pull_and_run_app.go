@@ -17,5 +17,5 @@ func (sm *StateMachine) pullAndRunApp(payload common.TransitionPayload, app *com
 		}
 	}
 
-	return nil
+	return sm.noActionTransitionFunc(payload, app)
 }

@@ -26,14 +26,19 @@ func InitialSetup(
 	logManager *logging.LogManager,
 	stateObserver *apps.StateObserver,
 ) error {
-	err := stateObserver.CorrectLocalAndUpdateRemoteAppStates()
+	err := appManager.UpdateLocalRequestedAppStatesWithRemote()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to sync")
+	}
+
+	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
 
-	err = appManager.Sync()
+	err = appManager.EvaluateRequestedStates()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to sync")
+		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
 	apps, err := database.GetAppStates()
@@ -46,7 +51,7 @@ func InitialSetup(
 		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
-	logManager.SetupWampSubscriptions()
+	logManager.SetupEndpoints()
 	logManager.ReviveDeadLogs(apps)
 
 	external.RegisterAll()
