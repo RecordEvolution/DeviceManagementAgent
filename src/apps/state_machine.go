@@ -1,9 +1,9 @@
 package apps
 
 import (
-	"fmt"
 	"reagent/common"
 	"reagent/container"
+	"reagent/errdefs"
 	"reagent/logging"
 
 	"github.com/rs/zerolog/log"
@@ -28,10 +28,14 @@ func NewStateMachine(container container.Container, logManager *logging.LogManag
 	}
 }
 
+func noActionTransitionFunc(TransitionPayload common.TransitionPayload, app *common.App) error {
+	return errdefs.NoActionTransition()
+}
+
 func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState common.AppState) TransitionFunc {
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
-			common.PRESENT:     sm.pullApp,
+			common.PRESENT:     sm.removedToPresent,
 			common.RUNNING:     sm.pullAndRunApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -55,7 +59,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.FAILED: {
 			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: nil,
+			common.UNINSTALLED: sm.uninstallApp,
 			common.PRESENT:     sm.recoverFailToPresentHandler,
 			common.RUNNING:     sm.recoverFailToRunningHandler,
 			common.BUILT:       sm.buildApp,
@@ -64,7 +68,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.BUILT: {
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.PRESENT:     nil,
+			common.PRESENT:     noActionTransitionFunc,
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
@@ -83,7 +87,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     sm.runApp,
-			common.PRESENT:     nil,
+			common.PRESENT:     noActionTransitionFunc,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 		},
@@ -95,21 +99,21 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.UNINSTALLED: sm.uninstallApp,
 		},
 		common.DOWNLOADING: {
-			common.PRESENT:     nil,
-			common.REMOVED:     nil,
+			common.PRESENT:     sm.pullApp,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 		},
 		common.STARTING: {
 			common.PRESENT:     sm.stopApp,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.RUNNING:     nil,
+			common.RUNNING:     sm.runApp,
 		},
 		common.STOPPING: {
 			common.PRESENT:     sm.stopApp,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
-			common.RUNNING:     nil,
+			common.RUNNING:     sm.runApp,
 		},
 		common.UPDATING: {
 			common.PRESENT:     nil,
@@ -142,18 +146,6 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 	go func() {
 		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		err := transitionFunc(payload, app)
-
-		// If anything goes wrong with the transition function
-		// we should set the state change to FAILED
-		// This will in turn update the in memory state and the local database state
-		// which will in turn update the remote database as well
-		if err != nil {
-			setStateErr := sm.setState(app, common.FAILED)
-			if setStateErr != nil {
-				// wrap errors into one
-				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
-			}
-		}
 
 		// send potential error to errChannel
 		// if error = nil, the transition has completed successfully

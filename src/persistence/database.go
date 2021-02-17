@@ -20,12 +20,25 @@ type AppStateDatabase struct {
 	config *config.Config
 }
 
+const (
+	driver      = "sqlite3"
+	cacheShared = "cache=shared"
+	busyTimeout = "_busy_timeout=5000"
+	maxOpenConn = 1
+)
+
 func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 	databaseFileName := config.CommandLineArguments.DatabaseFileName
-	db, err := sql.Open("sqlite3", "./"+databaseFileName)
+	connectionString := fmt.Sprintf("./%s?%s&%s", databaseFileName, cacheShared, busyTimeout)
+	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return nil, err
 	}
+
+	// SQLite cannot handle concurrent writes, so we limit sqlite to one connection. https://github.com/mattn/go-sqlite3/issues/274
+	// will not effect performance noticably, even for large amounts of operations: https://stackoverflow.com/questions/35804884/sqlite-concurrent-writing-performance/35805826
+	db.SetMaxOpenConns(maxOpenConn)
+
 	return &AppStateDatabase{db: db, config: config}, nil
 }
 
@@ -54,7 +67,6 @@ func (sqlite *AppStateDatabase) Init() error {
 
 func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.AppState) (common.Timestamp, error) {
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
-	defer selectStatement.Close()
 	if err != nil {
 		return "", err
 	}
@@ -76,7 +88,7 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	var curReleaseKey uint64
 	err = rows.Scan(&curState, &curVersion, &curReleaseKey)
 	if err != nil {
-		return "", err
+		return "", rows.Close()
 	}
 
 	if curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
@@ -155,14 +167,12 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 	}
 
 	rows, err := preppedStatement.Query(appKey, stage)
-
 	if err != nil {
 		return &common.App{}, err
 	}
 
 	hasRow := rows.Next()
 	if !hasRow {
-		err := rows.Close()
 		if err != nil {
 			return &common.App{}, err
 		}
@@ -172,7 +182,6 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 
 	app := &common.App{}
 	err = rows.Scan(&app.AppName, &app.AppKey, &app.Version, &app.ReleaseKey, &app.Stage, &app.CurrentState, &app.LastUpdated)
-
 	if err != nil {
 		return &common.App{}, err
 	}
@@ -197,7 +206,6 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 
 func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
 	rows, err := ast.db.Query(QuerySelectAllAppStates)
-
 	if err != nil {
 		return nil, err
 	}
@@ -210,21 +218,31 @@ func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
 			return nil, err
 		}
 
-		requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
-		if err != nil {
-			return nil, err
-		}
-
-		// neccessary to update remote app state (need to know e.g. who to publish updates to)
-		app.RequestorAccountKey = requestedState.RequestorAccountKey
-		app.RequestedState = requestedState.RequestedState
-		app.RequestUpdate = requestedState.RequestUpdate
 		apps = append(apps, app)
 	}
 
 	err = rows.Close()
 	if err != nil {
 		return nil, err
+	}
+
+	requestedStates, err := ast.GetRequestedStates()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, requestedState := range requestedStates {
+		for appIndex := range apps {
+			app := apps[appIndex]
+
+			if app.AppKey == requestedState.AppKey && app.Stage == requestedState.Stage {
+				// neccessary to update remote app state (need to know e.g. who to publish updates to)
+				app.RequestorAccountKey = requestedState.RequestorAccountKey
+				app.RequestedState = requestedState.RequestedState
+				app.RequestUpdate = requestedState.RequestUpdate
+			}
+
+		}
 	}
 
 	return apps, nil
@@ -237,13 +255,10 @@ func (ast *AppStateDatabase) insertAppState(app *common.App) (common.Timestamp, 
 		return "", err
 	}
 
+	defer insertStatement.Close()
+
 	timestamp := time.Now().Format(time.RFC3339)
 	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, app.CurrentState, timestamp)
-	if err != nil {
-		return "", err
-	}
-
-	err = insertStatement.Close()
 	if err != nil {
 		return "", err
 	}
@@ -261,10 +276,11 @@ func (ast *AppStateDatabase) UpdateNetworkInterface(intf system.NetworkInterface
 
 func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, error) {
 	rows, err := ast.db.Query(QuerySelectAllRequestedStates)
-
 	if err != nil {
 		return nil, err
 	}
+
+	defer rows.Close()
 
 	payloads := []common.TransitionPayload{}
 	for rows.Next() {
@@ -312,8 +328,6 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 
 func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage) (common.TransitionPayload, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectRequestedStateByAppKeyAndStage)
-	defer preppedStatement.Close()
-
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -387,13 +401,10 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 
 	for _, payload := range payloads {
 		upsertStatement, err := tx.Prepare(QueryUpsertRequestedStateEntry) // Prepare statement.
-
 		if err != nil {
 			tx.Rollback()
 			return err
 		}
-
-		defer upsertStatement.Close()
 
 		environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)
 		if err != nil {
@@ -425,15 +436,15 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 	defer upsertStatement.Close()
 
 	// if the payload we received from the backend/database does not include a current state
-	// TODO: test if this is still relevant --> I don't think so since we always send full state now
-	if payload.CurrentState == "" {
-		app, err := ast.GetAppState(payload.AppKey, payload.Stage)
-		if err != nil {
-			return err
-		}
+	// // TODO: test if this is still relevant --> I don't think so since we always send full state now
+	// if payload.CurrentState == "" {
+	// 	app, err := ast.GetAppState(payload.AppKey, payload.Stage)
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-		payload.CurrentState = app.CurrentState
-	}
+	// 	payload.CurrentState = app.CurrentState
+	// }
 
 	environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)
 	if err != nil {
@@ -459,10 +470,18 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus system.DeviceStatus, ne
 	if err != nil {
 		return err
 	}
+
+	defer selectStatement.Close()
+
 	rows, err := selectStatement.Query()
 	hasResult := rows.Next() // only get first result
 
 	if hasResult == false {
+		err := rows.Close()
+		if err != nil {
+			return err
+		}
+
 		return fmt.Errorf("No device state to update")
 	}
 

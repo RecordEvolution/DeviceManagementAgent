@@ -20,7 +20,7 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, file)
-	logger := log.Output(multiWriter)
+	logger := zerolog.New(multiWriter).With().Caller().Timestamp().Stack().Logger()
 	log.Logger = logger
 
 	if cliArgs.Debug {

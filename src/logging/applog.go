@@ -13,6 +13,7 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -35,7 +36,8 @@ type LogSubscription struct {
 type LogManager struct {
 	Container  container.Container
 	Messenger  messenger.Messenger
-	ActiveLogs map[string]*LogSubscription
+	activeLogs map[string]*LogSubscription
+	mapMutex   sync.Mutex
 }
 
 type LogType string
@@ -131,7 +133,7 @@ func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 }
 
 func (lm *LogManager) Init() error {
-	lm.ActiveLogs = make(map[string]*LogSubscription)
+	lm.activeLogs = make(map[string]*LogSubscription)
 
 	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
@@ -161,10 +163,13 @@ func (lm *LogManager) Init() error {
 		}
 
 		idString := fmt.Sprint(id)
-		if lm.ActiveLogs[idString] != nil {
+		lm.mapMutex.Lock()
+		if lm.activeLogs[idString] != nil {
+			lm.mapMutex.Unlock()
 			// this shouldn't happen if the subscriptions are properly removed
 			return errors.New("The subscription somehow already exists, this should never happen")
 		}
+		lm.mapMutex.Unlock()
 
 		lm.createLogTask(idString, containerName)
 
@@ -176,11 +181,13 @@ func (lm *LogManager) Init() error {
 		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
 		idString := fmt.Sprint(id)
 
-		if lm.ActiveLogs[idString] == nil {
+		lm.mapMutex.Lock()
+		defer lm.mapMutex.Unlock()
+		if lm.activeLogs[idString] == nil {
 			return nil
 		}
 
-		activeSubscription := lm.ActiveLogs[idString]
+		activeSubscription := lm.activeLogs[idString]
 
 		if activeSubscription.Stream == nil {
 			log.Info().Msg("stream was empty, nothing to close")
@@ -196,7 +203,7 @@ func (lm *LogManager) Init() error {
 		}
 
 		// remove entry from active logs map
-		delete(lm.ActiveLogs, idString)
+		delete(lm.activeLogs, idString)
 
 		return nil
 	}, nil)
@@ -224,7 +231,9 @@ func (lm *LogManager) createLogTask(id string, containerName string) error {
 		Streaming:     false,
 	}
 
-	lm.ActiveLogs[id] = &subscriptionEntry
+	lm.mapMutex.Lock()
+	lm.activeLogs[id] = &subscriptionEntry
+	lm.mapMutex.Unlock()
 
 	// a subscription can be created without an actual stream, in that case don't stream
 	if stream == nil {
@@ -250,7 +259,7 @@ func (lm *LogManager) buildTopic(containerName string) string {
 }
 
 func (lm *LogManager) UpdateLogStream(containerName string) error {
-	for _, subscription := range lm.ActiveLogs {
+	for _, subscription := range lm.activeLogs {
 		if subscription.ContainerName == containerName && !subscription.Streaming {
 			reader, err := lm.getLogStream(containerName)
 			if err != nil {

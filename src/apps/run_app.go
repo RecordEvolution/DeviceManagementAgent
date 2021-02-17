@@ -7,6 +7,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/logging"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
@@ -86,9 +87,15 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.Container.WaitUntilRunning(ctx, containerID)
-	if err != nil {
+	pollingRate := time.Second * 1
+	runningSignal, errC := sm.Container.WaitForRunning(ctx, containerID, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+	select {
+	case err = <-errC:
 		return err
+	case <-runningSignal:
+		break
 	}
 
 	err = sm.LogManager.Write(payload.ContainerName.Prod, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
@@ -189,9 +196,15 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	err = sm.Container.WaitUntilRunning(ctx, newContainerID)
-	if err != nil {
+	pollingRate := time.Second * 1
+	runningSignal, errC := sm.Container.WaitForRunning(ctx, newContainerID, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+	select {
+	case err = <-errC:
 		return err
+	case <-runningSignal:
+		break
 	}
 
 	err = sm.setState(app, common.RUNNING)

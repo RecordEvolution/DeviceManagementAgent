@@ -9,6 +9,7 @@ import (
 	"reagent/messenger/topics"
 	"reagent/persistence"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -82,14 +83,15 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 		app.CurrentState = common.REMOVED
 	}
 
-	// Insert the newly created app state data into the database
-	timestamp, err := am.database.UpsertAppState(app, app.CurrentState)
-	if err != nil {
-		return nil, err
-	}
-
-	app.LastUpdated = timestamp
 	am.apps = append(am.apps, app)
+
+	go func() {
+		// Insert the newly created app state data into the database
+		_, err := am.database.UpsertAppState(app, app.CurrentState)
+		if err != nil {
+			log.Error().Stack().Err(err)
+		}
+	}()
 
 	return app, nil
 }
@@ -154,7 +156,6 @@ func (am *AppStore) UpdateRemoteAppState(app *common.App, stateToSet common.AppS
 
 func (am *AppStore) UpdateRequestedStatesWithRemote() error {
 	appStateChanges, err := am.fetchRequestedAppStates()
-
 	if err != nil {
 		return err
 	}

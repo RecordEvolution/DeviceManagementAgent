@@ -1,5 +1,7 @@
 package errdefs
 
+import "errors"
+
 type ErrBuildFailed struct{ error }
 
 func (e ErrBuildFailed) Cause() error {
@@ -188,4 +190,22 @@ func DockerBuildCanceled(err error) error {
 	}
 
 	return ErrDockerBuildCanceled{err}
+}
+
+/*-----------*/
+
+type ErrNoActionTransition struct {
+	error
+}
+
+func (e ErrNoActionTransition) Cause() error {
+	return e.error
+}
+
+func (e ErrNoActionTransition) Unwrap() error {
+	return e.error
+}
+
+func NoActionTransition() error {
+	return ErrNoActionTransition{errors.New("no action")}
 }

@@ -1,7 +1,9 @@
 package apps
 
 import (
+	"fmt"
 	"reagent/common"
+	"reagent/errdefs"
 
 	"github.com/rs/zerolog/log"
 )
@@ -12,10 +14,11 @@ type AppManager struct {
 	StateObserver *StateObserver
 }
 
-func NewAppManager(sm *StateMachine, as *AppStore) AppManager {
+func NewAppManager(sm *StateMachine, as *AppStore, so *StateObserver) AppManager {
 	return AppManager{
-		StateMachine: sm,
-		AppStore:     as,
+		StateMachine:  sm,
+		StateObserver: so,
+		AppStore:      as,
 	}
 }
 
@@ -74,8 +77,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	case err := <-errC:
 		app.Unlock()
 
+		if errdefs.IsNoActionTransition(err) {
+			log.Info().Msg("A no action transition was executed, nothing to do.")
+			return nil
+		}
+
 		if err == nil {
-			log.Info().Msgf("Successfully finished transaction")
+			log.Info().Msgf("Successfully finished transaction for App (%d, %s)", app.AppKey, app.Stage)
+
 			// Verify if app has the latest requested state
 			// TODO: properly handle it when verifying fails
 			err := am.VerifyState(app)
@@ -84,6 +93,18 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				return err
 			}
 			return nil
+		}
+
+		// If anything goes wrong with the transition function
+		// we should set the state change to FAILED
+		// This will in turn update the in memory state and the local database state
+		// which will in turn update the remote database as well
+		if err != nil {
+			setStateErr := am.StateObserver.Notify(app, common.FAILED)
+			if setStateErr != nil {
+				// wrap errors into one
+				err = fmt.Errorf("Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
+			}
 		}
 
 		log.Error().Msgf("An error occured during transition from %s to %s", app.CurrentState, payload.RequestedState)
@@ -112,25 +133,23 @@ func (am *AppManager) VerifyState(app *common.App) error {
 	if requestedStatePayload.RequestedState != app.CurrentState {
 		log.Printf("App (%d, %s) is not in latest state (%s), transitioning to %s...", app.AppKey, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
 
-		builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
-			(app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED)
+		// transition again
+		go func() {
+			builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
+				(app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED)
 
-		// we confirmed the release in the backend and can put the state to PRESENT now
-		if builtOrPublishedToPresent {
-			app.CurrentState = common.PRESENT // also set in memory
-			_, err := am.AppStore.UpdateLocalAppState(app, common.PRESENT)
-			if err != nil {
-				return err
+			// we confirmed the release in the backend and can put the state to PRESENT now
+			if builtOrPublishedToPresent {
+				app.CurrentState = common.PRESENT // also set in memory
+				_, err := am.AppStore.UpdateLocalAppState(app, common.PRESENT)
+				if err != nil {
+					log.Error().Stack().Err(err)
+				}
+
+				return
 			}
 
-			return nil
-		}
-
-		go func() {
 			_ = am.RequestAppState(requestedStatePayload)
-			log.Debug().Msg("request app state finished")
-			// log.Printf("App (%d, %s) is in latest state!", app.AppKey, app.Stage)
-
 		}()
 	}
 
@@ -154,10 +173,14 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 		app.Version = payload.PresentVersion
 	}
 
-	_, err = am.AppStore.UpdateLocalAppState(app, app.CurrentState)
-	if err != nil {
-		return err
-	}
+	go func() {
+		timestamp, err := am.AppStore.UpdateLocalAppState(app, app.CurrentState)
+		if err != nil {
+			log.Error().Err(err)
+		}
+
+		app.LastUpdated = timestamp
+	}()
 
 	return nil
 }
@@ -186,10 +209,12 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	// normally should always update the app's requestedState using the transition payload
 	app.RequestedState = payload.RequestedState
 
-	err = am.AppStore.UpdateLocalRequestedState(payload)
-	if err != nil {
-		return err
-	}
+	go func() {
+		err = am.AppStore.UpdateLocalRequestedState(payload)
+		if err != nil {
+			log.Error().Stack().Err(err)
+		}
+	}()
 
 	return nil
 }

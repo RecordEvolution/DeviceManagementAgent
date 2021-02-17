@@ -44,3 +44,8 @@ func IsDockerBuildCanceled(err error) bool {
 	_, ok := err.(ErrDockerBuildCanceled)
 	return ok
 }
+
+func IsNoActionTransition(err error) bool {
+	_, ok := err.(ErrNoActionTransition)
+	return ok
+}

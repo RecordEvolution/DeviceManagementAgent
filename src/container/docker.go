@@ -550,28 +550,41 @@ func (docker *Docker) GetContainerState(ctx context.Context, containerName strin
 	}, nil
 }
 
-func (docker *Docker) WaitUntilRunning(ctx context.Context, containerID string) error {
-	errChan := make(chan error, 1)
+// WaitForRunning will poll a container's status at a given interval until the running state is achieved.
+// If the container fails to start with an 'exited' or 'dead' status, it will throw an error
+func (docker *Docker) WaitForRunning(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {
+	errC := make(chan error, 1)
+	runningC := make(chan struct{}, 1)
 
 	go func() {
 		for {
-			inspectResult, err := docker.client.ContainerInspect(ctx, containerID)
+			state, err := docker.GetContainerState(ctx, containerID)
 			if err != nil {
-				errChan <- err
+				errC <- err
+				close(errC)
+				close(runningC)
 				return
 			}
 
-			if inspectResult.State.Running {
-				errChan <- nil
+			if state.Running {
+				runningC <- struct{}{}
+				close(errC)
+				close(runningC)
 				return
 			}
+
+			if state.Status == "exited" || state.Status == "dead" {
+				errC <- errors.New("container failed to start")
+				close(errC)
+				close(runningC)
+				return
+			}
+
+			time.Sleep(pollingRate)
 		}
 	}()
 
-	select {
-	case err := <-errChan:
-		return err
-	}
+	return runningC, errC
 }
 
 // TODO: make more generic

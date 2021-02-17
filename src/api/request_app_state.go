@@ -7,6 +7,8 @@ import (
 	"reagent/config"
 	"reagent/messenger"
 	"strconv"
+
+	"github.com/rs/zerolog/log"
 )
 
 func (ex *External) requestAppStateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -15,12 +17,19 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	err = ex.AppManager.CreateOrUpdateApp(payload)
-	if err != nil {
-		return nil, err
-	}
+	go func() {
+		err = ex.AppManager.CreateOrUpdateApp(payload)
+		if err != nil {
+			log.Error().Stack().Err(err)
+			return
+		}
 
-	go ex.AppManager.RequestAppState(payload)
+		err = ex.AppManager.RequestAppState(payload)
+		if err != nil {
+			log.Error().Stack().Err(err)
+			return
+		}
+	}()
 
 	return &messenger.InvokeResult{}, nil
 }

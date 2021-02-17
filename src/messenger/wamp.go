@@ -47,9 +47,7 @@ func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
 	return wrapper
 }
 
-// New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config *config.Config) (*WampSession, error) {
-	ctx := context.Background()
+func createConnectConfig(config *config.Config) (*client.Config, error) {
 	reswarmConfig := config.ReswarmConfig
 
 	tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
@@ -66,7 +64,7 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
 		Debug:           config.CommandLineArguments.DebugMessaging,
-		ResponseTimeout: 5 * time.Second,
+		ResponseTimeout: 3 * time.Second,
 		Logger:          wrapZeroLogger(log.Logger),
 		// Serialization:
 		TlsCfg: &tls.Config{
@@ -75,8 +73,19 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 		},
 	}
 
+	return &cfg, nil
+}
+
+// New creates a new wamp session from a ReswarmConfig file
+func NewWamp(config *config.Config) (*WampSession, error) {
+	ctx := context.Background()
+	connectionConfig, err := createConnectConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	// set up WAMP client and connect connect to websocket endpoint
-	client, err := client.ConnectNet(ctx, reswarmConfig.DeviceEndpointURL, cfg)
+	client, err := client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +95,29 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 
 func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error {
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
+}
+
+func (wampSession *WampSession) ResetSession(ctx context.Context) error {
+	config := wampSession.config
+
+	connectionConfig, err := createConnectConfig(config)
+	if err != nil {
+		return err
+	}
+
+	wampSession.client, err = client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (wampSession *WampSession) Connected() bool {
+	return wampSession.client.Connected()
+}
+func (wampSession *WampSession) Done() <-chan struct{} {
+	return wampSession.client.Done()
 }
 
 func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
@@ -232,7 +264,9 @@ func (wampSession *WampSession) SetupTestament() error {
 }
 
 func (wampSession *WampSession) Close() error {
-	return wampSession.client.Close()
+	err := wampSession.client.Close()
+	wampSession.client = nil
+	return err
 }
 
 func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) {

@@ -45,14 +45,18 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 	// update remotely
 	err := so.AppStore.UpdateRemoteAppState(app, achievedState)
 	if err != nil {
+		log.Error().Stack().Err(err)
 		// ignore
 	}
 
-	// update locally
-	_, err = so.AppStore.UpdateLocalAppState(app, achievedState)
-	if err != nil {
-		return err
-	}
+	go func() {
+		// update locally
+		_, err = so.AppStore.UpdateLocalAppState(app, achievedState)
+		if err != nil {
+			log.Error().Stack().Err(err)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -93,30 +97,31 @@ func parseContainerName(containerName string) (common.Stage, uint64, string, err
 
 func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
+	so.mapMutex.Lock()
 	observer := so.activeObservers[containerName]
 
 	if observer != nil {
 		close(observer.errChan)
-		so.mapMutex.Lock()
 		delete(so.activeObservers, containerName)
-		so.mapMutex.Unlock()
+		log.Debug().Msgf("removed an observer for %s (%s)", appName, stage)
 	}
+	so.mapMutex.Unlock()
 }
 
 func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
 
+	so.mapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
 		errC := so.observeAppState(stage, appKey, appName)
-		so.mapMutex.Lock()
 		so.activeObservers[containerName] = &AppStateObserver{
 			AppKey:  appKey,
 			AppName: appName,
 			Stage:   stage,
 			errChan: errC,
 		}
-		so.mapMutex.Unlock()
 	}
+	so.mapMutex.Unlock()
 }
 
 func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
@@ -162,7 +167,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				return
 			}
 
-			if app.CurrentState != latestAppState && !isTransientState(app.CurrentState) {
+			if app.CurrentState != latestAppState && !isTransientState(app.CurrentState) && !isTransientState(latestAppState) {
 				log.Debug().Msgf("Observer: app (%s, %s) state is not up to date", appName, stage)
 				log.Debug().Msgf("Observer: app (%s, %s) updating from %s to %s", appName, stage, app.CurrentState, latestAppState)
 
@@ -203,6 +208,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 						close(errChan)
 						break loop
 					}
+					log.Debug().Msgf("added an observer for %s (%s)", name, stage)
 					so.addObserver(stage, key, name)
 				}
 			case err := <-errC:
@@ -264,7 +270,7 @@ func containerStatusToAppState(containerStatus string, exitCode int) (common.App
 		return common.FAILED, nil
 	case "exited":
 		if exitCode == 0 {
-			return common.STOPPED, nil
+			return common.PRESENT, nil
 		}
 		return common.FAILED, nil
 	case "dead":

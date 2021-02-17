@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"reagent/api"
@@ -15,6 +16,41 @@ import (
 
 	"github.com/rs/zerolog/log"
 )
+
+func InitialSetup(
+	external *api.External,
+	messenger messenger.Messenger,
+	database persistence.Database,
+	appManager *apps.AppManager,
+	logManager *logging.LogManager,
+	stateObserver *apps.StateObserver,
+) error {
+	err := system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
+	external.RegisterAll()
+	apps, err := database.GetAppStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
+	}
+
+	err = appManager.Sync()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to sync")
+	}
+
+	err = stateObserver.ObserveAppStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
+	}
+
+	logManager.Init()
+	logManager.ReviveDeadLogs(apps)
+
+	return err
+}
 
 func main() {
 	cliArgs := config.GetCliArguments()
@@ -46,11 +82,6 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
 	}
 
-	err = system.UpdateRemoteDeviceStatus(messenger, system.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	}
-
 	container, _ := container.NewDocker(&generalConfig)
 
 	appStore := apps.NewAppStore(database, messenger)
@@ -63,11 +94,7 @@ func main() {
 	}
 
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
-	appManager := apps.NewAppManager(&stateMachine, &appStore)
-
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to run sync")
-	}
+	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 
 	terminalManager, err := terminal.InitManager(messenger, container)
 	if err != nil {
@@ -83,26 +110,51 @@ func main() {
 		Database:        database,
 	}
 
-	external.RegisterAll()
-
-	apps, err := database.GetAppStates()
+	err = InitialSetup(&external, messenger, database, &appManager, &logManager, &stateObserver)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
+		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
 
-	err = appManager.Sync()
+	go func() {
+		doneSignal := messenger.Done()
+		dead := false
 
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to sync")
-	}
+	reconnectLoop:
+		for {
+			select {
+			case <-doneSignal:
+				// done signal received, we most likely disconnected
 
-	err = stateObserver.ObserveAppStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
-	}
+				messenger.Close()
+				// attempt to reconnect
+				err := messenger.ResetSession(context.Background())
+				if err != nil {
+					log.Fatal().Stack().Err(err).Msg("failed to reconnect, retrying...")
+				}
 
-	logManager.Init()
-	logManager.ReviveDeadLogs(apps)
+				dead = true
+
+			default:
+				if !dead {
+					break
+				}
+				// did we reconnect successfully? new internal client should be set now
+				if messenger.Connected() {
+					doneSignal = messenger.Done()
+
+					// rerun boot setup
+					err = InitialSetup(&external, messenger, database, &appManager, &logManager, &stateObserver)
+					if err != nil {
+						log.Fatal().Stack().Err(err).Msg("failed to init")
+						break
+					}
+
+					dead = false
+					break reconnectLoop
+				}
+			}
+		}
+	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
