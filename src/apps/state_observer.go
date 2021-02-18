@@ -180,7 +180,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			return nil
 		}
 
-		log.Debug().Msgf("State Correcter: app state for %s will be updated to %s", containerName, correctedAppState)
+		log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedAppState)
 		err = so.Notify(app, correctedAppState)
 		if err != nil {
 			return err
