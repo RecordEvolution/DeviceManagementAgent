@@ -99,7 +99,10 @@ func (agent *Agent) Init() error {
 	agent.LogManager.SetupEndpoints()
 	agent.LogManager.ReviveDeadLogs(apps)
 
-	agent.External.RegisterAll()
+	err = agent.External.RegisterAll()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+	}
 
 	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
 	if err != nil {

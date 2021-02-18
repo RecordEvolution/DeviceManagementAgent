@@ -7,7 +7,6 @@ import (
 
 func (ex *External) getImagesHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	images, err := ex.Container.ListImages(ctx, nil)
-
 	if err != nil {
 		return nil, err
 	}
@@ -18,5 +17,7 @@ func (ex *External) getImagesHandler(ctx context.Context, response messenger.Res
 		args = append(args, image)
 	}
 
-	return &messenger.InvokeResult{}, nil
+	return &messenger.InvokeResult{
+		Arguments: args,
+	}, nil
 }

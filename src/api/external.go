@@ -11,6 +11,8 @@ import (
 	"reagent/messenger/topics"
 	"reagent/persistence"
 	"reagent/terminal"
+
+	"github.com/rs/zerolog/log"
 )
 
 // External is the API that is meant to be used by the externally exposed WAMP topics.
@@ -58,7 +60,7 @@ func (ex *External) RegisterAll() error {
 		if err != nil {
 			return err
 		}
-		return err
+		log.Info().Msgf("API: Registered topic %s on the device", fullTopic)
 	}
 	return nil
 }
