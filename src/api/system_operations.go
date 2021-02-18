@@ -8,15 +8,19 @@ import (
 )
 
 func (ex *External) systemRebootHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
-	system.Reboot()
+	err := system.Reboot()
+	if err != nil {
+		return nil, err
+	}
 
 	return &messenger.InvokeResult{}, nil
 }
 
 func (ex *External) systemShutdownHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
-	system.Poweroff()
+	err := system.Poweroff()
+	if err != nil {
+		return nil, err
+	}
 
 	return &messenger.InvokeResult{}, nil
 }
