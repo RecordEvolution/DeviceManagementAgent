@@ -2,9 +2,10 @@ package persistence
 
 import (
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"reagent/common"
 	"reagent/config"
 	"reagent/system"
@@ -46,17 +47,21 @@ func (sqlite *AppStateDatabase) Close() error {
 	return sqlite.db.Close()
 }
 
+//go:embed update-scripts/*
+var scriptFiles embed.FS
+
+const scriptsDir = "update-scripts"
+
 func (sqlite *AppStateDatabase) Init() error {
-	scriptsDir := sqlite.config.CommandLineArguments.DatabaseScriptsDirectory
-	files, err := ioutil.ReadDir(scriptsDir)
+	scriptFiles, err := fs.ReadDir(scriptFiles, scriptsDir)
 	if err != nil {
 		return err
 	}
 
-	for _, file := range files {
-		scriptFilePath := scriptsDir + "/" + file.Name()
-		log.Debug().Msgf("Executing Database script with path: %s", scriptFilePath)
-		err := sqlite.executeFromFile(scriptFilePath)
+	for _, file := range scriptFiles {
+		fileName := file.Name()
+		log.Debug().Msgf("Executing Database script: %s", fileName)
+		err := sqlite.execute(scriptsDir + "/" + fileName)
 		if err != nil {
 			return err
 		}
@@ -564,8 +569,8 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus system.DeviceStatus, ne
 	return nil
 }
 
-func (ast *AppStateDatabase) executeFromFile(filePath string) error {
-	file, err := ioutil.ReadFile(filePath)
+func (ast *AppStateDatabase) execute(fileName string) error {
+	file, err := fs.ReadFile(scriptFiles, fileName)
 
 	if err != nil {
 		return err

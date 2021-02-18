@@ -44,7 +44,6 @@ type CommandLineArguments struct {
 	DebugMessaging           bool
 	LogFileLocation          string
 	ConfigFileLocation       string
-	DatabaseScriptsDirectory string
 	DatabaseFileName         string
 }
 
@@ -71,7 +70,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", false, "sets the log level to debug")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
-	dbScriptsLocation := flag.String("initScripts", "database/update-scripts", "sets the location where database update scripts exist")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	appsDirectory := flag.String("appsDirectory", defaultAppsDir, "sets the directory where the app files will be stored")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
@@ -92,7 +90,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		LogFileLocation:          *logFile,
 		ConfigFileLocation:       *cfgFile,
 		DatabaseFileName:         *databaseFileName,
-		DatabaseScriptsDirectory: *dbScriptsLocation,
 	}
 
 	return &cliArgs, nil
