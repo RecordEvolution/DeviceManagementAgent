@@ -36,6 +36,12 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.RequestTerminalSession: ex.requestTerminalSessHandler,
 		topics.StartTerminalSession:   ex.startTerminalSessHandler,
 		topics.StopTerminalSession:    ex.stopTerminalSession,
+
+		topics.ListWiFiNetworks:       ex.listWiFiNetworksHandler,
+		topics.AddWiFiConfiguration:   ex.addWiFiConfigurationHandler,
+		topics.SelectWiFiNetwork:      ex.selectWiFiNetworkHandler,
+		topics.SystemReboot:           ex.systemRebootHandler,
+		topics.SystemShutdown:         ex.systemShutdownHandler,
 	}
 }
 

@@ -11,10 +11,10 @@ func main() {
 	var ifaces []NetworkIface = ListNetworkInterfaces()
 	var ifaceactive string
 	for i, n := range ifaces {
-		fmt.Printf("%d: %s\n",i,n.name)
+		fmt.Printf("%d: %s\n",i,n.Name)
 		fmt.Println(n.Info())
-		if n.state == "up" && n.connected {
-			ifaceactive = n.name
+		if n.State == "up" && n.Connected {
+			ifaceactive = n.Name
 		}
 	}
 
@@ -24,7 +24,7 @@ func main() {
 		var wifis []WiFi = ListWiFiNetworks(ifaceactive)
 
 		for i, n := range wifis {
-			fmt.Printf("%d: %s\n",i,n.ssid)
+			fmt.Printf("%d: %s\n",i,n.Ssid)
 			fmt.Println(n.Info())
 		}
 	}
@@ -32,8 +32,8 @@ func main() {
 	if true {
 
 		crd := WiFiCredentials {
-			ssid: "FRITZ!Box 7430 RI",
-			passwd: "R/7z:F%a3b?19cK8xWS5AA",
+			Ssid: "FRITZ!Box 7430 RI",
+			Passwd: "R/7z:F%a3b?19cK8xWS5AA",
 		}
 
 		res := AddWifiConfig(crd,true)
