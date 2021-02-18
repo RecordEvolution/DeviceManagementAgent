@@ -16,12 +16,7 @@ Start your Pi
 connect via:
 `ssh <your-username>@<device-hostname>`
 
-
 ## Step 3
-
-Ssh copy the reagent binary and the database scripts over to the device.
-
-## Step 4
 
 Go to your `git/RESWARM` directory and checkout to the `feat/deviceManagementAgentChanges` branch.
 
@@ -36,7 +31,7 @@ Make sure to `make down-repods && make down && make repods && make build`
 
 (aka just make sure that you get that branch running)
 
-## Step 5
+## Step 4
 
 Create a new device in Reswarm and make sure to enter the correct WiFi credentials.
 
@@ -53,7 +48,9 @@ Open the `.reswarm` file and adjust the following keys:
 
 Replace `192.168.178.36` with the local IP of the machine running Reswarm (aka your laptop local ip)
 
-After applying the changes copy the `.reswarm` file over to your device with scp.
+## Step 5
+
+After applying the changes copy the `.reswarm` file as well as the reagent binary and the database scripts over to the device.
 
 ## Final Step
 
