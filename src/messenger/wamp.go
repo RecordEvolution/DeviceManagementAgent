@@ -265,8 +265,11 @@ func (wampSession *WampSession) SetupTestament() error {
 
 func (wampSession *WampSession) Close() error {
 	err := wampSession.client.Close()
+	if err != nil {
+		return err
+	}
 	wampSession.client = nil
-	return err
+	return nil
 }
 
 func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) {
