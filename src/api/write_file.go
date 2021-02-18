@@ -1,10 +1,14 @@
 package api
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
 	"reagent/messenger"
 )
 
@@ -18,7 +22,7 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 	// container_nameArg := args[3]
 	// totalArg := args[4]
 
-	name, ok := nameArg.(string)
+	fileName, ok := nameArg.(string)
 	if !ok {
 		return nil, errors.New("Failed to parse name argument")
 	}
@@ -28,9 +32,8 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 		return nil, errors.New("Failed to parse chunk argument")
 	}
 
-	filePath := ex.Messenger.GetConfig().CommandLineArguments.AppBuildsDirectory
-	err := write(name, filePath, chunk)
-
+	fileDir := ex.Messenger.GetConfig().CommandLineArguments.AppsBuildDirectory
+	err := write(fileName, fileDir, chunk)
 	if err != nil {
 		return nil, err
 	}
@@ -66,4 +69,32 @@ func write(fileName string, filePath string, chunk string) error {
 	}
 
 	return nil
+}
+
+func decompressTgz(sourcePath string, targetPath string, targetFileName string) error {
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	gzReader, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	targetPath = filepath.Join(targetPath, targetFileName)
+	writer, err := os.Create(targetPath)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	_, err = io.Copy(writer, tarReader)
+	return err
 }

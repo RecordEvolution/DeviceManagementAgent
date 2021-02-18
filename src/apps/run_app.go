@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 )
 
@@ -46,17 +47,25 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	environmentVariables := buildProdEnvironmentVariables(defaultEnvironmentVariables, payload.EnvironmentVariables)
 
 	containerConfig := container.Config{
-		Image:   fullImageNameWithTag,
-		Env:     environmentVariables,
-		Labels:  map[string]string{"real": "True"},
-		Volumes: map[string]struct{}{},
-		Tty:     true,
+		Image:  fullImageNameWithTag,
+		Env:    environmentVariables,
+		Labels: map[string]string{"real": "True"},
+		Tty:    true,
 	}
 
 	hostConfig := container.HostConfig{
 		// CapDrop: []string{"NET_ADMIN"},
 		RestartPolicy: container.RestartPolicy{
 			Name: "no",
+		},
+		Mounts: buildMounts(config),
+		Resources: container.Resources{
+			Devices: []container.DeviceMapping{
+				{
+					PathOnHost:      "/dev",
+					PathInContainer: "/dev",
+				},
+			},
 		},
 		Privileged:  true,
 		NetworkMode: "host",
@@ -144,7 +153,16 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		},
 		Privileged:  true,
 		NetworkMode: "host",
-		CapAdd:      []string{"ALL"},
+		Mounts:      buildMounts(config),
+		Resources: container.Resources{
+			Devices: []container.DeviceMapping{
+				{
+					PathOnHost:      "/dev",
+					PathInContainer: "/dev",
+				},
+			},
+		},
+		CapAdd: []string{"ALL"},
 	}
 
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
@@ -231,6 +249,17 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 func buildProdEnvironmentVariables(defaultEnvironmentVariables []string, payloadEnvironmentVariables map[string]interface{}) []string {
 	return append(defaultEnvironmentVariables, common.EnvironmentVarsToStringArray((payloadEnvironmentVariables))...)
+}
+
+func buildMounts(config *config.Config) []mount.Mount {
+	return []mount.Mount{
+		{
+			Type:     mount.TypeBind,
+			Source:   config.CommandLineArguments.AppsSharedDirectory,
+			Target:   "/shared",
+			ReadOnly: false,
+		},
+	}
 }
 
 func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {

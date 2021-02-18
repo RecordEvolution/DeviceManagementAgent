@@ -2,9 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 )
 
 // ReswarmConfig types for the .reswarm file
@@ -33,7 +36,9 @@ type ReswarmConfig struct {
 }
 
 type CommandLineArguments struct {
-	AppBuildsDirectory       string
+	AppsDirectory            string
+	AppsBuildDirectory       string
+	AppsSharedDirectory      string
 	CompressedBuildExtension string
 	Debug                    bool
 	DebugMessaging           bool
@@ -48,22 +53,39 @@ type Config struct {
 	CommandLineArguments *CommandLineArguments
 }
 
-func GetCliArguments() *CommandLineArguments {
-	logFile := flag.String("logFile", "/Users/ruben/Desktop/reagent.log",
-		"Log file used by the ReAgent to store all its log messages")
+func GetCliArguments() (*CommandLineArguments, error) {
+	defaultAppsDir := "/opt/reagent/apps"
+	defaultLogFilePath := "/var/log/reagent.log"
+
+	// fallback for when reagent is ran on mac/windows
+	if runtime.GOOS != "linux" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+
+		defaultLogFilePath = fmt.Sprintf("%s/%s", homeDir, "reagent/reagent.log")
+		defaultAppsDir = fmt.Sprintf("%s/%s", homeDir, "reagent/apps")
+	}
+
+	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", false, "sets the log level to debug")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	dbScriptsLocation := flag.String("initScripts", "database/update-scripts", "sets the location where database update scripts exist")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
-	appsBuildDirectory := flag.String("appsDirectory", "/Users/ruben/Desktop", "sets the directory where app build files will be stored")
-	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension used to decompress the transfered build files")
-	cfgFile := flag.String("config", "./demo_demo_swarm_TestDevice.reswarm",
-		"Configuration file of IoT device running on localhost")
-
+	appsDirectory := flag.String("appsDirectory", defaultAppsDir, "sets the directory where the app files will be stored")
+	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
+	cfgFile := flag.String("config", "", "Configuration file of IoT device running on localhost")
 	flag.Parse()
 
+	if *cfgFile == "" {
+		return nil, errors.New("the config file path cannot be empty")
+	}
+
 	cliArgs := CommandLineArguments{
-		AppBuildsDirectory:       *appsBuildDirectory,
+		AppsDirectory:            *appsDirectory,
+		AppsBuildDirectory:       (*appsDirectory) + "/build",
+		AppsSharedDirectory:      (*appsDirectory) + "/shared",
 		CompressedBuildExtension: *compressedBuildExtension,
 		Debug:                    *debug,
 		DebugMessaging:           *debugMessaging,
@@ -73,7 +95,7 @@ func GetCliArguments() *CommandLineArguments {
 		DatabaseScriptsDirectory: *dbScriptsLocation,
 	}
 
-	return &cliArgs
+	return &cliArgs, nil
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path

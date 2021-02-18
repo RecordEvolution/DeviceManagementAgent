@@ -50,6 +50,13 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.BUILDING: {
 			common.REMOVED: sm.cancelBuild,
 		},
+		common.STOPPED: {
+			common.REMOVED:     sm.removeApp,
+			common.UNINSTALLED: sm.uninstallApp,
+			common.RUNNING:     sm.runApp,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   sm.publishApp,
+		},
 		common.PRESENT: {
 			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,

@@ -95,7 +95,8 @@ type Container interface {
 	WaitForContainerByName(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForRunning(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan struct{}, <-chan error)
 	StartContainer(ctx context.Context, containerID string) error
-	GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error)
+	GetImage(ctx context.Context, fullImageName string, tag string) (ImageResult, error)
+	GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error)
 	RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
 	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error

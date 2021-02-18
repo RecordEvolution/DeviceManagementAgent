@@ -220,10 +220,44 @@ func (docker *Docker) StopContainerByName(ctx context.Context, containerName str
 	return docker.client.ContainerStop(ctx, container.ID, (*time.Duration)(&timeout))
 }
 
-func (docker *Docker) GetImage(ctx context.Context, imageName string, tag string) (ImageResult, error) {
+func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error) {
+	filters := filters.NewArgs()
+	filters.Add("reference", fullImageName)
+
+	options := types.ImageListOptions{Filters: filters}
+
+	imagesResult, err := docker.client.ImageList(ctx, options)
+	if err != nil {
+		return []ImageResult{}, err
+	}
+
+	if len(imagesResult) == 0 {
+		return []ImageResult{}, nil
+	}
+
+	var images []ImageResult
+	for i := range imagesResult {
+		image := imagesResult[i]
+
+		images = append(images, ImageResult{
+			Created:     image.Created,
+			Containers:  image.Containers,
+			SharedSize:  image.SharedSize,
+			VirtualSize: image.VirtualSize,
+			ID:          image.ID,
+			Labels:      image.Labels,
+			Size:        image.Size,
+			RepoTags:    image.RepoTags,
+		})
+	}
+
+	return images, nil
+}
+
+func (docker *Docker) GetImage(ctx context.Context, fullImageName string, tag string) (ImageResult, error) {
 
 	filters := filters.NewArgs()
-	fullImageNameWithTag := fmt.Sprintf("%s:%s", imageName, tag)
+	fullImageNameWithTag := fmt.Sprintf("%s:%s", fullImageName, tag)
 	filters.Add("reference", fullImageNameWithTag)
 
 	options := types.ImageListOptions{Filters: filters}
@@ -234,7 +268,7 @@ func (docker *Docker) GetImage(ctx context.Context, imageName string, tag string
 	}
 
 	if len(images) == 0 {
-		return ImageResult{}, errdefs.ImageNotFound(fmt.Errorf("no image found with name: %s:%s", imageName, tag))
+		return ImageResult{}, errdefs.ImageNotFound(fmt.Errorf("no image found with name: %s:%s", fullImageName, tag))
 	}
 
 	image := images[0]
@@ -704,11 +738,9 @@ func (docker *Docker) Tag(ctx context.Context, source string, target string) err
 	return docker.client.ImageTag(ctx, source, target)
 }
 
-// TODO: make more generic
-//
 // Build builds a Docker image using a tarfile as context
-func (docker *Docker) Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error) {
-	dockerBuildContext, err := os.Open(pathToTar)
+func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string, options types.ImageBuildOptions) (io.ReadCloser, error) {
+	dockerBuildContext, err := os.Open(compressedBuildFilesPath)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to open compressed build file: %s", err)
 	}

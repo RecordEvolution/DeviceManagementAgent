@@ -110,13 +110,38 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 		container, err := so.Container.GetContainerState(ctx, containerName)
 		if err != nil {
 			if errdefs.IsContainerNotFound(err) {
+				// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
 
-				// should set the app state to 'removed' if it wasn't already
-				if app.CurrentState != common.REMOVED && app.CurrentState != common.UNINSTALLED {
+				var fullImageName string
+				if rState.Stage == common.DEV {
+					fullImageName = rState.RegistryImageName.Dev
+				} else if rState.Stage == common.PROD {
+					fullImageName = rState.RegistryImageName.Prod
+				}
+
+				images, err := so.Container.GetImages(ctx, fullImageName)
+				if err != nil {
+					return err
+				}
+
+				correctedStage := app.CurrentState
+				if len(images) == 0 {
+					// no images was found (and no container) for this guy, so this guy is REMOVED
+					if app.CurrentState != common.REMOVED && app.CurrentState != common.UNINSTALLED {
+						correctedStage = common.REMOVED
+					}
+				} else {
+					// images were found for this guy, but no container, this means --> PRESENT
+					if app.CurrentState != common.PRESENT {
+						correctedStage = common.PRESENT
+					}
+				}
+
+				if correctedStage != app.CurrentState {
 					log.Debug().Msgf("State Correcter: irregular state was found for app %s (%s) that has no container on the device", rState.AppName, rState.Stage)
-					log.Debug().Msgf("State Correcter: app state for %s will be updated to %s", containerName, common.REMOVED)
+					log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedStage)
 
-					err := so.Notify(app, common.REMOVED)
+					err = so.Notify(app, correctedStage)
 					if err != nil {
 						return err
 					}
@@ -170,7 +195,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 	ctx := context.Background()
 	containerName := common.BuildContainerName(stage, appKey, appName)
 	errorC := make(chan error, 1)
-	pollingRate := time.Second * 2
+	pollingRate := time.Second * 1
 
 	go func() {
 		lastKnownStatus := "UKNOWN"
@@ -251,8 +276,8 @@ func (so *StateObserver) initObserverSpawner() chan error {
 						close(errChan)
 						break loop
 					}
-					log.Debug().Msgf("added an observer for %s (%s)", name, stage)
 					so.addObserver(stage, key, name)
+					log.Debug().Msgf("State Observer: created an observer for %s (%s) (container create)", name, stage)
 				}
 			case err := <-errC:
 				errChan <- err

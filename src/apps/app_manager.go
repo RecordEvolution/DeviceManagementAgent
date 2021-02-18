@@ -30,7 +30,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate {
-		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
+		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
 		return nil
 	}
 
@@ -45,7 +45,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	locked := app.SecureLock() // if the app is not locked, it will lock the app
 	if locked {
-		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+		log.Warn().Msgf("App Manager: App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
 	}
 
@@ -116,23 +116,23 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 }
 
 func (am *AppManager) VerifyState(app *common.App) error {
-	log.Printf("Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
+	log.Printf("App Manager: Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
 
 	requestedStatePayload, err := am.AppStore.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
 
-	log.Info().Msgf("Latest requested state (verify): %s", requestedStatePayload.RequestedState)
+	log.Info().Msgf("App Manager: Latest requested state (verify): %s", requestedStatePayload.RequestedState)
 
 	// TODO: what to do when the app transition fails? How do we handle that?
 	if app.CurrentState == common.FAILED {
-		log.Print("App transition finished in a failed state")
+		log.Debug().Msg("App Manager: App transition finished in a failed state")
 		return nil
 	}
 
 	if requestedStatePayload.RequestedState != app.CurrentState {
-		log.Printf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
+		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
 
 		// transition again
 		go func() {
@@ -249,7 +249,7 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 		return err
 	}
 
-	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(payloads))
+	log.Info().Msgf("App Manager: Found %d app states, updating local database with new requested states..", len(payloads))
 
 	for i := range payloads {
 		payload := payloads[i]

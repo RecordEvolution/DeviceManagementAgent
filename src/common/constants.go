@@ -38,7 +38,7 @@ func ContainerStateToAppState(containerState string, exitCode int) (AppState, er
 	case "running":
 		return RUNNING, nil
 	case "created":
-		return "", unknownStateErr
+		return FAILED, nil
 	case "removing":
 		return STOPPING, nil
 	case "paused": // won't occur (as of writing)

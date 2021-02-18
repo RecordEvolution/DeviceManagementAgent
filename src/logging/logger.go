@@ -12,7 +12,7 @@ import (
 )
 
 func SetupLogger(cliArgs *config.CommandLineArguments) {
-	file, err := os.OpenFile(cliArgs.LogFileLocation, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	file, err := os.OpenFile(cliArgs.LogFileLocation, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		log.Error().Err(err).Msg("error occured while trying to open log file")
 	}

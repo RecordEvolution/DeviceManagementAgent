@@ -8,6 +8,7 @@ import (
 	"reagent/apps"
 	"reagent/config"
 	"reagent/container"
+	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
 	"reagent/persistence"
@@ -65,8 +66,16 @@ func InitialSetup(
 }
 
 func main() {
-	cliArgs := config.GetCliArguments()
+	cliArgs, err := config.GetCliArguments()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to parse cli arguments")
+	}
+
 	logging.SetupLogger(cliArgs)
+	err = filesystem.InitDirectories(cliArgs)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to init reagent directories")
+	}
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
 	if err != nil {
