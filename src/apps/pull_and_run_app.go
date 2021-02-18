@@ -11,11 +11,9 @@ func (sm *StateMachine) pullAndRunApp(payload common.TransitionPayload, app *com
 			return err
 		}
 
-		err = sm.runApp(payload, app)
-		if err != nil {
-			return err
-		}
+		return sm.runApp(payload, app)
 	}
 
+	//
 	return sm.noActionTransitionFunc(payload, app)
 }
