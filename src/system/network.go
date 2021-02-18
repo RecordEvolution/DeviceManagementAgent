@@ -3,6 +3,7 @@ package system
 import (
 	// "context"
 	"fmt"
+	"errors"
 	// "io"
 	// "bytes"
 	"os"
@@ -30,53 +31,74 @@ const wpaconfigpath string = "/etc/wpa_supplicant/"
 // ------------------------------------------------------------------------- //
 
 type NetworkIface struct {
-	name       string     // name of interface, e.g. wlan0
-	mac        string     // MAC
-	state      string     // current operational state
-	wifi       bool       // is it a wifi interface ?
-	connected  bool       // interface is active/connected
+	Name       string     // name of interface, e.g. wlan0
+	Mac        string     // MAC
+	State      string     // current operational state
+	Wifi       bool       // is it a wifi interface ?
+	Connected  bool       // interface is active/connected
 }
 
 func (ifc *NetworkIface) Info() (string) {
 	var sb strings.Builder
-	fmt.Fprintf(&sb,"name:      %s\n",ifc.name)
-	fmt.Fprintf(&sb,"mac:       %s\n",ifc.mac)
-	fmt.Fprintf(&sb,"state:     %s\n",ifc.state)
-	fmt.Fprintf(&sb,"wifi:      %t\n",ifc.wifi)
-	fmt.Fprintf(&sb,"connected: %t\n",ifc.connected)
+	fmt.Fprintf(&sb,"name:      %s\n",ifc.Name)
+	fmt.Fprintf(&sb,"mac:       %s\n",ifc.Mac)
+	fmt.Fprintf(&sb,"state:     %s\n",ifc.State)
+	fmt.Fprintf(&sb,"wifi:      %t\n",ifc.Wifi)
+	fmt.Fprintf(&sb,"connected: %t\n",ifc.Connected)
 	return sb.String()
 }
 
+func (ifc* NetworkIface) Dict() (map[string]interface{}) {
+	ifcdict := make(map[string]interface{})
+	ifcdict["name"] = ifc.Name
+	ifcdict["mac"] = ifc.Mac
+	ifcdict["state"] = ifc.State
+	ifcdict["wiFi"] = ifc.Wifi
+	ifcdict["connected"] = ifc.Connected
+	return ifcdict
+}
+
 type WiFi struct {
-	ssid       string     // network name
-	mac        string     // MAC
-	signal     float64    // signal strength (dBm)
-	security   string     // security/encryption
-	channel    int64      // channel index
-	frequency  int64      // frequency [MHz]
+	Ssid       string     // network name
+	Mac        string     // MAC
+	Signal     float64    // signal strength (dBm)
+	Security   string     // security/encryption
+	Channel    int64      // channel index
+	Frequency  int64      // frequency [MHz]
 }
 
 func (wf *WiFi) Info() (string) {
 	var sb strings.Builder
-	fmt.Fprintf(&sb,"MAC:       %s\n",wf.mac)
-	fmt.Fprintf(&sb,"SSID:      %s\n",wf.ssid)
-	fmt.Fprintf(&sb,"Signal:    %4.2f dBm\n",wf.signal)
-	fmt.Fprintf(&sb,"Security:  %s\n",wf.security)
-	fmt.Fprintf(&sb,"Channel:   %d\n",wf.channel)
-	fmt.Fprintf(&sb,"Frequency: %d MHz\n",wf.frequency)
+	fmt.Fprintf(&sb,"MAC:       %s\n",wf.Mac)
+	fmt.Fprintf(&sb,"SSID:      %s\n",wf.Ssid)
+	fmt.Fprintf(&sb,"Signal:    %4.2f dBm\n",wf.Signal)
+	fmt.Fprintf(&sb,"Security:  %s\n",wf.Security)
+	fmt.Fprintf(&sb,"Channel:   %d\n",wf.Channel)
+	fmt.Fprintf(&sb,"Frequency: %d MHz\n",wf.Frequency)
 	return sb.String()
 }
 
+func (wf* WiFi) Dict() (map[string]interface{}) {
+	wifidict := make(map[string]interface{})
+	wifidict["mac"] = wf.Mac
+	wifidict["ssid"] = wf.Ssid
+	wifidict["signal"] = wf.Signal
+	wifidict["security"] = wf.Security
+	wifidict["channel"] = wf.Channel
+	wifidict["frequency"] = wf.Frequency
+	return wifidict
+}
+
 type WiFiCredentials struct {
-	ssid    string        // SSID of network
-	passwd  string        // password for SSID
+	Ssid    string        // SSID of network
+	Passwd  string        // password for SSID
 }
 
 func (crd *WiFiCredentials) Info() (string) {
 	var sb strings.Builder
-	fmt.Fprintf(&sb,"ssid:     %s\n",crd.ssid)
+	fmt.Fprintf(&sb,"ssid:     %s\n",crd.Ssid)
 	reg := regexp.MustCompile(`[\S]`)
-	fmt.Fprintf(&sb,"password: %s\n",reg.ReplaceAllString(crd.passwd,"*"))
+	fmt.Fprintf(&sb,"password: %s\n",reg.ReplaceAllString(crd.Passwd,"*"))
 	return sb.String()
 }
 
@@ -98,42 +120,61 @@ func ListNetworkInterfaces() []NetworkIface {
 
   for idx, dir := range dirs {
 		// name of interface corresponds to directory name
-		ifaces[idx].name = dir.Name()
+		ifaces[idx].Name = dir.Name()
 
 		// read MAC address from file
-		pthadd := pth + ifaces[idx].name + "/address"
+		pthadd := pth + ifaces[idx].Name + "/address"
 		macfin, err := ioutil.ReadFile(pthadd)
     if err != nil {
 			panic(err)
 		}
-    ifaces[idx].mac = strings.Replace(string(macfin),"\n","",-1)
+    ifaces[idx].Mac = strings.Replace(string(macfin),"\n","",-1)
 
 		// read current state from file
-		pthsta := pth + ifaces[idx].name + "/operstate"
+		pthsta := pth + ifaces[idx].Name + "/operstate"
 		stafin, err := ioutil.ReadFile(pthsta)
     if err != nil {
 			panic(err)
 		}
-    ifaces[idx].state = strings.Replace(string(stafin),"\n","",-1)
+    ifaces[idx].State = strings.Replace(string(stafin),"\n","",-1)
 
 		// read device type from file
-		pthdev := pth + ifaces[idx].name + "/uevent"
+		pthdev := pth + ifaces[idx].Name + "/uevent"
 		devfin, err := ioutil.ReadFile(pthdev)
     if err != nil {
 			panic(err)
 		}
 		reg := regexp.MustCompile(`DEVTYPE=wlan`)
-    ifaces[idx].wifi = reg.MatchString(string(devfin))
+    ifaces[idx].Wifi = reg.MatchString(string(devfin))
 
 		// connection of interface
-		if ifaces[idx].state == "up" {
-			ifaces[idx].connected = true
+		if ifaces[idx].State == "up" {
+			ifaces[idx].Connected = true
 		} else {
-			ifaces[idx].connected = false
+			ifaces[idx].Connected = false
 		}
 	}
 
 	return ifaces
+}
+
+func GetActiveWiFiInterface() NetworkIface {
+
+	// list all active network interface
+  var ifaces []NetworkIface = ListNetworkInterfaces()
+
+	// select the first active WiFi interface
+	var ifaceactive NetworkIface
+	for _, n := range ifaces {
+		if n.State == "up" && n.Connected && n.Wifi {
+			ifaceactive = n
+		}
+	}
+  if ifaceactive.Name == "" {
+    panic(errors.New("no active WiFi interface available"))
+  }
+
+	return ifaceactive
 }
 
 // ------------------------------------------------------------------------- //
@@ -162,12 +203,12 @@ func ListWiFiNetworks(iface string) []WiFi {
 		// MAC
 		reA := regexp.MustCompile(`([a-z0-9]{2}:){5}[a-z0-9]{2}`)
 		macmatch := reA.FindAllString(n,-1)
-		wifis[i].mac = macmatch[0]
+		wifis[i].Mac = macmatch[0]
 
 		// SSID network name
 		reB := regexp.MustCompile(`SSID: .*`)
 		ssidmatch := reB.FindAllString(n,-1)
-		wifis[i].ssid = strings.Replace(ssidmatch[0],"SSID: ","",-1)
+		wifis[i].Ssid = strings.Replace(ssidmatch[0],"SSID: ","",-1)
 
 		// signal strength
 		reC := regexp.MustCompile(`signal: .*`)
@@ -175,17 +216,17 @@ func ListWiFiNetworks(iface string) []WiFi {
 		replC := strings.NewReplacer("signal: ","","dBm",""," ","")
 		signstr := replC.Replace(signalmatch[0])
 		resC, _ := strconv.ParseFloat(signstr,64)
-		wifis[i].signal = resC
+		wifis[i].Signal = resC
 
 		// security
 		reF := regexp.MustCompile(`WPS: *`)
 		reG := regexp.MustCompile(`WPA: *`)
 		if reG.FindAllString(n,-1) != nil {
-			wifis[i].security = "WPA"
+			wifis[i].Security = "WPA"
 		} else if reF.FindAllString(n,-1) != nil {
-			wifis[i].security = "WPS"
+			wifis[i].Security = "WPS"
 		} else {
-			wifis[i].security = "None"
+			wifis[i].Security = "None"
 		}
 
 		// channel index
@@ -194,7 +235,7 @@ func ListWiFiNetworks(iface string) []WiFi {
 		replD := strings.NewReplacer("DS Parameter set:","","channel",""," ","")
 		chnstr := replD.Replace(channelmatch[0])
 		resD, _ := strconv.ParseInt(chnstr,10,32)
-		wifis[i].channel = resD
+		wifis[i].Channel = resD
 
 		// frequency
 		reE := regexp.MustCompile(`freq: .*`)
@@ -202,7 +243,7 @@ func ListWiFiNetworks(iface string) []WiFi {
 		replE := strings.NewReplacer("freq:",""," ","")
 		freqstr := replE.Replace(freqmatch[0])
 		resE, _ := strconv.ParseInt(freqstr,10,32)
-		wifis[i].frequency = resE
+		wifis[i].Frequency = resE
 
 		// fmt.Println(wifis[i].Info())
 	}
@@ -235,7 +276,7 @@ func AddWifiConfig(wificred WiFiCredentials, overwrite bool) bool {
   }
 
 	// use hashed SSID as file name
-	ssidhsh := filehash(wificred.ssid)
+	ssidhsh := filehash(wificred.Ssid)
 	flname := ssidhsh + ".conf"
 	// fmt.Printf("filename: %s",flname)
 
@@ -251,8 +292,8 @@ func AddWifiConfig(wificred WiFiCredentials, overwrite bool) bool {
 	cfgstr := "ctrl_interface=/var/run/wpa_supplicant\n" +
 	          "ap_scan=1\n\n" +
 						"network={\n" +
-						"  ssid=\"" + wificred.ssid + "\"\n" +
-						"  psk=\"" + wificred.passwd + "\"\n" +
+						"  ssid=\"" + wificred.Ssid + "\"\n" +
+						"  psk=\"" + wificred.Passwd + "\"\n" +
 						"}\n"
 	fou, erra := os.Create(cfgfile)
 	if erra != nil {
@@ -281,7 +322,7 @@ func ActivateWifi(wifi WiFi, iface NetworkIface) bool {
 	ishere := false
 	cfgfile := ""
 	for _, fl := range files {
-		if strings.Replace(fl.Name(),".conf","",-1) == filehash(wifi.ssid) {
+		if strings.Replace(fl.Name(),".conf","",-1) == filehash(wifi.Ssid) {
 			ishere = true
 			cfgfile = fl.Name()
 		}
@@ -297,7 +338,7 @@ func ActivateWifi(wifi WiFi, iface NetworkIface) bool {
 		panic(erra)
 	}
 	_, errb := exec.Command("wpa_supplicant","-B","-D","nl80211",
-	                        "-i",iface.name,"-c",wpaconfigpath+cfgfile).Output()
+	                        "-i",iface.Name,"-c",wpaconfigpath+cfgfile).Output()
 	if errb != nil {
 		panic(errb)
 	}
