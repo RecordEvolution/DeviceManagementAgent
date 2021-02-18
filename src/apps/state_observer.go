@@ -177,7 +177,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 
 		if correctedAppState == app.CurrentState {
 			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
-			return nil
+			continue
 		}
 
 		log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedAppState)
