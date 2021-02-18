@@ -49,3 +49,8 @@ func IsNoActionTransition(err error) bool {
 	_, ok := err.(ErrNoActionTransition)
 	return ok
 }
+
+func IsDockerBuildFilesNotFound(err error) bool {
+	_, ok := err.(ErrDockerBuildFilesNotFound)
+	return ok
+}

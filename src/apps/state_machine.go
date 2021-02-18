@@ -36,7 +36,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
 			common.PRESENT:     sm.removedToPresent,
-			common.RUNNING:     sm.pullAndRunApp,
+			common.RUNNING:     sm.removedToRuning,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: sm.uninstallApp,

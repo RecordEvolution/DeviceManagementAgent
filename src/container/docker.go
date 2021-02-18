@@ -228,6 +228,9 @@ func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]Im
 
 	imagesResult, err := docker.client.ImageList(ctx, options)
 	if err != nil {
+		if strings.Contains(err.Error(), "No such image") {
+			return []ImageResult{}, errdefs.ImageNotFound(err)
+		}
 		return []ImageResult{}, err
 	}
 
@@ -264,6 +267,9 @@ func (docker *Docker) GetImage(ctx context.Context, fullImageName string, tag st
 
 	images, err := docker.client.ImageList(ctx, options)
 	if err != nil {
+		if strings.Contains(err.Error(), "No such image") {
+			return ImageResult{}, errdefs.ImageNotFound(err)
+		}
 		return ImageResult{}, err
 	}
 
@@ -742,7 +748,10 @@ func (docker *Docker) Tag(ctx context.Context, source string, target string) err
 func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string, options types.ImageBuildOptions) (io.ReadCloser, error) {
 	dockerBuildContext, err := os.Open(compressedBuildFilesPath)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open compressed build file: %s", err)
+		if os.IsNotExist(err) {
+			return nil, errdefs.DockerBuildFilesNotFound(err)
+		}
+		return nil, err
 	}
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)

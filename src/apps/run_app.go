@@ -3,10 +3,12 @@ package apps
 import (
 	"context"
 	"fmt"
+	"os"
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/logging"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -53,12 +55,17 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		Tty:    true,
 	}
 
+	mounts, err := computeMounts(app.Stage, app.AppName, config)
+	if err != nil {
+		return err
+	}
+
 	hostConfig := container.HostConfig{
 		// CapDrop: []string{"NET_ADMIN"},
 		RestartPolicy: container.RestartPolicy{
 			Name: "no",
 		},
-		Mounts: buildMounts(config),
+		Mounts: mounts,
 		Resources: container.Resources{
 			Devices: []container.DeviceMapping{
 				{
@@ -131,6 +138,21 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
+	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Dev, "latest")
+	if err != nil {
+		// if we can't find the dev image, we should try to build it first
+		if errdefs.IsImageNotFound(err) {
+			imageNotFoundMessage := "WARNING: The image " + payload.RegistryImageName.Dev + " was not found on the device, attempting to build it first..."
+			sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, imageNotFoundMessage)
+
+			buildAppErr := sm.buildApp(payload, app)
+			// this can fail if the build files are for example not available on the device
+			if buildAppErr != nil {
+				return buildAppErr
+			}
+		}
+	}
+
 	config := sm.Container.GetConfig()
 	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
 
@@ -146,6 +168,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		Tty:          true,
 	}
 
+	mounts, err := computeMounts(app.Stage, app.AppName, config)
+	if err != nil {
+		return err
+	}
+
 	hostConfig := container.HostConfig{
 		// CapDrop: []string{"NET_ADMIN"},
 		RestartPolicy: container.RestartPolicy{
@@ -153,16 +180,9 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		},
 		Privileged:  true,
 		NetworkMode: "host",
-		Mounts:      buildMounts(config),
-		Resources: container.Resources{
-			Devices: []container.DeviceMapping{
-				{
-					PathOnHost:      "/dev",
-					PathInContainer: "/dev",
-				},
-			},
-		},
-		CapAdd: []string{"ALL"},
+		Mounts:      mounts,
+		Resources:   computeResources(),
+		CapAdd:      []string{"ALL"},
 	}
 
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
@@ -251,13 +271,51 @@ func buildProdEnvironmentVariables(defaultEnvironmentVariables []string, payload
 	return append(defaultEnvironmentVariables, common.EnvironmentVarsToStringArray((payloadEnvironmentVariables))...)
 }
 
-func buildMounts(config *config.Config) []mount.Mount {
-	return []mount.Mount{
+func computeMounts(stage common.Stage, appName string, config *config.Config) ([]mount.Mount, error) {
+	appSpecificDirectory := strings.ToLower(config.CommandLineArguments.AppsDirectory + "/" + string(stage) + "/" + appName)
+
+	err := os.MkdirAll(appSpecificDirectory, os.ModePerm)
+	if err != nil {
+		if !os.IsExist(err) {
+			return nil, err
+		}
+	}
+
+	mounts := []mount.Mount{
 		{
 			Type:     mount.TypeBind,
 			Source:   config.CommandLineArguments.AppsSharedDirectory,
 			Target:   "/shared",
 			ReadOnly: false,
+		},
+		{
+			Type:     mount.TypeBind,
+			Source:   appSpecificDirectory,
+			Target:   "/data",
+			ReadOnly: false,
+		},
+	}
+
+	// path to this exists
+	if _, err := os.Stat("/sys/bus/w1/devices"); !os.IsNotExist(err) {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   "/sys/bus/w1/devices",
+			Target:   "/sys/bus/w1/devices",
+			ReadOnly: false,
+		})
+	}
+
+	return mounts, nil
+}
+
+func computeResources() container.Resources {
+	return container.Resources{
+		Devices: []container.DeviceMapping{
+			{
+				PathOnHost:      "/dev",
+				PathInContainer: "/dev",
+			},
 		},
 	}
 }

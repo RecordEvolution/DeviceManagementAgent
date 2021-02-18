@@ -76,7 +76,7 @@ func ImageNotFound(err error) error {
 		return err
 	}
 
-	return ErrContainerNotFound{err}
+	return ErrImageNotFound{err}
 }
 
 /*------------*/
@@ -168,6 +168,28 @@ func DockerfileIsMissing(err error) error {
 	}
 
 	return ErrDockerfileIsMissing{err}
+}
+
+/*-----------*/
+
+type ErrDockerBuildFilesNotFound struct {
+	error
+}
+
+func (e ErrDockerBuildFilesNotFound) Cause() error {
+	return e.error
+}
+
+func (e ErrDockerBuildFilesNotFound) Unwrap() error {
+	return e.error
+}
+
+func DockerBuildFilesNotFound(err error) error {
+	if err == nil || IsDockerBuildFilesNotFound(err) {
+		return err
+	}
+
+	return ErrDockerBuildFilesNotFound{err}
 }
 
 /*-----------*/

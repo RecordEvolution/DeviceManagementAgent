@@ -108,7 +108,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			}
 		}
 
-		log.Error().Msgf("App Manager: An error occured during transition from %s to %s", app.CurrentState, payload.RequestedState)
+		log.Error().Msgf("App Manager: An error occured during transition from %s to %s for %s (%s)", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		log.Error().Err(err).Msg("App Manager: The current app state will has been set to FAILED")
 	}
 

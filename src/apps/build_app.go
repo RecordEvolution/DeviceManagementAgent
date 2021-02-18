@@ -3,13 +3,12 @@ package apps
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
-	"reagent/filesystem"
 	"reagent/logging"
 
 	"github.com/docker/docker/api/types"
+	"github.com/rs/zerolog/log"
 )
 
 func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.App) error {
@@ -34,13 +33,6 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	// this ensures that the dev release will be set to exists = true
 	// prod ready builds will not be set to exists until after they are pushed
 	app.ReleaseBuild = releaseBuild
-
-	exists, _ := filesystem.FileExists(filePath)
-	if !exists {
-		sm.setState(app, common.FAILED)
-		err := fmt.Errorf("build files do not exist on path %s", filePath)
-		return err
-	}
 
 	err := sm.setState(app, common.BUILDING)
 
@@ -67,7 +59,11 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			errorMessage = "The Dockerfile cannot be empty, please fill out your Dockerfile"
 		} else if errdefs.IsDockerfileIsMissing(err) {
 			errorMessage = "Could not find a Dockerfile, please create a Dockerfile in the root of your project"
+		} else if errdefs.IsDockerBuildFilesNotFound(err) {
+			errorMessage = "Build files for app not found: " + err.Error()
 		}
+
+		log.Debug().Msgf("build_app: building failed sending following message to user %s", errorMessage)
 
 		messageErr := sm.LogManager.Write(topicForLogStream, logging.BUILD, errorMessage)
 		if messageErr != nil {
