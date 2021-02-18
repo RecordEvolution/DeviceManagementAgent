@@ -149,6 +149,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	external := api.External{
+		Container:       container,
 		Messenger:       messenger,
 		Database:        database,
 		AppManager:      &appManager,
