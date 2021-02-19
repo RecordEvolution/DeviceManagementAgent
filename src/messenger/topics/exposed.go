@@ -10,6 +10,9 @@ const StopTerminalSession Topic = "stop_terminal_session"
 
 const ListWiFiNetworks Topic = "list_wifi_networks"
 const AddWiFiConfiguration Topic = "add_wifi_configuration"
+const RemoveWiFiConfiguration Topic = "remove_wifi_configuration"
 const SelectWiFiNetwork Topic = "select_wifi_network"
+const RestartWifi Topic = "restart_wifi"
+
 const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"
