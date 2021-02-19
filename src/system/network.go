@@ -195,7 +195,6 @@ func ListWiFiNetworks(iface string) ([]WiFi, error) {
 	}
 
 	outstr := string(out)
-	// fmt.Printf("%s",outstr)
 
 	// split into separate networks
 	outnets := regexp.MustCompile(`(?m)^BSS `).Split(outstr, -1)
@@ -210,20 +209,26 @@ func ListWiFiNetworks(iface string) ([]WiFi, error) {
 		// MAC
 		reA := regexp.MustCompile(`([a-z0-9]{2}:){5}[a-z0-9]{2}`)
 		macmatch := reA.FindAllString(n, -1)
-		wifis[i].Mac = macmatch[0]
+		if len(macmatch) > 0 {
+			wifis[i].Mac = macmatch[0]
+		}
 
 		// SSID network name
 		reB := regexp.MustCompile(`SSID: .*`)
 		ssidmatch := reB.FindAllString(n, -1)
-		wifis[i].Ssid = strings.Replace(ssidmatch[0], "SSID: ", "", -1)
+		if len(ssidmatch) > 0 {
+			wifis[i].Ssid = strings.Replace(ssidmatch[0], "SSID: ", "", -1)
+		}
 
 		// signal strength
 		reC := regexp.MustCompile(`signal: .*`)
 		signalmatch := reC.FindAllString(n, -1)
 		replC := strings.NewReplacer("signal: ", "", "dBm", "", " ", "")
-		signstr := replC.Replace(signalmatch[0])
-		resC, _ := strconv.ParseFloat(signstr, 64)
-		wifis[i].Signal = resC
+		if len(signalmatch) > 0 {
+			signstr := replC.Replace(signalmatch[0])
+			resC, _ := strconv.ParseFloat(signstr, 64)
+			wifis[i].Signal = resC
+		}
 
 		// security
 		reF := regexp.MustCompile(`WPS: *`)
@@ -236,23 +241,29 @@ func ListWiFiNetworks(iface string) ([]WiFi, error) {
 			wifis[i].Security = "None"
 		}
 
-		// channel index
-		reD := regexp.MustCompile(`DS Parameter set: .*`)
+		//
+		// 'Uschannel indexe primary channel' instead of 'DS Parameter set' since the entry seems to be missing for some networks
+		reD := regexp.MustCompile(`\* primary channel: .*`)
 		channelmatch := reD.FindAllString(n, -1)
-		replD := strings.NewReplacer("DS Parameter set:", "", "channel", "", " ", "")
-		chnstr := replD.Replace(channelmatch[0])
-		resD, _ := strconv.ParseInt(chnstr, 10, 32)
-		wifis[i].Channel = resD
+		replD := strings.NewReplacer("* primary channel:", "")
+		if len(channelmatch) > 0 {
+			chnstr := replD.Replace(channelmatch[0])
+			resD, _ := strconv.ParseInt(strings.Trim(chnstr, " "), 10, 32)
+
+			wifis[i].Channel = resD
+		}
 
 		// frequency
 		reE := regexp.MustCompile(`freq: .*`)
 		freqmatch := reE.FindAllString(n, -1)
 		replE := strings.NewReplacer("freq:", "", " ", "")
-		freqstr := replE.Replace(freqmatch[0])
-		resE, _ := strconv.ParseInt(freqstr, 10, 32)
-		wifis[i].Frequency = resE
+		if len(freqmatch) > 0 {
+			freqstr := replE.Replace(freqmatch[0])
+			resE, _ := strconv.ParseInt(freqstr, 10, 32)
 
-		// fmt.Println(wifis[i].Info())
+			wifis[i].Frequency = resE
+		}
+
 	}
 
 	return wifis, nil
