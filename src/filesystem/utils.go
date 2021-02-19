@@ -1,9 +1,10 @@
 package filesystem
 
 import (
-	"os"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 )
 
 func FileExists(filename string) (bool, error) {
@@ -14,6 +15,20 @@ func FileExists(filename string) (bool, error) {
 		return false, err
 	}
 	return !info.IsDir(), nil
+}
+
+func OverwriteFile(filePath string, value string) error {
+	file, err := os.OpenFile(filePath, os.O_TRUNC|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(file, "%s", value)
+	if err != nil {
+		return err
+	}
+
+	return err
 }
 
 // download from URL to local file
@@ -34,7 +49,7 @@ func DownloadURL(filepath string, url string) error {
 	defer out.Close()
 
 	// copy the http body into the file
-	_, err = io.Copy(out,resp.Body)
+	_, err = io.Copy(out, resp.Body)
 
 	return err
 }

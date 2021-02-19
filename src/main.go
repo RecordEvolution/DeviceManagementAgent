@@ -70,8 +70,14 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
+	// will also check the bootConfig
+	err := system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
-	err := agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
+	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}
@@ -102,11 +108,6 @@ func (agent *Agent) Init() error {
 	err = agent.External.RegisterAll()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
-	}
-
-	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	return err
