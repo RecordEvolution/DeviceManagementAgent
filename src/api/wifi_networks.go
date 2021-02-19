@@ -12,7 +12,7 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 	// find active network interface
 	ifaces, err := system.ListNetworkInterfaces()
 	if err != nil {
-		return &messenger.InvokeResult{}, nil
+		return nil, nil
 	}
 
 	var ifaceActive system.NetworkIface
@@ -27,6 +27,9 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 
 	// use active WiFi interface to list networks in range
 	wifis, err := system.ListWiFiNetworks(ifaceActive.Name)
+	if err != nil {
+		return nil, err
+	}
 
 	// convert to slice to be passed on
 	wifislst := make([]interface{}, len(wifis))
