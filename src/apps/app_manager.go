@@ -43,7 +43,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		}
 	}
 
-	locked := app.SecureLock() // if the app is not locked, it will lock the app
+	locked := app.SecureTransition() // if the app is not locked, it will lock the app
 	if locked {
 		log.Warn().Msgf("App Manager: App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
@@ -54,14 +54,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	// this is necessary because some state transitions require a change of actual state (BUILD & PUBLISH)
 	err = am.UpdateCurrentAppState(payload)
 	if err != nil {
-		app.Unlock()
+		app.UnlockTransition()
 		return err
 	}
 
 	// before we transition, should request the token
 	token, err := am.AppStore.GetRegistryToken(payload.RequestorAccountKey)
 	if err != nil {
-		app.Unlock()
+		app.UnlockTransition()
 		return err
 	}
 	payload.RegisteryToken = token
@@ -69,14 +69,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	errC := am.StateMachine.PerformTransition(app, payload)
 	if errC == nil {
 		// not yet implemented or nullified state transition
-		app.Unlock()
+		app.UnlockTransition()
 		return nil
 	}
 
 	// block till transition has finished
 	select {
 	case err := <-errC:
-		app.Unlock()
+		app.UnlockTransition()
 
 		if errdefs.IsNoActionTransition(err) {
 			log.Debug().Msg("App Manager: A no action transition was executed, nothing to do. Will also not verify")

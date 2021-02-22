@@ -94,6 +94,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	}
 
 	cliArgs := CommandLineArguments{
+		AppsDirectory:            appsDir,
 		AppsBuildDir:             (appsDir) + "/build",
 		AppsSharedDir:            (appsDir) + "/shared",
 		AgentDownloadDir:         (*agentDir) + "/downloads",

@@ -3,6 +3,7 @@ package common
 import (
 	"errors"
 	"reagent/config"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
@@ -23,20 +24,21 @@ type App struct {
 	RequestUpdate       bool
 	ReleaseBuild        bool
 	Version             string
-	Semaphore           *semaphore.Weighted
 	LastUpdated         Timestamp
+	TransitionLock      *semaphore.Weighted
+	StateLock           sync.Mutex
 }
 
-func (app *App) SecureLock() bool {
-	if app.Semaphore == nil {
+func (app *App) SecureTransition() bool {
+	if app.TransitionLock == nil {
 		log.Error().Err(errors.New("no semaphore initialized"))
 		return false
 	}
-	return !app.Semaphore.TryAcquire(1)
+	return !app.TransitionLock.TryAcquire(1)
 }
 
-func (app *App) Unlock() {
-	app.Semaphore.Release(1)
+func (app *App) UnlockTransition() {
+	app.TransitionLock.Release(1)
 }
 
 func (app *App) IsCancelable() bool {

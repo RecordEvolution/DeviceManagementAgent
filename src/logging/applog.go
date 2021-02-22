@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
 )
 
 type ActiveLog struct {
@@ -28,7 +29,7 @@ type ActiveLog struct {
 	logHistory     []string
 	LogType        common.LogType
 	Publish        bool
-	Active         bool
+	Active         *semaphore.Weighted
 }
 
 type LogManager struct {
@@ -115,12 +116,12 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 
 // TODO: handle errors from this goroutine
 func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
-	// Already watching logs, should just return
-	if logEntry.Active {
+	if logEntry.Stream == nil {
 		return nil
 	}
 
-	if logEntry.Stream == nil {
+	// Already watching logs, should just return
+	if !logEntry.Active.TryAcquire(1) {
 		return nil
 	}
 
@@ -148,12 +149,12 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 				return
 			}
 
-			logEntry.Active = false
+			logEntry.Active.Release(1)
+
 			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
 		}()
 	}()
 
-	logEntry.Active = true
 	for scanner.Scan() {
 		chunk := scanner.Text()
 
@@ -218,6 +219,7 @@ func (lm *LogManager) ReviveDeadLogs() error {
 			LogType:        logType,
 			SubscriptionID: fmt.Sprint(id),
 			Stream:         reader,
+			Active:         semaphore.NewWeighted(1),
 			Publish:        true,
 		}
 
@@ -269,7 +271,7 @@ func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]stri
 		return []string{}, nil
 	}
 
-	logType := common.GetCurrentLogType(app.CurrentState)
+	logType := common.GetCurrentLogType(app.GetCurrentState())
 	// not found in memory, lets check database
 	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage, logType)
 	if err != nil {
@@ -342,7 +344,7 @@ func (lm *LogManager) SetupEndpoints() error {
 			activeLog.Publish = true
 
 			// ensure we are actually actively streaming
-			if activeLog.Active != true && activeLog.LogType == common.APP {
+			if activeLog.Active.TryAcquire(1) && activeLog.LogType == common.APP {
 				log.Warn().Msgf("Log Manager: we weren't active yet for %s", activeLog.ContainerName)
 				return lm.Stream(containerName, activeLog.LogType, nil)
 			}
@@ -355,6 +357,7 @@ func (lm *LogManager) SetupEndpoints() error {
 				SubscriptionID: id,
 				Publish:        true,
 				logHistory:     make([]string, 0),
+				Active:         semaphore.NewWeighted(1),
 				ContainerName:  containerName,
 			}
 
@@ -423,6 +426,7 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 		logHistory:    make([]string, 0),
 		LogType:       logType,
 		Stream:        stream,
+		Active:        semaphore.NewWeighted(1),
 		Publish:       false,
 	}
 
@@ -499,6 +503,14 @@ func (lm *LogManager) Write(containerName string, text string) error {
 	entry := common.Dict{"type": "build", "chunk": text}
 	args := make([]interface{}, 0)
 	args = append(args, entry)
+
+	lm.mapMutex.Lock()
+	activeLog := lm.activeLogs[containerName]
+	lm.mapMutex.Unlock()
+
+	if activeLog != nil {
+		activeLog.logHistory = append(activeLog.logHistory, text)
+	}
 
 	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
 	if err != nil {

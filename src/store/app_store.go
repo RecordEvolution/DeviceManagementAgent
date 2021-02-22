@@ -58,7 +58,7 @@ func (am *AppStore) GetApp(appKey uint64, stage common.Stage) (*common.App, erro
 		return nil, nil
 	}
 
-	app.Semaphore = semaphore.NewWeighted(1)
+	app.TransitionLock = semaphore.NewWeighted(1)
 	am.apps = append(am.apps, app)
 
 	return app, nil
@@ -76,7 +76,7 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 		Stage:               payload.Stage,
 		Version:             payload.PresentVersion,
 		RequestUpdate:       payload.RequestUpdate,
-		Semaphore:           semaphore.NewWeighted(1),
+		TransitionLock:      semaphore.NewWeighted(1),
 	}
 
 	if payload.CurrentState == "" {
