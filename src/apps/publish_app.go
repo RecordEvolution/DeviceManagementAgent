@@ -55,5 +55,10 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
+	err = sm.LogManager.ClearLogHistory(payload.PublishContainerName)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
