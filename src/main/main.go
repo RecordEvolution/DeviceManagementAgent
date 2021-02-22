@@ -17,6 +17,7 @@ func main() {
 	}
 
 	logging.SetupLogger(cliArgs)
+
 	err = filesystem.InitDirectories(cliArgs)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init reagent directories")
@@ -27,10 +28,7 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to load reswarm config file")
 	}
 
-	generalConfig := config.Config{
-		ReswarmConfig:        reswarmConfig,
-		CommandLineArguments: cliArgs,
-	}
+	generalConfig := config.New(cliArgs, reswarmConfig)
 
 	agent := NewAgent(&generalConfig)
 	err = agent.Init()

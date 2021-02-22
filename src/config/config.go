@@ -55,6 +55,13 @@ type Config struct {
 	CommandLineArguments *CommandLineArguments
 }
 
+func New(cliArgs *CommandLineArguments, reswarmConfig *ReswarmConfig) Config {
+	return Config{
+		ReswarmConfig:        reswarmConfig,
+		CommandLineArguments: cliArgs,
+	}
+}
+
 func GetCliArguments() (*CommandLineArguments, error) {
 	defaultAgentDir := "/opt/reagent"
 	defaultLogFilePath := "/var/log/reagent.log"
