@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reagent/messenger"
-	"reagent/system"
 )
 
 func (ex *External) updateReagent(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -17,10 +16,7 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		return nil, errors.New("failed to parse version string argument, invalid type")
 	}
 
-	err := system.GetNewAgent(versionString)
-	if err != nil {
-		return nil, err
-	}
+	ex.System.UpdateAgent(versionString)
 
 	return &messenger.InvokeResult{}, nil
 }

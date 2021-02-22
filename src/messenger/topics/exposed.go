@@ -18,3 +18,5 @@ const RestartWifi Topic = "restart_wifi"
 
 const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"
+
+const UpdateAgent Topic = "update_agent"

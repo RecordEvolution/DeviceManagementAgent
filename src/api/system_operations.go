@@ -2,13 +2,11 @@ package api
 
 import (
 	"context"
-	// "reagent/common"
 	"reagent/messenger"
-	"reagent/system"
 )
 
 func (ex *External) systemRebootHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	err := system.Reboot()
+	err := ex.System.Reboot()
 	if err != nil {
 		return nil, err
 	}
@@ -17,7 +15,7 @@ func (ex *External) systemRebootHandler(ctx context.Context, response messenger.
 }
 
 func (ex *External) systemShutdownHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	err := system.Poweroff()
+	err := ex.System.Poweroff()
 	if err != nil {
 		return nil, err
 	}

@@ -2,28 +2,77 @@ package system
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"reagent/config"
 	"reagent/filesystem"
+
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
 )
 
-const agenturl string = "https://storage.cloud.google.com/reagent/reagent-v0.1"
-const agentDir string = "/opt/reagent"
+type System struct {
+	config     *config.Config
+	updateLock *semaphore.Weighted
+}
+
+func New(config *config.Config) System {
+	return System{
+		config:     config,
+		updateLock: semaphore.NewWeighted(1),
+	}
+}
 
 // ------------------------------------------------------------------------- //
 
-func Reboot() error {
+func (sys *System) Reboot() error {
 	_, err := exec.Command("reboot").Output()
 	return err
 }
 
-func Poweroff() error {
+func (sys *System) Poweroff() error {
 	_, err := exec.Command("poweroff").Output()
 	return err
 }
 
-func GetNewAgent(versionString string) error {
-	filePath := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
-	return filesystem.DownloadURL(filePath, agenturl)
+func (sys *System) UpdateAgent(versionString string) chan error {
+
+	// The update is already in progress
+	agentDir := sys.config.CommandLineArguments.AgentDir
+	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
+	agentURL := remoteUpdateURL + "/reagent-" + versionString
+
+	newAgentDestination := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
+	tmpFilePath := "/tmp/reagent-" + versionString
+	errC := make(chan error, 1)
+
+	go func() {
+		if !sys.updateLock.TryAcquire(1) {
+			return
+		}
+
+		defer sys.updateLock.Release(1)
+
+		// download it to /tmp first
+		err := filesystem.DownloadURL(tmpFilePath, agentURL)
+		if err != nil {
+			errC <- err
+			return
+		}
+
+		// move it to the actual agent dir
+		err = os.Rename(tmpFilePath, newAgentDestination)
+		if err != nil {
+			errC <- err
+			return
+		}
+
+		log.Debug().Msg("Reagent update finished...")
+
+		errC <- nil
+	}()
+
+	return errC
 }
 
 // ------------------------------------------------------------------------- //

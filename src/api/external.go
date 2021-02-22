@@ -10,6 +10,7 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
+	"reagent/system"
 	"reagent/terminal"
 
 	"github.com/rs/zerolog/log"
@@ -21,6 +22,7 @@ type External struct {
 	Container       container.Container
 	Messenger       messenger.Messenger
 	Database        persistence.Database
+	System          *system.System
 	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager
 	LogManager      *logging.LogManager
@@ -48,6 +50,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.SystemShutdown:          ex.systemShutdownHandler,
 		topics.RestartWifi:             ex.wifiRebootHandler,
 		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
+		topics.UpdateAgent:             ex.updateReagent,
 	}
 }
 

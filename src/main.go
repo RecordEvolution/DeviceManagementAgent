@@ -60,6 +60,7 @@ func main() {
 type Agent struct {
 	Messenger       messenger.Messenger
 	Database        persistence.Database
+	System          *system.System
 	Config          *config.Config
 	External        *api.External
 	LogManager      *logging.LogManager
@@ -115,6 +116,9 @@ func (agent *Agent) Init() error {
 }
 
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
+
+	systemAPI := system.New(generalConfig)
+
 	database, _ := persistence.NewSQLiteDb(generalConfig)
 	err := database.Init()
 	if err != nil {
@@ -159,6 +163,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Container:       container,
 		Messenger:       messenger,
 		Database:        database,
+		System:          &systemAPI,
 		AppManager:      &appManager,
 		TerminalManager: &terminalManager,
 		LogManager:      &logManager,
@@ -167,6 +172,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	return &Agent{
 		Config:          generalConfig,
+		System:          &systemAPI,
 		External:        &external,
 		LogManager:      &logManager,
 		TerminalManager: &terminalManager,
