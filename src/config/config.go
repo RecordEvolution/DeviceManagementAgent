@@ -79,7 +79,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
-	cfgFile := flag.String("config", "", "Configuration file of IoT device running on localhost")
+	cfgFile := flag.String("config", "", "reswarm configuration file")
 	flag.Parse()
 
 	if *cfgFile == "" {
