@@ -29,7 +29,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	sm.setState(app, common.REMOVED)
 
 	config := sm.Container.GetConfig()
-	buildsDir := config.CommandLineArguments.AppsBuildDirectory
+	buildsDir := config.CommandLineArguments.AppsBuildDir
 	fileName := payload.AppName + "." + config.CommandLineArguments.CompressedBuildExtension
 	filePath := buildsDir + "/" + fileName
 

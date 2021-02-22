@@ -37,10 +37,11 @@ type ReswarmConfig struct {
 
 type CommandLineArguments struct {
 	AppsDirectory            string
-	AppsBuildDirectory       string
-	AppsSharedDirectory      string
-	CompressedBuildExtension string
+	AppsBuildDir             string
+	AppsSharedDir            string
 	AgentDir                 string
+	AgentDownloadDir         string
+	CompressedBuildExtension string
 	RemoteUpdateURL          string
 	Debug                    bool
 	DebugMessaging           bool
@@ -56,7 +57,6 @@ type Config struct {
 
 func GetCliArguments() (*CommandLineArguments, error) {
 	defaultAgentDir := "/opt/reagent"
-	defaultAppsDir := "/opt/reagent/apps"
 	defaultLogFilePath := "/var/log/reagent.log"
 
 	// fallback for when reagent is ran on mac/windows
@@ -67,9 +67,10 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		}
 
 		defaultLogFilePath = fmt.Sprintf("%s/%s", homeDir, "reagent/reagent.log")
-		defaultAppsDir = fmt.Sprintf("%s/%s", homeDir, "reagent/apps")
 		defaultAgentDir = fmt.Sprintf("%s/%s", homeDir, "reagent")
 	}
+
+	appsDir := defaultAgentDir + "/apps"
 
 	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", false, "sets the log level to debug")
@@ -77,7 +78,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
-	appsDirectory := flag.String("appsDirectory", defaultAppsDir, "sets the directory where the app files will be stored")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
 	cfgFile := flag.String("config", "", "Configuration file of IoT device running on localhost")
 	flag.Parse()
@@ -87,9 +87,9 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	}
 
 	cliArgs := CommandLineArguments{
-		AppsDirectory:            *appsDirectory,
-		AppsBuildDirectory:       (*appsDirectory) + "/build",
-		AppsSharedDirectory:      (*appsDirectory) + "/shared",
+		AppsBuildDir:             (appsDir) + "/build",
+		AppsSharedDir:            (appsDir) + "/shared",
+		AgentDownloadDir:         (*agentDir) + "/downloads",
 		AgentDir:                 *agentDir,
 		RemoteUpdateURL:          *remoteUpdateURL,
 		CompressedBuildExtension: *compressedBuildExtension,

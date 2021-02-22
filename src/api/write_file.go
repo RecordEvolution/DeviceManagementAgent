@@ -32,7 +32,7 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 		return nil, errors.New("Failed to parse chunk argument")
 	}
 
-	fileDir := ex.Messenger.GetConfig().CommandLineArguments.AppsBuildDirectory
+	fileDir := ex.Messenger.GetConfig().CommandLineArguments.AppsBuildDir
 	err := write(fileName, fileDir, chunk)
 	if err != nil {
 		return nil, err

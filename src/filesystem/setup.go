@@ -12,20 +12,20 @@ func InitDirectories(cliArgs *config.CommandLineArguments) error {
 			return err
 		}
 	}
-	err = os.MkdirAll(cliArgs.AppsBuildDirectory, os.ModePerm)
+	err = os.MkdirAll(cliArgs.AppsBuildDir, os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
 			return err
 		}
 	}
-	err = os.MkdirAll(cliArgs.AppsSharedDirectory, os.ModePerm)
+	err = os.MkdirAll(cliArgs.AppsSharedDir, os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
 			return err
 		}
 	}
 
-	err = os.MkdirAll(cliArgs.AgentDir+"/downloads", os.ModePerm)
+	err = os.MkdirAll(cliArgs.AgentDownloadDir, os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
 			return err

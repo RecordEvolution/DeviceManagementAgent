@@ -303,7 +303,7 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 	mounts := []mount.Mount{
 		{
 			Type:     mount.TypeBind,
-			Source:   config.CommandLineArguments.AppsSharedDirectory,
+			Source:   config.CommandLineArguments.AppsSharedDir,
 			Target:   "/shared",
 			ReadOnly: false,
 		},

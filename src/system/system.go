@@ -43,7 +43,7 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 	agentURL := remoteUpdateURL + "/reagent-" + versionString
 
 	newAgentDestination := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
-	tmpFilePath := sys.config.CommandLineArguments.AgentDir + "/downloads" + "/reagent-" + versionString
+	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-" + versionString
 	errC := make(chan error, 1)
 
 	go func() {
