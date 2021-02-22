@@ -43,7 +43,7 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 	agentURL := remoteUpdateURL + "/reagent-" + versionString
 
 	newAgentDestination := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
-	tmpFilePath := "/tmp/reagent-" + versionString
+	tmpFilePath := sys.config.CommandLineArguments.AgentDir + "/downloads" + "/reagent-" + versionString
 	errC := make(chan error, 1)
 
 	go func() {
@@ -57,6 +57,7 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 		err := filesystem.DownloadURL(tmpFilePath, agentURL)
 		if err != nil {
 			errC <- err
+			log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
 			return
 		}
 
@@ -64,6 +65,7 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 		err = os.Rename(tmpFilePath, newAgentDestination)
 		if err != nil {
 			errC <- err
+			log.Error().Err(err).Msg("Failed to move agent to AgentDir")
 			return
 		}
 
