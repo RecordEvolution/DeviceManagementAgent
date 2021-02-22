@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/container"
-	"reagent/logging"
 )
 
 func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
@@ -36,7 +35,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.ContainerName.Prod, logging.PULL, reader)
+	err = sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.PULL, reader)
 	if err != nil {
 		return err
 	}

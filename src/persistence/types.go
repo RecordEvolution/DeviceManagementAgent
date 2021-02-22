@@ -12,6 +12,8 @@ type Database interface {
 	UpdateNetworkInterface(system.NetworkInterface) error
 	UpsertRequestedStateChange(payload common.TransitionPayload) error
 	BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error
+	GetAppLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType) ([]string, error)
+	UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType, logs []string) error
 	GetAppState(appKey uint64, stage common.Stage) (*common.App, error)
 	GetAppStates() ([]*common.App, error)
 	GetRequestedState(aKey uint64, aStage common.Stage) (common.TransitionPayload, error)

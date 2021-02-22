@@ -7,7 +7,6 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
-	"reagent/logging"
 	"strings"
 	"time"
 
@@ -79,6 +78,11 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		CapAdd:      []string{"ALL"},
 	}
 
+	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
 	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
@@ -109,12 +113,21 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	// block and wait for running, if exited status then return as a failed state
 	select {
 	case err = <-errC:
+		options := common.Dict{"follow": true, "stdout": true, "stderr": true}
+
+		ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
+		if logsErr != nil {
+			return logsErr
+		}
+
+		sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
+
 		return err
 	case <-runningSignal:
 		break
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Prod, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
@@ -124,10 +137,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	// in case there's an active subscription, (an open panel) before the app was started, we need to make sure we start a stream
-	// NOTE: this is currently not possible since we close the panel everytime we switch states for production apps
-	// but in case we change this in the future, then this is already accounted for
-	err = sm.LogManager.UpdateLogStream(payload.ContainerName.Prod)
+	err = sm.LogManager.Stream(payload.ContainerName.Prod, common.APP, nil)
 	if err != nil {
 		return err
 	}
@@ -143,7 +153,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		// if we can't find the dev image, we should try to build it first
 		if errdefs.IsImageNotFound(err) {
 			imageNotFoundMessage := "WARNING: The image " + payload.RegistryImageName.Dev + " was not found on the device, attempting to build it first..."
-			sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, imageNotFoundMessage)
+			sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
 
 			buildAppErr := sm.buildApp(payload, app)
 			// this can fail if the build files are for example not available on the device
@@ -217,6 +227,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 	}
 
+	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
 	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
@@ -240,6 +255,14 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	// block and wait for running, if exited status then return as a failed state
 	select {
 	case err = <-errC:
+		options := common.Dict{"follow": true, "stdout": true, "stderr": true}
+
+		ioReader, logsErr := sm.Container.Logs(context.Background(), newContainerID, options)
+		if logsErr != nil {
+			return logsErr
+		}
+
+		sm.LogManager.StreamBlocking(payload.ContainerName.Dev, common.APP, ioReader)
 		return err
 	case <-runningSignal:
 		break
@@ -250,16 +273,12 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Dev, logging.BUILD, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
 
-	// when we build the app, we create a subscription
-	// now we make sure to populate this existing subscription with a stream (if the user is still subscribed)
-	// since we have now started the app
-	// it's also possible for users to have an active subscription before the app has started running
-	err = sm.LogManager.UpdateLogStream(payload.ContainerName.Dev)
+	err = sm.LogManager.Stream(payload.ContainerName.Dev, common.APP, nil)
 	if err != nil {
 		return err
 	}

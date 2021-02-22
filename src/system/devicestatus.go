@@ -7,7 +7,6 @@ import (
 	"reagent/common"
 	"reagent/messenger"
 	"reagent/messenger/topics"
-	"runtime"
 
 	"github.com/rs/zerolog/log"
 )
@@ -75,39 +74,36 @@ func UpdateRemoteDeviceStatus(messenger messenger.Messenger, status DeviceStatus
 		"status":     string(status),
 	}
 
-	rpcResult, err := messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+	_, err := messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
+
+	// current we will not update the boot config
 
 	// Are we only a Raspberry Pi
-	_, err = os.Stat(bootConfigPath)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	// _, err = os.Stat(bootConfigPath)
+	// if os.IsNotExist(err) {
+	// 	return nil
+	// }
 
-	// don't update boot config, if we're running on
-	if runtime.GOOS != "linux" {
-		return nil
-	}
+	// // deviceConfig for this device from remote database
+	// latestDeviceConfig, err := buildDeviceConfigFromPayload(&rpcResult)
+	// if err != nil {
+	// 	return err
+	// }
 
-	// deviceConfig for this device from remote database
-	latestDeviceConfig, err := buildDeviceConfigFromPayload(&rpcResult)
-	if err != nil {
-		return err
-	}
+	// // current device config extracted from filesystem
+	// currentDeviceConfig, err := getDeviceConfig()
+	// if err != nil {
+	// 	return err
+	// }
 
-	// current device config extracted from filesystem
-	currentDeviceConfig, err := getDeviceConfig()
-	if err != nil {
-		return err
-	}
-
-	// was there an update detected?
-	_, err = UpdateDeviceConfig(&currentDeviceConfig, &latestDeviceConfig)
-	if err != nil {
-		return err
-	}
+	// // was there an update detected?
+	// _, err = UpdateDeviceConfig(&currentDeviceConfig, &latestDeviceConfig)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// payload["boot_config_applied"] = updated
 	// payload["firewall_applied"] = updated // FIXME: doesn't actually do something

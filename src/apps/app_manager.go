@@ -141,12 +141,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 			// we confirmed the release in the backend and can put the state to PRESENT now
 			if builtOrPublishedToPresent {
-				app.CurrentState = common.PRESENT // also set in memory
-				_, err := am.AppStore.UpdateLocalAppState(app, common.PRESENT)
-				if err != nil {
-					log.Error().Stack().Err(err)
-				}
-
+				am.StateObserver.Notify(app, common.PRESENT)
 				return
 			}
 

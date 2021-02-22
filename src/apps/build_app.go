@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reagent/common"
 	"reagent/errdefs"
-	"reagent/logging"
 
 	"github.com/docker/docker/api/types"
 	"github.com/rs/zerolog/log"
@@ -22,6 +21,11 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
 	ctx := context.Background()
 
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
 	sm.setState(app, common.REMOVED)
 
 	config := sm.Container.GetConfig()
@@ -34,8 +38,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	// prod ready builds will not be set to exists until after they are pushed
 	app.ReleaseBuild = releaseBuild
 
-	err := sm.setState(app, common.BUILDING)
-
+	err = sm.setState(app, common.BUILDING)
 	if err != nil {
 		return err
 	}
@@ -65,7 +68,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 
 		log.Debug().Msgf("build_app: building failed sending following message to user %s", errorMessage)
 
-		messageErr := sm.LogManager.Write(topicForLogStream, logging.BUILD, errorMessage)
+		messageErr := sm.LogManager.Write(topicForLogStream, errorMessage)
 		if messageErr != nil {
 			return messageErr
 		}
@@ -74,11 +77,11 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	}
 
 	var buildMessage string
-	streamErr := sm.LogManager.Stream(topicForLogStream, logging.BUILD, reader)
+	streamErr := sm.LogManager.StreamBlocking(topicForLogStream, common.BUILD, reader)
 	if streamErr != nil {
 		if errdefs.IsDockerBuildCanceled(streamErr) {
 			buildMessage = "The build stream was canceled"
-			writeErr := sm.LogManager.Write(topicForLogStream, logging.BUILD, buildMessage)
+			writeErr := sm.LogManager.Write(topicForLogStream, buildMessage)
 			if writeErr != nil {
 				return writeErr
 			}
@@ -90,7 +93,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	}
 
 	buildMessage = "Image built successfully"
-	err = sm.LogManager.Write(topicForLogStream, logging.BUILD, buildMessage)
+	err = sm.LogManager.Write(topicForLogStream, buildMessage)
 	if err != nil {
 		return err
 	}

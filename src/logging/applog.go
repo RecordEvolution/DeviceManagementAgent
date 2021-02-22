@@ -12,6 +12,8 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/messenger/topics"
+	"reagent/persistence"
+	"reagent/store"
 	"strings"
 	"sync"
 	"time"
@@ -19,35 +21,27 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func GetBuildLogs(appid string) string {
-	return "id"
-}
-
-func GetAppLogs(appid string) string {
-	return "id"
-}
-
-type LogSubscription struct {
-	ContainerName string
-	Stream        io.ReadCloser
-	Streaming     bool
+type ActiveLog struct {
+	SubscriptionID string // The currently active subscriptionID for this log entry, can be empty
+	ContainerName  string
+	Stream         io.ReadCloser
+	logHistory     []string
+	LogType        common.LogType
+	Publish        bool
+	Active         bool
 }
 
 type LogManager struct {
 	Container  container.Container
 	Messenger  messenger.Messenger
-	activeLogs map[string]*LogSubscription
+	Database   persistence.Database
+	AppStore   store.AppStore
+	activeLogs map[string]*ActiveLog
 	mapMutex   sync.Mutex
 }
 
-type LogType string
-
-const (
-	PULL    LogType = "PULL"
-	PUSH    LogType = "PUSH"
-	BUILD   LogType = "BUILD"
-	RUNNING LogType = "RUNNING"
-)
+// Amount of lines that will be stored for each app
+const historyStorageLimit = 200
 
 type JSONProgress struct {
 	terminalFd uintptr
@@ -78,37 +72,121 @@ type JSONMessage struct {
 	Aux             *json.RawMessage `json:"aux,omitempty"`
 }
 
-// TODO: handle errors from this goroutine
-func (lm *LogManager) emitStream(subscription *LogSubscription) {
-	topic := lm.buildTopic(subscription.ContainerName)
+func (lm *LogManager) ClearLogHistory(containerName string) error {
+	lm.mapMutex.Lock()
+	activeLogEntry := lm.activeLogs[containerName]
+	lm.mapMutex.Unlock()
 
-	// shouldn't occur, but for safety reasons...
-	if subscription.Streaming {
-		return
+	if activeLogEntry == nil {
+		return nil
 	}
 
-	scanner := bufio.NewScanner(subscription.Stream)
-	subscription.Streaming = true
-	defer subscription.Stream.Close()
+	// clear locally
+	activeLogEntry.logHistory = make([]string, 0)
 
+	stage, appKey, appName, err := common.ParseContainerName(containerName)
+	if err != nil {
+		return err
+	}
+
+	// clear in database
+	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.APP, []string{})
+	if err != nil {
+		return err
+	}
+
+	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.BUILD, []string{})
+	if err != nil {
+		return err
+	}
+
+	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.PULL, []string{})
+	if err != nil {
+		return err
+	}
+
+	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.PUSH, []string{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// TODO: handle errors from this goroutine
+func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
+	// Already watching logs, should just return
+	if logEntry.Active {
+		return nil
+	}
+
+	if logEntry.Stream == nil {
+		return nil
+	}
+
+	topic := lm.buildTopic(logEntry.ContainerName)
+	scanner := bufio.NewScanner(logEntry.Stream)
+
+	// clear old log history
+	logEntry.logHistory = make([]string, 0)
+
+	// cleanup func, closes the stream + saves the current logs in the database
+	defer func() {
+		go func() {
+			err := logEntry.Stream.Close()
+			if err != nil {
+				return
+			}
+
+			stage, appKey, appName, err := common.ParseContainerName(logEntry.ContainerName)
+			if err != nil {
+				return
+			}
+
+			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logEntry.LogType, logEntry.logHistory)
+			if err != nil {
+				return
+			}
+
+			logEntry.Active = false
+			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
+		}()
+	}()
+
+	logEntry.Active = true
 	for scanner.Scan() {
 		chunk := scanner.Text()
 
-		err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
-		if err != nil {
-			return
+		if len(logEntry.logHistory) == historyStorageLimit {
+			logEntry.logHistory = logEntry.logHistory[1:]
 		}
 
+		logEntry.logHistory = append(logEntry.logHistory, chunk)
+
+		if logEntry.Publish {
+			lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
+		}
 	}
 
-	log.Print("goroutine has finshed publishing logs for", subscription.ContainerName)
+	err := scanner.Err()
+	if err != nil {
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			return errdefs.DockerBuildCanceled(err)
+		}
+		return err
+	}
 
-	subscription.Streaming = false
+	return nil
 }
 
 // ReviveDeadLogs will iterate over all apps that are running and check if it has an active logger subscription. If a subscription exists, it will publish the container logs.
-func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
+func (lm *LogManager) ReviveDeadLogs() error {
 	log.Info().Msg("Checking for alive log subscriptions")
+
+	appStates, err := lm.AppStore.GetAllApps()
+	if err != nil {
+		return err
+	}
 
 	for _, app := range appStates {
 		containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
@@ -126,14 +204,108 @@ func (lm *LogManager) ReviveDeadLogs(appStates []*common.App) error {
 			continue
 		}
 
-		// app is running and there's a subscription active in this realm, init publish
-		lm.createLogTask(fmt.Sprint(id), containerName)
+		logType := common.GetCurrentLogType(app.CurrentState)
+		reader, err := lm.getLogStream(containerName)
+		if err != nil {
+			if !errdefs.IsContainerNotFound(err) {
+				return err
+			}
+		}
+
+		subscriptionEntry := ActiveLog{
+			ContainerName:  containerName,
+			logHistory:     make([]string, 0),
+			LogType:        logType,
+			SubscriptionID: fmt.Sprint(id),
+			Stream:         reader,
+			Publish:        true,
+		}
+
+		lm.mapMutex.Lock()
+		lm.activeLogs[containerName] = &subscriptionEntry
+		lm.mapMutex.Unlock()
+
+		if reader != nil {
+			go lm.emitStream(&subscriptionEntry)
+		}
 	}
 	return nil
 }
 
+func (lm *LogManager) GetLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType) ([]string, error) {
+	for _, logSession := range lm.activeLogs {
+		containerName := common.BuildContainerName(stage, appKey, appName)
+		if logSession.ContainerName == containerName {
+			return logSession.logHistory, nil
+		}
+	}
+
+	// not found in memory, lets check database
+	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage, logType)
+	if err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}
+
+func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]string, error) {
+	for _, logSession := range lm.activeLogs {
+		if logSession.ContainerName == containerName {
+			if len(logSession.logHistory) > 0 {
+				return logSession.logHistory, nil
+			}
+		}
+	}
+
+	stage, appKey, appName, err := common.ParseContainerName(containerName)
+
+	app, err := lm.AppStore.GetApp(appKey, stage)
+	if err != nil {
+		return nil, err
+	}
+
+	if app == nil {
+		return []string{}, nil
+	}
+
+	logType := common.GetCurrentLogType(app.CurrentState)
+	// not found in memory, lets check database
+	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage, logType)
+	if err != nil {
+		if strings.Contains(err.Error(), "No logs found") {
+			return []string{}, nil
+		}
+	}
+
+	return logs, nil
+}
+
 func (lm *LogManager) SetupEndpoints() error {
-	lm.activeLogs = make(map[string]*LogSubscription)
+	lm.activeLogs = make(map[string]*ActiveLog)
+
+	_ = lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
+		subscriptionID := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was created
+
+		activeLog := lm.getLogTaskBySubscriptionID(subscriptionID)
+		if activeLog == nil {
+			return nil
+		}
+
+		history, err := lm.getLogHistoryByContainerName(activeLog.ContainerName)
+		if err != nil {
+			return err
+		}
+
+		for _, logEntry := range history {
+			err := lm.Write(activeLog.ContainerName, logEntry)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}, nil)
 
 	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
@@ -149,7 +321,6 @@ func (lm *LogManager) SetupEndpoints() error {
 		// ignore any non log subscriptions
 		if !strings.HasPrefix(uri, "reswarm.logs.") {
 			return nil
-
 		}
 
 		topicSplit := strings.Split(uri, ".")
@@ -159,51 +330,40 @@ func (lm *LogManager) SetupEndpoints() error {
 		// if the request is not for my device
 		if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
 			return nil
-
 		}
 
-		idString := fmt.Sprint(id)
 		lm.mapMutex.Lock()
-		if lm.activeLogs[idString] != nil {
-			lm.mapMutex.Unlock()
-			// this shouldn't happen if the subscriptions are properly removed
-			return errors.New("The subscription somehow already exists, this should never happen")
-		}
+		activeLog := lm.activeLogs[containerName]
 		lm.mapMutex.Unlock()
 
-		lm.createLogTask(idString, containerName)
+		// there is at least one client subscribed, we should publish
+		if activeLog != nil {
+			activeLog.SubscriptionID = id // set the current subscriptionID
+			activeLog.Publish = true
 
-		return nil
-	}, nil)
-
-	err = lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) error {
-		_ = r.Arguments[0]   // the id of the client session that used to be listening
-		id := r.Arguments[1] // the id of the subscription that was deleted, in the delete we only receive the ID
-		idString := fmt.Sprint(id)
-
-		lm.mapMutex.Lock()
-		defer lm.mapMutex.Unlock()
-		if lm.activeLogs[idString] == nil {
-			return nil
-		}
-
-		activeSubscription := lm.activeLogs[idString]
-
-		if activeSubscription.Stream == nil {
-			log.Info().Msg("Log Manager: stream was empty, nothing to close")
-		} else {
-			// cancel the io stream that is active
-			// TODO: figure out way to handle errors inside a subscription callback, however this error would be rare
-			err := activeSubscription.Stream.Close()
-			if err != nil {
-				return errors.New("Log Manager: error occured while trying to close stream")
+			// ensure we are actually actively streaming
+			if activeLog.Active != true && activeLog.LogType == common.APP {
+				log.Warn().Msgf("Log Manager: we weren't active yet for %s", activeLog.ContainerName)
+				return lm.Stream(containerName, activeLog.LogType, nil)
 			}
 
-			log.Print("Log Manager: Closed active stream for", activeSubscription.ContainerName)
-		}
+			log.Debug().Msgf("Log Manager: A subscription was created, enabling publishing for %s", activeLog.ContainerName)
+		} else {
+			// we don't have an active stream yet, and also don't know the logtype
+			// but we want to add an entry so we can populate the stream later on
+			newActiveLog := ActiveLog{
+				SubscriptionID: id,
+				Publish:        true,
+				logHistory:     make([]string, 0),
+				ContainerName:  containerName,
+			}
 
-		// remove entry from active logs map
-		delete(lm.activeLogs, idString)
+			lm.mapMutex.Lock()
+			lm.activeLogs[containerName] = &newActiveLog
+			lm.mapMutex.Unlock()
+
+			log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream...", newActiveLog.ContainerName)
+		}
 
 		return nil
 	}, nil)
@@ -211,42 +371,91 @@ func (lm *LogManager) SetupEndpoints() error {
 	if err != nil {
 		return err
 	}
+
+	return lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) error {
+		_ = r.Arguments[0]               // the id of the client session that used to be listening
+		id := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was deleted, in the delete we only receive the ID
+
+		subscription := lm.getLogTaskBySubscriptionID(id)
+
+		if subscription != nil {
+			// no clients are subscribed, should stop publishing
+			subscription.Publish = false
+			log.Print("Log Manager: Stopped publishing logs for", subscription.ContainerName)
+		}
+
+		return nil
+	}, nil)
+}
+
+func (lm *LogManager) getLogTaskBySubscriptionID(id string) *ActiveLog {
+	lm.mapMutex.Lock()
+	defer lm.mapMutex.Unlock()
+
+	for _, subscription := range lm.activeLogs {
+		if subscription.SubscriptionID == id {
+			return subscription
+		}
+	}
 	return nil
 }
 
-func (lm *LogManager) createLogTask(id string, containerName string) error {
-	stream, err := lm.getLogStream(containerName)
-	if err != nil {
-		// It's possible the container does not exist yet
-		// e.g. if we trigger a subscription via an app build
-		// in that case we will just keep the session in memory and trigger it later
-		if !errdefs.IsContainerNotFound(err) {
-			return err
-		}
+func (lm *LogManager) initLogStream(containerName string, logType common.LogType, stream io.ReadCloser) error {
+	lm.mapMutex.Lock()
+	exisitingLog := lm.activeLogs[containerName]
+	lm.mapMutex.Unlock()
+
+	// found an entry without an active stream, populate the stream
+	if exisitingLog != nil {
+		exisitingLog.LogType = logType
+		exisitingLog.Stream = stream
+		return lm.emitStream(exisitingLog)
 	}
 
-	subscriptionEntry := LogSubscription{
+	// in case there is already an active subscription, we need to start publishing straight away
+	id, err := lm.getActiveSubscriptionID(containerName)
+	if err != nil {
+		return err
+	}
+
+	activeLog := ActiveLog{
 		ContainerName: containerName,
+		logHistory:    make([]string, 0),
+		LogType:       logType,
 		Stream:        stream,
-		Streaming:     false,
+		Publish:       false,
+	}
+
+	if id != "" {
+		activeLog.Publish = true
+		activeLog.SubscriptionID = id
 	}
 
 	lm.mapMutex.Lock()
-	lm.activeLogs[id] = &subscriptionEntry
+	lm.activeLogs[containerName] = &activeLog
 	lm.mapMutex.Unlock()
 
-	// a subscription can be created without an actual stream, in that case don't stream
-	if stream == nil {
-		return nil
+	return lm.emitStream(&activeLog)
+}
+
+func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, error) {
+	ctx := context.Background()
+	result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{lm.buildTopic(containerName), common.Dict{"match": "wildcard"}}, nil, nil, nil)
+	if err != nil {
+		return "", err
 	}
 
-	go lm.emitStream(&subscriptionEntry)
+	id := result.Arguments[0]
+	if id != nil {
+		return fmt.Sprint(id), nil
+	}
 
-	return nil
+	return "", nil
 }
 
 func (lm *LogManager) getLogStream(containerName string) (io.ReadCloser, error) {
-	options := common.Dict{"follow": true, "stdout": true, "stderr": true, "tail": "100"}
+	// start from last log, do not get any history
+	options := common.Dict{"follow": true, "stdout": true, "stderr": true, "tail": "0"}
 
 	ctx := context.Background()
 
@@ -258,80 +467,34 @@ func (lm *LogManager) buildTopic(containerName string) string {
 	return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 }
 
-func (lm *LogManager) UpdateLogStream(containerName string) error {
-	for _, subscription := range lm.activeLogs {
-		if subscription.ContainerName == containerName && !subscription.Streaming {
-			reader, err := lm.getLogStream(containerName)
-			if err != nil {
-				return err
-			}
-
-			if reader != nil {
-				subscription.Stream = reader
-				go lm.emitStream(subscription)
-			}
-		}
+func (lm *LogManager) StreamBlocking(containerName string, logType common.LogType, reader io.ReadCloser) error {
+	if reader != nil {
+		return lm.initLogStream(containerName, logType, reader)
 	}
 	return nil
 }
 
-// Stream meant to be used for pull / build streams or any stream that isn't a container logs stream
-func (lm *LogManager) Stream(containerName string, logType LogType, reader io.ReadCloser) error {
-	topic := lm.buildTopic(containerName)
-	scanner := bufio.NewScanner(reader)
-
-	messages := make([]JSONMessage, 0)
-	for scanner.Scan() {
-		chunk := scanner.Bytes()
-		var message JSONMessage
-		err := json.Unmarshal(chunk, &message)
-
-		if err != nil {
+func (lm *LogManager) Stream(containerName string, logType common.LogType, otherReader io.ReadCloser) error {
+	reader, err := lm.getLogStream(containerName)
+	if err != nil {
+		if !errdefs.IsContainerNotFound(err) {
 			return err
 		}
-
-		entry := common.Dict{"type": "build", "chunk": message}
-		args := make([]interface{}, 0)
-		args = append(args, entry)
-
-		err = lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
-		if err != nil {
-			return err
-		}
-
-		// TODO: show proper errors to user instead of actual docker api error
-		if message.Error != nil {
-			msg := message.Error.Message
-			if message.Error.Message == "" && message.ErrorMessage != "" {
-				msg = message.ErrorMessage
-			}
-			if msg == "" {
-				msg = "an error occured during the docker build"
-			}
-			return errdefs.BuildFailed(errors.New(msg))
-		}
-
-		messages = append(messages, message)
 	}
 
-	err := reader.Close()
-	if err != nil {
-		return err
+	if reader != nil {
+		go lm.initLogStream(containerName, logType, reader)
+		return nil
 	}
 
-	err = scanner.Err()
-	if err != nil {
-		if strings.Contains(err.Error(), "use of closed network connection") {
-			return errdefs.DockerBuildCanceled(err)
-		}
-		return err
+	if otherReader != nil {
+		go lm.initLogStream(containerName, logType, otherReader)
 	}
 
-	// TODO: store build/pull logs in db
 	return nil
 }
 
-func (lm *LogManager) Write(containerName string, logType LogType, text string) error {
+func (lm *LogManager) Write(containerName string, text string) error {
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
 	entry := common.Dict{"type": "build", "chunk": text}
 	args := make([]interface{}, 0)

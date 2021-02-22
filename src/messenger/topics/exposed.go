@@ -7,6 +7,8 @@ const ContainerImages Topic = "get_images"
 const RequestTerminalSession Topic = "request_terminal_session"
 const StartTerminalSession Topic = "start_terminal_session"
 const StopTerminalSession Topic = "stop_terminal_session"
+const GetLogHistory Topic = "get_log_history"
+const StreamLogHistory Topic = "stream_log_history"
 
 const ListWiFiNetworks Topic = "list_wifi_networks"
 const AddWiFiConfiguration Topic = "add_wifi_configuration"

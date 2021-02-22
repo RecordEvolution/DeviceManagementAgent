@@ -70,7 +70,6 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
-	// will also check the bootConfig
 	err := system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
@@ -92,18 +91,20 @@ func (agent *Agent) Init() error {
 		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
-	apps, err := agent.Database.GetAppStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to get local app states")
-	}
-
 	err = agent.StateObserver.ObserveAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
-	agent.LogManager.SetupEndpoints()
-	agent.LogManager.ReviveDeadLogs(apps)
+	err = agent.LogManager.SetupEndpoints()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
+	}
+
+	err = agent.LogManager.ReviveDeadLogs()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
+	}
 
 	err = agent.External.RegisterAll()
 	if err != nil {
@@ -141,6 +142,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	logManager := logging.LogManager{
 		Messenger: messenger,
+		AppStore:  appStore,
+		Database:  database,
 		Container: container,
 	}
 

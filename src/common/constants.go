@@ -1,6 +1,8 @@
 package common
 
-import "errors"
+import (
+	"errors"
+)
 
 // AppState states
 type AppState string
@@ -12,6 +14,29 @@ func IsCancelableState(appState AppState) bool {
 		return true
 	}
 	return false
+}
+
+type LogType string
+
+const (
+	PULL  LogType = "PULL"
+	PUSH  LogType = "PUSH"
+	BUILD LogType = "BUILD"
+	APP   LogType = "APP"
+)
+
+func GetCurrentLogType(currentState AppState) LogType {
+	var logType LogType
+	if currentState == DOWNLOADING {
+		logType = PULL
+	} else if currentState == PUBLISHING {
+		logType = PUSH
+	} else if currentState == BUILDING {
+		logType = BUILD
+	} else {
+		logType = APP
+	}
+	return logType
 }
 
 func IsTransientState(appState AppState) bool {
@@ -38,7 +63,7 @@ func ContainerStateToAppState(containerState string, exitCode int) (AppState, er
 	case "running":
 		return RUNNING, nil
 	case "created":
-		return FAILED, nil
+		return PRESENT, nil
 	case "removing":
 		return STOPPING, nil
 	case "paused": // won't occur (as of writing)

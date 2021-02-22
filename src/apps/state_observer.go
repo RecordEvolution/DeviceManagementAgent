@@ -269,6 +269,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 			case event := <-messageC:
 				switch event.Action {
 				case "create", "start":
+					// log.Debug().Msg("create or start event triggered")
 					containerName := event.Actor.Attributes["name"]
 					stage, key, name, err := common.ParseContainerName(containerName)
 					if err != nil {
@@ -280,10 +281,13 @@ func (so *StateObserver) initObserverSpawner() chan error {
 				}
 			case err := <-errC:
 				errChan <- err
+				log.Error().Err(err).Msg("Error during observer spawner")
 				close(errChan)
 				break loop
 			}
 		}
+
+		// log.Warn().Msgf("Observer spawner died")
 	}()
 
 	return errChan

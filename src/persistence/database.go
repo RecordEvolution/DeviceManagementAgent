@@ -470,6 +470,69 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 	return nil
 }
 
+func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType, logs []string) error {
+	upsertStatement, err := ast.db.Prepare(QueryUpsertLogHistoryEntry)
+	if err != nil {
+		return err
+	}
+
+	defer upsertStatement.Close()
+
+	logsBytes, err := json.Marshal(logs)
+	if err != nil {
+		return err
+	}
+
+	_, err = upsertStatement.Exec(appName, appKey, stage, logType, string(logsBytes))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType) ([]string, error) {
+	preppedStatement, err := ast.db.Prepare(QuerySelectLogHistoryByAppKeyStageAndType)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := preppedStatement.Query(appKey, stage, logType)
+	if err != nil {
+		return nil, err
+	}
+
+	hasResult := rows.Next() // only get first result
+	if hasResult == false {
+		err := rows.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("No logs found (%s) for %d (%s) ", logType, appKey, stage)
+	}
+
+	var logsString string
+
+	err = rows.Scan(&logsString)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	var logsArray []string
+	err = json.Unmarshal([]byte(logsString), &logsArray)
+	if err != nil {
+		return nil, err
+	}
+
+	return logsArray, nil
+}
+
 func (ast *AppStateDatabase) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectAllDeviceState)
 	if err != nil {

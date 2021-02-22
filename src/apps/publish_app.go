@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/container"
-	"reagent/logging"
 )
 
 func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common.App) error {
-	err := sm.LogManager.Write(payload.PublishContainerName, logging.BUILD, fmt.Sprintf("Initializing publish process for %s...", app.AppName))
+	err := sm.LogManager.Write(payload.PublishContainerName, fmt.Sprintf("Initializing publish process for %s...", app.AppName))
 	if err != nil {
 		return err
 	}
@@ -19,7 +18,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.PublishContainerName, logging.BUILD, "App build has finished, Starting to publish...")
+	err = sm.LogManager.Write(payload.PublishContainerName, "App build has finished, Starting to publish...")
 	if err != nil {
 		return err
 	}
@@ -46,7 +45,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.Stream(payload.PublishContainerName, logging.PUSH, reader)
+	err = sm.LogManager.StreamBlocking(payload.PublishContainerName, common.PUSH, reader)
 	if err != nil {
 		return err
 	}
