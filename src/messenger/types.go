@@ -40,6 +40,6 @@ type Messenger interface {
 	GetConfig() *config.Config
 	Done() <-chan struct{}
 	Connected() bool
-	ResetSession(ctx context.Context) error
-	Close() error
+	Reconnect()
+	Close()
 }

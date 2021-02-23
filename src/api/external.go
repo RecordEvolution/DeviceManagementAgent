@@ -12,6 +12,7 @@ import (
 	"reagent/persistence"
 	"reagent/system"
 	"reagent/terminal"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 )
@@ -63,9 +64,27 @@ func (ex *External) RegisterAll() error {
 		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
 		err := ex.Messenger.Register(topics.Topic(fullTopic), handler, nil)
 		if err != nil {
-			return err
+			// on reconnect we will reregister, which could cause a already exists exception
+			if strings.Contains(err.Error(), "wamp.error.procedure_already_exists") {
+				log.Warn().Msgf("API: Tried to register already existing topic: %s, will unregister", fullTopic)
+			} else {
+				return err
+			}
 		}
 		log.Info().Msgf("API: Registered topic %s on the device", fullTopic)
+	}
+	return nil
+}
+
+func (ex *External) UnregisterAll() error {
+	serialNumber := ex.Config.ReswarmConfig.SerialNumber
+	topicHandlerMap := ex.getTopicHandlerMap()
+	for topic := range topicHandlerMap {
+		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
+		err := ex.Messenger.Unregister(topics.Topic(fullTopic))
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/signal"
 	"reagent/api"
@@ -74,6 +73,11 @@ func (agent *Agent) Init() error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
+	err = agent.Messenger.SetupTestament()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	}
+
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
 	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
@@ -126,11 +130,6 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	messenger, err := messenger.NewWamp(generalConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
-	}
-
-	err = messenger.SetupTestament()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
 	}
 
 	container, err := container.NewDocker(generalConfig)
@@ -192,22 +191,10 @@ func (agent *Agent) ListenForDisconnect() {
 		go func() {
 			select {
 			case <-doneSignal:
-				log.Debug().Msg("Reconnect: received a done signal for WAMP connection")
-
-				err := agent.Messenger.Close()
-				if err != nil {
-					log.Fatal().Stack().Err(err).Msg("failed to close agent.Messenger...")
-				}
-				log.Debug().Msg("Reconnect: cleaned up the old session")
-
-				log.Debug().Msg("Reconnect: creating new session...")
-				err = agent.Messenger.ResetSession(context.Background())
-				if err != nil {
-					log.Fatal().Stack().Err(err).Msg("failed to reconnect, retrying...")
-				}
+				log.Debug().Msg("Reconnect: attempting to create a new session...")
+				agent.Messenger.Reconnect() // will block until a session is established
 
 				reconnectSignal <- struct{}{}
-
 				break
 			}
 		}()
@@ -215,7 +202,6 @@ func (agent *Agent) ListenForDisconnect() {
 		go func() {
 			select {
 			case <-reconnectSignal:
-				log.Debug().Msg("Reconnect: we are dead, let's try to reconnect..")
 				// did we reconnect successfully? new internal client should be set now
 				if agent.Messenger.Connected() {
 					doneSignal = agent.Messenger.Done()
