@@ -166,23 +166,21 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 	}
 
 	app.StateLock.Lock()
+
 	curAppState := app.CurrentState
-	app.StateLock.Unlock()
 
 	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
 	if curAppState == common.BUILT || curAppState == common.PUBLISHED {
 		if payload.CurrentState != "" {
-			app.StateLock.Lock()
 			app.CurrentState = payload.CurrentState
-			app.StateLock.Unlock()
 		}
 	}
 
 	if payload.PresentVersion != "" {
-		app.StateLock.Lock()
 		app.Version = payload.PresentVersion
-		app.StateLock.Unlock()
 	}
+
+	app.StateLock.Unlock()
 
 	go func() {
 		app.StateLock.Lock()

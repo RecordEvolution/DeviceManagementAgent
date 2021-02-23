@@ -71,8 +71,11 @@ func (sqlite *AppStateDatabase) Init() error {
 }
 
 func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.AppState) (common.Timestamp, error) {
+	app.StateLock.Lock()
+
 	selectStatement, err := ast.db.Prepare(QuerySelectCurrentAppStateByKeyAndStage)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
@@ -82,9 +85,11 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	if hasResult == false {
 		err := rows.Close()
 		if err != nil {
+			app.StateLock.Unlock()
 			return "", err
 		}
 
+		app.StateLock.Unlock()
 		return ast.insertAppState(app)
 	}
 
@@ -93,79 +98,93 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	var curReleaseKey uint64
 	err = rows.Scan(&curState, &curVersion, &curReleaseKey)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", rows.Close()
 	}
 
 	if curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
 		err := rows.Close()
 		if err != nil {
+			app.StateLock.Unlock()
 			return "", err
 		}
 
 		// Silently do nothing if state is already the same
+		app.StateLock.Unlock()
 		return "", nil
 	}
 
 	err = rows.Close()
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	// First add new entry in history
 	insertStatement, err := ast.db.Prepare(QueryInsertAppStateHistoryEntry) // Prepare statement.
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	historyTimestamp := time.Now().Format(time.RFC3339)
 	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, curState, historyTimestamp)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	err = insertStatement.Close()
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	// Update current app state
 	updateStatement, err := ast.db.Prepare(QueryUpdateAppStateByAppKeyAndStage) // Prepare statement.
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	err = updateStatement.Close()
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	// Update RequestedAppState
 	requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
 	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
 	// note: this is only neccessary because we do not force users to update to the latest version
 	// The database will then check if this version is actually the latest version, if not it will request another update
-	app.StateLock.Lock()
 	requestedState.RequestUpdate = app.RequestUpdate
 	requestedState.CurrentState = newState
 	requestedState.RequestedState = app.RequestedState
 	requestedState.PresentVersion = app.Version
 	requestedState.ReleaseKey = app.ReleaseKey
-	app.StateLock.Unlock()
 
 	err = ast.UpsertRequestedStateChange(requestedState)
 	if err != nil {
+		app.StateLock.Unlock()
 		return "", err
 	}
 
-	return common.Timestamp(historyTimestamp), nil
+	timestamp := common.Timestamp(historyTimestamp)
+
+	app.StateLock.Unlock()
+
+	return timestamp, nil
 }
 
 func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*common.App, error) {
