@@ -241,7 +241,7 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs)}
 	}
 
-	err := wampSession.client.Register(string(topic), invocationHandler, wamp.Dict(options))
+	err := wampSession.client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
 	if err != nil {
 		return err
 	}
