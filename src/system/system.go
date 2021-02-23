@@ -53,6 +53,8 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 
 		defer sys.updateLock.Release(1)
 
+		log.Debug().Msg("Reagent update Initialized...")
+
 		// download it to /tmp first
 		err := filesystem.DownloadURL(tmpFilePath, agentURL)
 		if err != nil {
@@ -66,6 +68,13 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 		if err != nil {
 			errC <- err
 			log.Error().Err(err).Msg("Failed to move agent to AgentDir")
+			return
+		}
+
+		err = os.Chmod(newAgentDestination, 0755)
+		if err != nil {
+			errC <- err
+			log.Error().Err(err).Msg("Failed to set permissions for agent binary")
 			return
 		}
 
