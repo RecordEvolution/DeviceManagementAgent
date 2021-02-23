@@ -63,18 +63,18 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 			return
 		}
 
+		err = os.Chmod(tmpFilePath, 0755)
+		if err != nil {
+			errC <- err
+			log.Error().Err(err).Msg("Failed to set permissions for agent binary")
+			return
+		}
+
 		// move it to the actual agent dir
 		err = os.Rename(tmpFilePath, newAgentDestination)
 		if err != nil {
 			errC <- err
 			log.Error().Err(err).Msg("Failed to move agent to AgentDir")
-			return
-		}
-
-		err = os.Chmod(newAgentDestination, 0755)
-		if err != nil {
-			errC <- err
-			log.Error().Err(err).Msg("Failed to set permissions for agent binary")
 			return
 		}
 
