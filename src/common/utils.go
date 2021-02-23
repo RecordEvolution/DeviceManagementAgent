@@ -83,6 +83,8 @@ func ParseContainerName(containerName string) (Stage, uint64, string, error) {
 		stage = DEV
 	} else if containerSplit[0] == "prod" {
 		stage = PROD
+	} else if containerSplit[0] == "pub" {
+		stage = DEV
 	} else {
 		stage = ""
 	}

@@ -29,7 +29,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		return err
 	}
 
-	if app.CurrentState == payload.RequestedState && !payload.RequestUpdate {
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	if curAppState == payload.RequestedState && !payload.RequestUpdate {
 		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
 		return nil
 	}
@@ -37,7 +41,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	// If appState is already up to date we should do nothing
 	// transition cancellation will ignore the app lock
 	if app.IsCancelable() {
-		if payload.RequestedState == common.REMOVED && app.CurrentState == common.BUILDING {
+		if payload.RequestedState == common.REMOVED && curAppState == common.BUILDING {
 			am.StateMachine.CancelTransition(app, payload)
 			return nil
 		}
@@ -125,19 +129,22 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 	log.Info().Msgf("App Manager: Latest requested state (verify): %s", requestedStatePayload.RequestedState)
 
-	// TODO: what to do when the app transition fails? How do we handle that?
-	if app.CurrentState == common.FAILED {
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	if curAppState == common.FAILED {
 		log.Debug().Msg("App Manager: App transition finished in a failed state")
 		return nil
 	}
 
-	if requestedStatePayload.RequestedState != app.CurrentState {
-		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, app.CurrentState, requestedStatePayload.RequestedState)
+	if requestedStatePayload.RequestedState != curAppState {
+		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedStatePayload.RequestedState)
 
 		// transition again
 		go func() {
 			builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
-				(app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED)
+				(curAppState == common.BUILT || curAppState == common.PUBLISHED)
 
 			// we confirmed the release in the backend and can put the state to PRESENT now
 			if builtOrPublishedToPresent {
@@ -158,24 +165,38 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 		return err
 	}
 
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
 	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
-	if app.CurrentState == common.BUILT || app.CurrentState == common.PUBLISHED {
+	if curAppState == common.BUILT || curAppState == common.PUBLISHED {
 		if payload.CurrentState != "" {
+			app.StateLock.Lock()
 			app.CurrentState = payload.CurrentState
+			app.StateLock.Unlock()
 		}
 	}
 
 	if payload.PresentVersion != "" {
+		app.StateLock.Lock()
 		app.Version = payload.PresentVersion
+		app.StateLock.Unlock()
 	}
 
 	go func() {
-		timestamp, err := am.AppStore.UpdateLocalAppState(app, app.CurrentState)
+		app.StateLock.Lock()
+		curAppState := app.CurrentState
+		app.StateLock.Unlock()
+
+		timestamp, err := am.AppStore.UpdateLocalAppState(app, curAppState)
 		if err != nil {
 			log.Error().Err(err)
 		}
 
+		app.StateLock.Lock()
 		app.LastUpdated = timestamp
+		app.StateLock.Unlock()
 	}()
 
 	return nil
@@ -195,15 +216,21 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 		}
 	}
 
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
 	// Whenever a release confirmation gets requested, we shouldn't override the requestedState if it's not 'BUILT'
 	// For example: whenever the app state goes from FAILED -> RUNNING, it will attempt building with requestedState as 'RUNNING'
 	// this makes sure we don't override this requestedState to 'PRESENT'
-	if app.CurrentState == common.BUILT && app.RequestedState != common.BUILT {
+	if curAppState == common.BUILT && app.RequestedState != common.BUILT {
 		return nil
 	}
 
 	// normally should always update the app's requestedState using the transition payload
+	app.StateLock.Lock()
 	app.RequestedState = payload.RequestedState
+	app.StateLock.Unlock()
 
 	go func() {
 		err = am.AppStore.UpdateLocalRequestedState(payload)

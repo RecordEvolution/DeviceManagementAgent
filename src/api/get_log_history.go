@@ -61,11 +61,16 @@ func (ex *External) getLogHistoryHandler(ctx context.Context, response messenger
 
 	var logType common.LogType
 	app, err := ex.AppManager.AppStore.GetApp(appKey, stage)
-	if app.CurrentState == common.DOWNLOADING {
+
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	if curAppState == common.DOWNLOADING {
 		logType = common.PULL
-	} else if app.CurrentState == common.PUBLISHING {
+	} else if curAppState == common.PUBLISHING {
 		logType = common.PUSH
-	} else if app.CurrentState == common.BUILDING {
+	} else if curAppState == common.BUILDING {
 		logType = common.BUILD
 	} else {
 		logType = common.APP

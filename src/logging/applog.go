@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/semaphore"
 )
 
 type ActiveLog struct {
@@ -29,7 +28,8 @@ type ActiveLog struct {
 	logHistory     []string
 	LogType        common.LogType
 	Publish        bool
-	Active         *semaphore.Weighted
+	Active         bool
+	StateLock      sync.Mutex
 }
 
 type LogManager struct {
@@ -83,7 +83,9 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 	}
 
 	// clear locally
+	activeLogEntry.StateLock.Lock()
 	activeLogEntry.logHistory = make([]string, 0)
+	activeLogEntry.StateLock.Unlock()
 
 	stage, appKey, appName, err := common.ParseContainerName(containerName)
 	if err != nil {
@@ -121,7 +123,11 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 	}
 
 	// Already watching logs, should just return
-	if !logEntry.Active.TryAcquire(1) {
+	logEntry.StateLock.Lock()
+	active := logEntry.Active
+	logEntry.StateLock.Unlock()
+
+	if active {
 		return nil
 	}
 
@@ -129,11 +135,17 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 	scanner := bufio.NewScanner(logEntry.Stream)
 
 	// clear old log history
+	logEntry.StateLock.Lock()
 	logEntry.logHistory = make([]string, 0)
+	logEntry.StateLock.Unlock()
 
 	// cleanup func, closes the stream + saves the current logs in the database
 	defer func() {
 		go func() {
+			logEntry.StateLock.Lock()
+			logEntry.Active = false
+			logEntry.StateLock.Unlock()
+
 			err := logEntry.Stream.Close()
 			if err != nil {
 				return
@@ -144,27 +156,37 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 				return
 			}
 
-			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logEntry.LogType, logEntry.logHistory)
+			logEntry.StateLock.Lock()
+			logType := logEntry.LogType
+			logHistory := logEntry.logHistory
+			logEntry.StateLock.Unlock()
+
+			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logType, logHistory)
 			if err != nil {
 				return
 			}
-
-			logEntry.Active.Release(1)
 
 			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
 		}()
 	}()
 
+	logEntry.StateLock.Lock()
+	logEntry.Active = true
+	logEntry.StateLock.Unlock()
 	for scanner.Scan() {
 		chunk := scanner.Text()
 
+		logEntry.StateLock.Lock()
 		if len(logEntry.logHistory) == historyStorageLimit {
 			logEntry.logHistory = logEntry.logHistory[1:]
 		}
 
 		logEntry.logHistory = append(logEntry.logHistory, chunk)
 
-		if logEntry.Publish {
+		shouldPublish := logEntry.Publish
+		logEntry.StateLock.Unlock()
+
+		if shouldPublish {
 			lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
 		}
 	}
@@ -200,12 +222,12 @@ func (lm *LogManager) ReviveDeadLogs() error {
 		}
 
 		id := result.Arguments[0]
-		if id == nil {
-			log.Debug().Msgf("Log Manager: (%s) app %s has no active subs.. skipping..", app.Stage, app.AppName)
-			continue
-		}
 
-		logType := common.GetCurrentLogType(app.CurrentState)
+		app.StateLock.Lock()
+		curAppState := app.CurrentState
+		app.StateLock.Unlock()
+
+		logType := common.GetCurrentLogType(curAppState)
 		reader, err := lm.getLogStream(containerName)
 		if err != nil {
 			if !errdefs.IsContainerNotFound(err) {
@@ -214,13 +236,16 @@ func (lm *LogManager) ReviveDeadLogs() error {
 		}
 
 		subscriptionEntry := ActiveLog{
-			ContainerName:  containerName,
-			logHistory:     make([]string, 0),
-			LogType:        logType,
-			SubscriptionID: fmt.Sprint(id),
-			Stream:         reader,
-			Active:         semaphore.NewWeighted(1),
-			Publish:        true,
+			ContainerName: containerName,
+			logHistory:    make([]string, 0),
+			LogType:       logType,
+			Stream:        reader,
+			Active:        false,
+			Publish:       true,
+		}
+
+		if id != nil {
+			subscriptionEntry.SubscriptionID = fmt.Sprint(id)
 		}
 
 		lm.mapMutex.Lock()
@@ -252,10 +277,19 @@ func (lm *LogManager) GetLogHistory(appName string, appKey uint64, stage common.
 }
 
 func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]string, error) {
-	for _, logSession := range lm.activeLogs {
+	lm.mapMutex.Lock()
+	activeLogs := lm.activeLogs
+	lm.mapMutex.Unlock()
+
+	for _, logSession := range activeLogs {
 		if logSession.ContainerName == containerName {
-			if len(logSession.logHistory) > 0 {
-				return logSession.logHistory, nil
+
+			logSession.StateLock.Lock()
+			logHistory := logSession.logHistory
+			logSession.StateLock.Unlock()
+
+			if len(logHistory) > 0 {
+				return logHistory, nil
 			}
 		}
 	}
@@ -271,7 +305,12 @@ func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]stri
 		return []string{}, nil
 	}
 
-	logType := common.GetCurrentLogType(app.GetCurrentState())
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	logType := common.GetCurrentLogType(curAppState)
+
 	// not found in memory, lets check database
 	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage, logType)
 	if err != nil {
@@ -300,7 +339,7 @@ func (lm *LogManager) SetupEndpoints() error {
 		}
 
 		for _, logEntry := range history {
-			err := lm.Write(activeLog.ContainerName, logEntry)
+			err := lm.Publish(activeLog.ContainerName, logEntry)
 			if err != nil {
 				return err
 			}
@@ -340,14 +379,18 @@ func (lm *LogManager) SetupEndpoints() error {
 
 		// there is at least one client subscribed, we should publish
 		if activeLog != nil {
+
+			activeLog.StateLock.Lock()
 			activeLog.SubscriptionID = id // set the current subscriptionID
 			activeLog.Publish = true
+			// active := activeLog.Active
+			activeLog.StateLock.Unlock()
 
 			// ensure we are actually actively streaming
-			if activeLog.Active.TryAcquire(1) && activeLog.LogType == common.APP {
-				log.Warn().Msgf("Log Manager: we weren't active yet for %s", activeLog.ContainerName)
-				return lm.Stream(containerName, activeLog.LogType, nil)
-			}
+			// if active && activeLog.LogType == common.APP {
+			// 	log.Debug().Msgf("Log Manager: we weren't active yet for %s", activeLog.ContainerName)
+			// 	return lm.Stream(containerName, activeLog.LogType, nil)
+			// }
 
 			log.Debug().Msgf("Log Manager: A subscription was created, enabling publishing for %s", activeLog.ContainerName)
 		} else {
@@ -357,7 +400,7 @@ func (lm *LogManager) SetupEndpoints() error {
 				SubscriptionID: id,
 				Publish:        true,
 				logHistory:     make([]string, 0),
-				Active:         semaphore.NewWeighted(1),
+				Active:         false,
 				ContainerName:  containerName,
 			}
 
@@ -383,7 +426,10 @@ func (lm *LogManager) SetupEndpoints() error {
 
 		if subscription != nil {
 			// no clients are subscribed, should stop publishing
+			subscription.StateLock.Lock()
 			subscription.Publish = false
+			subscription.StateLock.Unlock()
+
 			log.Print("Log Manager: Stopped publishing logs for", subscription.ContainerName)
 		}
 
@@ -393,9 +439,10 @@ func (lm *LogManager) SetupEndpoints() error {
 
 func (lm *LogManager) getLogTaskBySubscriptionID(id string) *ActiveLog {
 	lm.mapMutex.Lock()
-	defer lm.mapMutex.Unlock()
+	activeLogs := lm.activeLogs
+	lm.mapMutex.Unlock()
 
-	for _, subscription := range lm.activeLogs {
+	for _, subscription := range activeLogs {
 		if subscription.SubscriptionID == id {
 			return subscription
 		}
@@ -426,7 +473,7 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 		logHistory:    make([]string, 0),
 		LogType:       logType,
 		Stream:        stream,
-		Active:        semaphore.NewWeighted(1),
+		Active:        false,
 		Publish:       false,
 	}
 
@@ -471,6 +518,7 @@ func (lm *LogManager) buildTopic(containerName string) string {
 	return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 }
 
+// StreamBlocking publishes an stream of string data to a specific subscribable container synchronisly.
 func (lm *LogManager) StreamBlocking(containerName string, logType common.LogType, reader io.ReadCloser) error {
 	if reader != nil {
 		return lm.initLogStream(containerName, logType, reader)
@@ -478,6 +526,7 @@ func (lm *LogManager) StreamBlocking(containerName string, logType common.LogTyp
 	return nil
 }
 
+// Stream publishes an stream of string data to a specific subscribable container
 func (lm *LogManager) Stream(containerName string, logType common.LogType, otherReader io.ReadCloser) error {
 	reader, err := lm.getLogStream(containerName)
 	if err != nil {
@@ -498,6 +547,21 @@ func (lm *LogManager) Stream(containerName string, logType common.LogType, other
 	return nil
 }
 
+// Publish publishes a message to a specific subscribable container.
+func (lm *LogManager) Publish(containerName string, text string) error {
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
+	entry := common.Dict{"type": "build", "chunk": text}
+	args := make([]interface{}, 0)
+	args = append(args, entry)
+
+	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Write adds an entry to the log history and publishes a message to a specific subscribable container.
 func (lm *LogManager) Write(containerName string, text string) error {
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
 	entry := common.Dict{"type": "build", "chunk": text}
@@ -509,7 +573,9 @@ func (lm *LogManager) Write(containerName string, text string) error {
 	lm.mapMutex.Unlock()
 
 	if activeLog != nil {
+		activeLog.StateLock.Lock()
 		activeLog.logHistory = append(activeLog.logHistory, text)
+		activeLog.StateLock.Unlock()
 	}
 
 	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)

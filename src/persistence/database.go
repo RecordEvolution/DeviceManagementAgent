@@ -152,11 +152,14 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
 	// note: this is only neccessary because we do not force users to update to the latest version
 	// The database will then check if this version is actually the latest version, if not it will request another update
+	app.StateLock.Lock()
 	requestedState.RequestUpdate = app.RequestUpdate
 	requestedState.CurrentState = newState
 	requestedState.RequestedState = app.RequestedState
 	requestedState.PresentVersion = app.Version
 	requestedState.ReleaseKey = app.ReleaseKey
+	app.StateLock.Unlock()
+
 	err = ast.UpsertRequestedStateChange(requestedState)
 	if err != nil {
 		return "", err
@@ -263,7 +266,17 @@ func (ast *AppStateDatabase) insertAppState(app *common.App) (common.Timestamp, 
 	defer insertStatement.Close()
 
 	timestamp := time.Now().Format(time.RFC3339)
-	_, err = insertStatement.Exec(app.AppName, app.AppKey, app.Version, app.ReleaseKey, app.Stage, app.CurrentState, timestamp)
+
+	app.StateLock.Lock()
+	appName := app.AppName
+	appKey := app.AppKey
+	version := app.Version
+	releaseKey := app.ReleaseKey
+	stage := app.Stage
+	currentState := app.CurrentState
+	app.StateLock.Unlock()
+
+	_, err = insertStatement.Exec(appName, appKey, version, releaseKey, stage, currentState, timestamp)
 	if err != nil {
 		return "", err
 	}

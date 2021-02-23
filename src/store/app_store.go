@@ -80,14 +80,20 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 	}
 
 	if payload.CurrentState == "" {
+		app.StateLock.Lock()
 		app.CurrentState = common.REMOVED
+		app.StateLock.Unlock()
 	}
 
 	am.apps = append(am.apps, app)
 
 	go func() {
 		// Insert the newly created app state data into the database
-		_, err := am.database.UpsertAppState(app, app.CurrentState)
+		app.StateLock.Lock()
+		curAppState := app.CurrentState
+		app.StateLock.Unlock()
+
+		_, err := am.database.UpsertAppState(app, curAppState)
 		if err != nil {
 			log.Error().Stack().Err(err)
 		}

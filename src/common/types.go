@@ -42,7 +42,11 @@ func (app *App) UnlockTransition() {
 }
 
 func (app *App) IsCancelable() bool {
-	return IsCancelableState(app.CurrentState)
+	app.StateLock.Lock()
+	currAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	return IsCancelableState(currAppState)
 }
 
 type StageBasedResult struct {

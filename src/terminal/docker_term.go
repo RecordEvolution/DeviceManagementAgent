@@ -28,6 +28,7 @@ type TerminalSession struct {
 	WriteTopic     string
 	ResizeTopic    string
 	once           sync.Once
+	stateLock      sync.Mutex
 }
 
 func (termSess *TerminalSession) Close() {
@@ -74,6 +75,7 @@ type TerminalManager struct {
 	Container      container.Container
 	Messenger      messenger.Messenger
 	ActiveSessions map[string]*TerminalSession
+	mapMutex       *sync.Mutex
 }
 
 var supportedShells = [...]string{"/bin/zsh", "/bin/bash"}
@@ -229,7 +231,9 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 }
 
 func (tm *TerminalManager) getSession(sessionID string) (*TerminalSession, error) {
+	tm.mapMutex.Lock()
 	aTSession := tm.ActiveSessions[sessionID]
+	tm.mapMutex.Unlock()
 
 	if aTSession == nil {
 		return nil, errors.New("session was not found")
@@ -249,8 +253,12 @@ func (tm *TerminalManager) ResizeTerminal(sessionID string, dimension container.
 
 func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 
+	tm.mapMutex.Lock()
+	activeSession := tm.ActiveSessions[session.SessionID]
+	tm.mapMutex.Unlock()
+
 	// has already been cleaned up
-	if session == nil || tm.ActiveSessions[session.SessionID] == nil {
+	if session == nil || activeSession == nil {
 		return nil
 	}
 
@@ -279,7 +287,10 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 
 	log.Debug().Msgf("Terminal Manager: cleaned up terminal session for %s", session.ContainerName)
 
+	tm.mapMutex.Lock()
 	delete(tm.ActiveSessions, session.SessionID)
+	tm.mapMutex.Unlock()
+
 	session = nil
 
 	return nil
@@ -328,7 +339,9 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 	serialNumber := tm.Messenger.GetConfig().ReswarmConfig.SerialNumber
 	termSession := NewSession(containerName, serialNumber, &hijackedResponse)
 
+	tm.mapMutex.Lock()
 	tm.ActiveSessions[termSession.SessionID] = termSession
+	tm.mapMutex.Unlock()
 
 	return termSession, nil
 }
@@ -337,13 +350,15 @@ func (tm *TerminalManager) initUnregisterWatcher() error {
 	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) error {
 		metaRegistrationID := r.Arguments[1]
 
+		tm.mapMutex.Lock()
 		for _, session := range tm.ActiveSessions {
 			if session.RegistrationID == metaRegistrationID {
+				tm.mapMutex.Unlock()
 				go tm.cleanupSession(session)
-
 				return nil
 			}
 		}
+		tm.mapMutex.Unlock()
 
 		return nil
 	}, nil)
@@ -362,6 +377,7 @@ func NewTerminalManager(messenger messenger.Messenger, container container.Conta
 		ActiveSessions: sessionsMap,
 		Messenger:      messenger,
 		Container:      container,
+		mapMutex:       &sync.Mutex{},
 	}
 
 	err := manager.initUnregisterWatcher()

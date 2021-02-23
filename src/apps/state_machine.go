@@ -166,20 +166,28 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 }
 
 func (sm *StateMachine) CancelTransition(app *common.App, payload common.TransitionPayload) chan error {
-	transitionFunc := sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	transitionFunc := sm.getTransitionFunc(curAppState, payload.RequestedState)
 	return sm.executeTransition(app, payload, transitionFunc)
 }
 
 func (sm *StateMachine) PerformTransition(app *common.App, payload common.TransitionPayload) chan error {
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
 	var transitionFunc TransitionFunc
 	if payload.RequestUpdate && payload.NewestVersion != app.Version {
 		transitionFunc = sm.getUpdateTransition(payload, app)
 	} else {
-		transitionFunc = sm.getTransitionFunc(app.CurrentState, payload.RequestedState)
+		transitionFunc = sm.getTransitionFunc(curAppState, payload.RequestedState)
 	}
 
 	if transitionFunc == nil {
-		log.Debug().Msgf("Not yet implemented transition from %s to %s", app.CurrentState, payload.RequestedState)
+		log.Debug().Msgf("Not yet implemented transition from %s to %s", curAppState, payload.RequestedState)
 		return nil
 	}
 

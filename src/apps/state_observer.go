@@ -38,7 +38,9 @@ func NewObserver(container container.Container, appStore *store.AppStore) StateO
 func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) error {
 
 	// update in memory
+	app.StateLock.Lock()
 	app.CurrentState = achievedState
+	app.StateLock.Unlock()
 
 	// update remotely
 	err := so.AppStore.UpdateRemoteAppState(app, achievedState)
@@ -124,6 +126,8 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 					return err
 				}
 
+				app.StateLock.Lock()
+
 				correctedStage := app.CurrentState
 				if len(images) == 0 {
 					// no images was found (and no container) for this guy, so this guy is REMOVED
@@ -137,7 +141,10 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 					}
 				}
 
-				if correctedStage != app.CurrentState {
+				curAppState := app.CurrentState
+				app.StateLock.Unlock()
+
+				if correctedStage != curAppState {
 					log.Debug().Msgf("State Correcter: irregular state was found for app %s (%s) that has no container on the device", rState.AppName, rState.Stage)
 					log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedStage)
 
@@ -160,9 +167,12 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			return err
 		}
 
+		app.StateLock.Lock()
 		correctedAppState := app.CurrentState
+		currentAppState := app.CurrentState
+		app.StateLock.Unlock()
 
-		switch app.CurrentState {
+		switch currentAppState {
 		case common.DOWNLOADING,
 			common.TRANSFERING,
 			common.BUILDING:
@@ -175,7 +185,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			correctedAppState = appStateDeterminedByContainer
 		}
 
-		if correctedAppState == app.CurrentState {
+		if correctedAppState == currentAppState {
 			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
 			continue
 		}
@@ -235,9 +245,13 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				return
 			}
 
-			if app.CurrentState != latestAppState && !common.IsTransientState(app.CurrentState) && !common.IsTransientState(latestAppState) {
+			app.StateLock.Lock()
+			curAppState := app.CurrentState
+			app.StateLock.Unlock()
+
+			if curAppState != latestAppState && !common.IsTransientState(curAppState) && !common.IsTransientState(latestAppState) {
 				log.Debug().Msgf("State Observer: app (%s, %s) state is not up to date", appName, stage)
-				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, app.CurrentState, latestAppState)
+				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
 
 				// update the app state
 				err := so.Notify(app, latestAppState)
