@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"reagent/api"
@@ -42,6 +43,14 @@ func main() {
 	generalConfig := config.New(cliArgs, reswarmConfig)
 
 	agent := NewAgent(&generalConfig)
+
+	log.Info().Msg("Waiting for Docker Daemon to be available...")
+	err = agent.Container.WaitForDaemon(context.Background())
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("error occured while waiting for daemon")
+	}
+	log.Info().Msg("Got reply from Docker Daemon, continuing")
+
 	err = agent.Init()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
@@ -49,7 +58,7 @@ func main() {
 
 	agent.ListenForDisconnect()
 
-	log.Info().Msg("Fiished Reagent initialization sequence")
+	log.Info().Msg("Finished Reagent initialization sequence")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
@@ -60,6 +69,7 @@ func main() {
 }
 
 type Agent struct {
+	Container       container.Container
 	Messenger       messenger.Messenger
 	Database        persistence.Database
 	System          *system.System
@@ -186,6 +196,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		AppManager:      &appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,
+		Container:       container,
 		Messenger:       messenger,
 		Database:        database,
 	}
@@ -195,8 +206,6 @@ func (agent *Agent) ListenForDisconnect() {
 	go func() {
 		doneSignal := agent.Messenger.Done()
 		reconnectSignal := make(chan struct{})
-
-		log.Debug().Msg("Reconnect: initialized reconnect goroutine")
 
 		go func() {
 			select {
@@ -232,5 +241,7 @@ func (agent *Agent) ListenForDisconnect() {
 			}
 
 		}()
+
+		log.Debug().Msg("Reconnect: Set up WAMP reconnect listeners")
 	}()
 }

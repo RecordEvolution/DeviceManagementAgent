@@ -789,6 +789,44 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 	return nil
 }
 
+type Ping struct {
+	APIVersion     string
+	OSType         string
+	Experimental   bool
+	BuilderVersion string
+}
+
+func (docker *Docker) WaitForDaemon(ctx context.Context) error {
+	for {
+		_, err := docker.Ping(ctx)
+		if err != nil {
+			if !strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
+				return err
+			}
+
+			time.Sleep(time.Millisecond * 100)
+		} else {
+			break
+		}
+	}
+
+	return nil
+}
+
+func (docker *Docker) Ping(ctx context.Context) (Ping, error) {
+	pingRes, err := docker.client.Ping(ctx)
+	if err != nil {
+		return Ping{}, err
+	}
+
+	return Ping{
+		APIVersion:     pingRes.APIVersion,
+		OSType:         pingRes.OSType,
+		Experimental:   pingRes.Experimental,
+		BuilderVersion: string(pingRes.BuilderVersion),
+	}, nil
+}
+
 func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 	docker.streamMapMutex.Lock()
 	defer docker.streamMapMutex.Unlock()

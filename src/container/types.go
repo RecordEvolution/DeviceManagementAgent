@@ -104,5 +104,7 @@ type Container interface {
 	PruneImages(ctx context.Context, options common.Dict) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
+	WaitForDaemon(ctx context.Context) error
+	Ping(ctx context.Context) (Ping, error)
 	GetConfig() *config.Config
 }

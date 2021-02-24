@@ -9,12 +9,16 @@ import (
 	"reagent/config"
 	"reagent/filesystem"
 	"strings"
+	"time"
+
+	_ "embed"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
 
-const version = "0.0.3"
+//go:embed version.txt
+var version string
 
 type System struct {
 	config     *config.Config
@@ -105,6 +109,11 @@ func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
 	resp, err := http.Get(reagentBucketURL + "/version.txt")
 	if err != nil {
+		// happens when time is not set yet
+		if strings.Contains(err.Error(), "certificate has expired or is not yet valid") {
+			time.Sleep(time.Second * 1)
+			return system.GetLatestVersion()
+		}
 		return "", err
 	}
 	buf := new(strings.Builder)
