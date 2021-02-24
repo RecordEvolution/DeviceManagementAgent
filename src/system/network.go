@@ -121,7 +121,7 @@ func ListNetworkInterfaces() ([]NetworkIface, error) {
 	// list names of interfaces, i.e. subdirectory names
 	dirs, err := ioutil.ReadDir(pth)
 	if err != nil {
-		return []NetworkIface{}, nil
+		return []NetworkIface{}, err
 	}
 
 	// declare list of interfaces
@@ -135,7 +135,7 @@ func ListNetworkInterfaces() ([]NetworkIface, error) {
 		pthadd := pth + ifaces[idx].Name + "/address"
 		macfin, err := ioutil.ReadFile(pthadd)
 		if err != nil {
-			return []NetworkIface{}, nil
+			return []NetworkIface{}, err
 		}
 		ifaces[idx].Mac = strings.Replace(string(macfin), "\n", "", -1)
 
@@ -143,7 +143,7 @@ func ListNetworkInterfaces() ([]NetworkIface, error) {
 		pthsta := pth + ifaces[idx].Name + "/operstate"
 		stafin, err := ioutil.ReadFile(pthsta)
 		if err != nil {
-			return []NetworkIface{}, nil
+			return []NetworkIface{}, err
 		}
 
 		ifaces[idx].State = strings.Replace(string(stafin), "\n", "", -1)
@@ -152,7 +152,7 @@ func ListNetworkInterfaces() ([]NetworkIface, error) {
 		pthdev := pth + ifaces[idx].Name + "/uevent"
 		devfin, err := ioutil.ReadFile(pthdev)
 		if err != nil {
-			return []NetworkIface{}, nil
+			return []NetworkIface{}, err
 		}
 		reg := regexp.MustCompile(`DEVTYPE=wlan`)
 		ifaces[idx].Wifi = reg.MatchString(string(devfin))
