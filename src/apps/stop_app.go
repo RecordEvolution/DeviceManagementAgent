@@ -40,7 +40,7 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*10)
+	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*1)
 	if err != nil {
 		return errors.Wrap(err, "failed to stop container by ID during stopProdApp")
 	}
@@ -87,7 +87,7 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*10)
+	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*1)
 	if err != nil {
 		return errors.Wrap(err, "failed to stop container by ID during stopDevApp")
 	}
