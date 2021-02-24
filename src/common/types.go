@@ -1,12 +1,8 @@
 package common
 
 import (
-	"errors"
 	"reagent/config"
 	"sync"
-
-	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/semaphore"
 )
 
 type Dict map[string]interface{}
@@ -25,20 +21,40 @@ type App struct {
 	ReleaseBuild        bool
 	Version             string
 	LastUpdated         Timestamp
-	TransitionLock      *semaphore.Weighted
+	Transitioning       bool
+	TransitionLock      sync.Mutex
 	StateLock           sync.Mutex
 }
 
+func (app *App) IsTransitioning() bool {
+	app.TransitionLock.Lock()
+	isTransitioning := app.Transitioning
+	app.TransitionLock.Unlock()
+
+	return isTransitioning
+}
+
+// SecureTransition acquires a transition lock and returns whether or not it is currently transitioning
 func (app *App) SecureTransition() bool {
-	if app.TransitionLock == nil {
-		log.Error().Err(errors.New("no semaphore initialized"))
-		return false
+	app.TransitionLock.Lock()
+	isTransitioning := app.Transitioning
+	app.TransitionLock.Unlock()
+
+	if isTransitioning {
+		return true
 	}
-	return !app.TransitionLock.TryAcquire(1)
+
+	app.TransitionLock.Lock()
+	app.Transitioning = true
+	app.TransitionLock.Unlock()
+
+	return false
 }
 
 func (app *App) UnlockTransition() {
-	app.TransitionLock.Release(1)
+	app.TransitionLock.Lock()
+	app.Transitioning = false
+	app.TransitionLock.Unlock()
 }
 
 func (app *App) IsCancelable() bool {

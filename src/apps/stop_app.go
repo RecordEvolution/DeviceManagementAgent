@@ -4,6 +4,7 @@ import (
 	"context"
 	"reagent/common"
 	"reagent/errdefs"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/pkg/errors"
@@ -39,19 +40,27 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*10)
 	if err != nil {
-		// if !errdefs.IsContainerRemovalAlreadyInProgress(err) && !errdefs.IsContainerNotFound(err) {
-		return errors.Wrap(err, "failed to remove container by ID during stopProdApp")
-		// }
+		return errors.Wrap(err, "failed to stop container by ID during stopProdApp")
 	}
 
-	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionNotRunning)
 	if err != nil {
-		// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
-		// still useful, and will wait if it's still not removed
+		return err
+	}
+
+	err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+	if err != nil {
+		return err
+	}
+
+	// should return 'container not found' error, this way we know it's removed successfully
+	_, errC := sm.Container.PollContainerState(ctx, cont.ID, time.Second)
+	select {
+	case err := <-errC:
 		if !errdefs.IsContainerNotFound(err) {
-			return errors.Wrap(err, "failed to wait for container during stopProdApp")
+			return err
 		}
 	}
 
@@ -78,21 +87,27 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+	err = sm.Container.StopContainerByID(ctx, cont.ID, time.Second*10)
 	if err != nil {
-		// It's possible we're trying to remove the container when it's already being removed
-		// RUNNING -> STOPPED -> RUNNING
-		if !errdefs.IsContainerRemovalAlreadyInProgress(err) {
-			return errors.Wrap(err, "failed to remove container by ID during stopDevApp")
-		}
+		return errors.Wrap(err, "failed to stop container by ID during stopDevApp")
 	}
 
-	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+	_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionNotRunning)
 	if err != nil {
-		// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
-		// still useful, and will wait if it's still not removed
+		return err
+	}
+
+	err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+	if err != nil {
+		return err
+	}
+
+	// should return 'container not found' error, this way we know it's removed successfully
+	_, errC := sm.Container.PollContainerState(ctx, cont.ID, time.Second)
+	select {
+	case err := <-errC:
 		if !errdefs.IsContainerNotFound(err) {
-			return errors.Wrap(err, "failed to wait for container during stopDevApp")
+			return err
 		}
 	}
 

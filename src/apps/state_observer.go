@@ -249,7 +249,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			curAppState := app.CurrentState
 			app.StateLock.Unlock()
 
-			if curAppState != latestAppState && !common.IsTransientState(curAppState) && !common.IsTransientState(latestAppState) {
+			if curAppState != latestAppState && !common.IsTransientState(curAppState) && !common.IsTransientState(latestAppState) && !app.IsTransitioning() {
 				log.Debug().Msgf("State Observer: app (%s, %s) state is not up to date", appName, stage)
 				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
 

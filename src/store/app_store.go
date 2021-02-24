@@ -10,7 +10,6 @@ import (
 	"reagent/persistence"
 
 	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/semaphore"
 )
 
 type AppStore struct {
@@ -58,7 +57,6 @@ func (am *AppStore) GetApp(appKey uint64, stage common.Stage) (*common.App, erro
 		return nil, nil
 	}
 
-	app.TransitionLock = semaphore.NewWeighted(1)
 	am.apps = append(am.apps, app)
 
 	return app, nil
@@ -76,7 +74,6 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 		Stage:               payload.Stage,
 		Version:             payload.PresentVersion,
 		RequestUpdate:       payload.RequestUpdate,
-		TransitionLock:      semaphore.NewWeighted(1),
 	}
 
 	if payload.CurrentState == "" {

@@ -207,17 +207,17 @@ func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID strin
 	return nil
 }
 
-func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout int64) error {
-	return docker.client.ContainerStop(ctx, containerID, (*time.Duration)(&timeout))
+func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error {
+	return docker.client.ContainerStop(ctx, containerID, &timeout)
 }
 
-func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout int64) error {
+func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout time.Duration) error {
 	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
 		return err
 	}
 
-	return docker.client.ContainerStop(ctx, container.ID, (*time.Duration)(&timeout))
+	return docker.client.ContainerStop(ctx, container.ID, &timeout)
 }
 
 func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error) {
@@ -604,6 +604,32 @@ func (docker *Docker) GetContainerState(ctx context.Context, containerName strin
 		StartedAt:  state.StartedAt,
 		FinishedAt: state.FinishedAt,
 	}, nil
+}
+
+func (docker *Docker) PollContainerState(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan ContainerState, <-chan error) {
+	errC := make(chan error, 1)
+	stateC := make(chan ContainerState, 1)
+
+	go func() {
+		for {
+			state, err := docker.GetContainerState(ctx, containerID)
+			if err != nil {
+				if strings.Contains(err.Error(), "no such container") {
+					err = errdefs.ContainerNotFound(err)
+				}
+
+				errC <- err
+				close(errC)
+				close(stateC)
+				return
+			}
+
+			stateC <- state
+			time.Sleep(pollingRate)
+		}
+	}()
+
+	return stateC, errC
 }
 
 // WaitForRunning will poll a container's status at a given interval until the running state is achieved.

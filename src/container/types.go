@@ -82,8 +82,8 @@ type Container interface {
 	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)
 	ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error)
 	Attach(ctx context.Context, containerName string, shell string) (HijackedResponse, error)
-	StopContainerByID(ctx context.Context, containerName string, timeout int64) error
-	StopContainerByName(ctx context.Context, containerName string, timeout int64) error
+	StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error
+	StopContainerByName(ctx context.Context, containerName string, timeout time.Duration) error
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error
 	RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error
 	Tag(ctx context.Context, source string, target string) error
@@ -94,6 +94,7 @@ type Container interface {
 	WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForContainerByName(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)
 	WaitForRunning(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan struct{}, <-chan error)
+	PollContainerState(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan ContainerState, <-chan error)
 	StartContainer(ctx context.Context, containerID string) error
 	GetImage(ctx context.Context, fullImageName string, tag string) (ImageResult, error)
 	GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error)
