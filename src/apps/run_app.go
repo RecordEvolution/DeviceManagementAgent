@@ -83,6 +83,11 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Starting %s...", payload.AppName))
+	if err != nil {
+		return err
+	}
+
 	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
@@ -127,12 +132,12 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		break
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.setState(app, common.RUNNING)
 	if err != nil {
 		return err
 	}
 
-	err = sm.setState(app, common.RUNNING)
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s", payload.AppName))
 	if err != nil {
 		return err
 	}
@@ -228,6 +233,11 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Starting %s...", payload.AppName))
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 	"time"
@@ -33,6 +34,11 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		if !errdefs.IsContainerNotFound(err) {
 			return errors.Wrap(err, "failed to getContainer during stopDevApp")
 		}
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Received stop signal for %s", payload.AppName))
+	if err != nil {
+		return err
 	}
 
 	err = sm.setState(app, common.STOPPING)
@@ -69,7 +75,7 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	return nil
+	return sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Successfully stopped %s", payload.AppName))
 }
 
 func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common.App) error {
@@ -80,6 +86,11 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		if !errdefs.IsContainerNotFound(err) {
 			return errors.Wrap(err, "failed to getContainer during stopDevApp")
 		}
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Received stop signal for %s", payload.AppName))
+	if err != nil {
+		return err
 	}
 
 	err = sm.setState(app, common.STOPPING)
@@ -116,5 +127,5 @@ func (sm *StateMachine) stopDevApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	return nil
+	return sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Successfully stopped %s", payload.AppName))
 }

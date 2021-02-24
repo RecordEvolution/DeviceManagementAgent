@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 
@@ -20,6 +21,17 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 
 func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
+
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	removeInitMessage := fmt.Sprintf("Starting removal process for %s...", payload.AppName)
+	err = sm.LogManager.Write(payload.ContainerName.Dev, removeInitMessage)
+	if err != nil {
+		return err
+	}
 
 	sm.setState(app, common.DELETING)
 	options := map[string]interface{}{"force": true}
@@ -53,11 +65,25 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 		return err
 	}
 
-	return sm.setState(app, common.REMOVED)
+	err = sm.setState(app, common.REMOVED)
+
+	sucessRemoveMessage := fmt.Sprintf("Successfully removed %s!", payload.AppName)
+	return sm.LogManager.Write(payload.ContainerName.Dev, sucessRemoveMessage)
 }
 
 func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
+
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	removeInitMessage := fmt.Sprintf("Starting removal process for %s...", payload.AppName)
+	err = sm.LogManager.Write(payload.ContainerName.Prod, removeInitMessage)
+	if err != nil {
+		return err
+	}
 
 	sm.setState(app, common.DELETING)
 	options := map[string]interface{}{"force": true}
@@ -92,5 +118,8 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 		return err
 	}
 
-	return sm.setState(app, common.REMOVED)
+	err = sm.setState(app, common.REMOVED)
+
+	sucessRemoveMessage := fmt.Sprintf("Successfully removed %s!", payload.AppName)
+	return sm.LogManager.Write(payload.ContainerName.Prod, sucessRemoveMessage)
 }
