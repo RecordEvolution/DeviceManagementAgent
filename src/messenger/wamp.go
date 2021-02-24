@@ -11,6 +11,7 @@ import (
 	"reagent/messenger/topics"
 
 	"github.com/gammazero/nexus/v3/client"
+	"github.com/gammazero/nexus/v3/transport"
 	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/gammazero/nexus/v3/wamp/crsign"
 	"github.com/rs/zerolog"
@@ -64,16 +65,15 @@ func createConnectConfig(config *config.Config) (*client.Config, error) {
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
 		Debug:           config.CommandLineArguments.DebugMessaging,
-		ResponseTimeout: 3 * time.Second,
+		ResponseTimeout: 4 * time.Second,
 		Logger:          wrapZeroLogger(log.Logger),
-		// Serialization:
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
 			InsecureSkipVerify: true,
 		},
-		// WsCfg: transport.WebsocketConfig{
-		// 	KeepAlive: time.Second,
-		// },
+		WsCfg: transport.WebsocketConfig{
+			KeepAlive: time.Second * 4,
+		},
 	}
 
 	return &cfg, nil
@@ -108,6 +108,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 
 func EstablishSocketConnection(ctx context.Context, config *config.Config) chan *client.Client {
 	resChan := make(chan *client.Client, 1)
+	retryTimeout := time.Second * 2
 
 	go func() {
 		for {
@@ -115,8 +116,8 @@ func EstablishSocketConnection(ctx context.Context, config *config.Config) chan 
 			client, err := client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 
 			if err != nil {
-				log.Debug().Msgf("Failed to establish a websocket connection, reattempting in 2 seconds...")
-				time.Sleep(time.Second * 5)
+				log.Debug().Msgf("Failed to establish a websocket connection, reattempting in %d seconds...", retryTimeout)
+				time.Sleep(retryTimeout)
 				continue
 			}
 

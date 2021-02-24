@@ -68,12 +68,7 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
-	err := system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	}
-
-	err = agent.Messenger.SetupTestament()
+	err := agent.Messenger.SetupTestament()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
 	}
@@ -112,6 +107,11 @@ func (agent *Agent) Init() error {
 	err = agent.External.RegisterAll()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+	}
+
+	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	return err
