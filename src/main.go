@@ -14,6 +14,7 @@ import (
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"runtime"
 
 	"github.com/rs/zerolog/log"
 )
@@ -25,6 +26,8 @@ func main() {
 	}
 
 	logging.SetupLogger(cliArgs)
+
+	log.Info().Msgf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s)", runtime.GOOS, runtime.GOARCH)
 
 	err = filesystem.InitDirectories(cliArgs)
 	if err != nil {
@@ -45,6 +48,8 @@ func main() {
 	}
 
 	agent.ListenForDisconnect()
+
+	log.Info().Msg("Fiished Reagent initialization sequence")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
