@@ -194,7 +194,7 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 	err := scanner.Err()
 	if err != nil {
 		if strings.Contains(err.Error(), "use of closed network connection") {
-			return errdefs.DockerBuildCanceled(err)
+			return errdefs.DockerStreamCanceled(err)
 		}
 		return err
 	}

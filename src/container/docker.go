@@ -12,6 +12,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -20,29 +21,35 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/rs/zerolog/log"
 )
 
 // Docker container implentation using the Docker API
 
-type DockerBuild struct {
+type DockerPull struct {
 	BuildID string
 	Stream  io.ReadCloser
 }
+type DockerStream struct {
+	StreamID string
+	Stream   io.ReadCloser
+}
 
 type Docker struct {
-	client       *client.Client
-	config       *config.Config
-	activeBuilds map[string]*DockerBuild
+	client         *client.Client
+	config         *config.Config
+	activeStreams  map[string]*DockerStream
+	streamMapMutex sync.Mutex
 }
 
 func NewDocker(config *config.Config) (*Docker, error) {
 	client, err := newDockerClient()
-	activeBuilds := make(map[string]*DockerBuild)
+	activeBuilds := make(map[string]*DockerStream)
 
 	if err != nil {
 		return nil, err
 	}
-	return &Docker{client: client, config: config, activeBuilds: activeBuilds}, nil
+	return &Docker{client: client, config: config, activeStreams: activeBuilds}, nil
 }
 
 // For now stick only with Docker as implementation
@@ -357,18 +364,41 @@ func (docker *Docker) GetConfig() *config.Config {
 	return docker.config
 }
 
+type PullOptions struct {
+	AuthConfig AuthConfig
+	PullID     string
+}
+
 // Pull pulls a container image from a registry
-func (docker *Docker) Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error) {
+func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOptions) (io.ReadCloser, error) {
 	dockerAuthConfig := types.AuthConfig{
-		Username: authConfig.Username,
-		Password: authConfig.Password,
+		Username: options.AuthConfig.Username,
+		Password: options.AuthConfig.Password,
 	}
+
 	encodedJSON, err := json.Marshal(dockerAuthConfig)
 	if err != nil {
 		return nil, err
 	}
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
-	return docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
+
+	ioReader, err := docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
+	if err != nil {
+		return nil, err
+	}
+
+	pullID := options.PullID
+
+	if pullID != "" {
+		docker.streamMapMutex.Lock()
+		docker.activeStreams[pullID] = &DockerStream{
+			Stream:   ioReader,
+			StreamID: pullID,
+		}
+		docker.streamMapMutex.Unlock()
+	}
+
+	return ioReader, nil
 }
 
 // Push pushes a container image to a registry
@@ -759,18 +789,27 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 	return nil
 }
 
-func (docker *Docker) CancelBuild(ctx context.Context, buildID string) error {
-	if docker.activeBuilds[buildID] == nil {
-		return errors.New("no active build was found")
+func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
+	docker.streamMapMutex.Lock()
+	defer docker.streamMapMutex.Unlock()
+
+	activeStreamEntry := docker.activeStreams[streamID]
+	log.Debug().Msgf("Active Stream: %+v", activeStreamEntry)
+
+	if activeStreamEntry == nil {
+		return errors.New("no active stream was found")
 	}
 
-	activeBuild := docker.activeBuilds[buildID]
-	err := activeBuild.Stream.Close()
-	if err != nil {
-		return err
+	stream := activeStreamEntry.Stream
+	if stream != nil {
+		err := stream.Close()
+		if err != nil {
+			return err
+		}
 	}
 
-	delete(docker.activeBuilds, buildID)
+	delete(docker.activeStreams, streamID)
+
 	return nil
 }
 
@@ -802,10 +841,12 @@ func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string
 	reader := buildResponse.Body
 
 	if options.BuildID != "" {
-		docker.activeBuilds[options.BuildID] = &DockerBuild{
-			BuildID: options.BuildID,
-			Stream:  reader,
+		docker.streamMapMutex.Lock()
+		docker.activeStreams[options.BuildID] = &DockerStream{
+			StreamID: options.BuildID,
+			Stream:   reader,
 		}
+		docker.streamMapMutex.Unlock()
 	}
 
 	return reader, nil

@@ -40,8 +40,8 @@ func IsDockerfileIsMissing(err error) bool {
 	return ok
 }
 
-func IsDockerBuildCanceled(err error) bool {
-	_, ok := err.(ErrDockerBuildCanceled)
+func IsDockerStreamCanceled(err error) bool {
+	_, ok := err.(ErrDockerStreamCanceled)
 	return ok
 }
 

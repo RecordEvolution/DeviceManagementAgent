@@ -74,7 +74,7 @@ type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
-	CancelBuild(ctx context.Context, buildID string) error
+	CancelStream(ctx context.Context, buildID string) error
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
 	ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
@@ -88,7 +88,7 @@ type Container interface {
 	RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error
 	Tag(ctx context.Context, source string, target string) error
 	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
-	Pull(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
+	Pull(ctx context.Context, imageName string, options PullOptions) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error)
 	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
 	WaitForContainerByID(ctx context.Context, containerID string, condition container.WaitCondition) (int64, error)

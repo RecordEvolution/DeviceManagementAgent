@@ -35,6 +35,10 @@ func BuildDockerBuildID(appKey uint64, appName string) string {
 	return fmt.Sprintf("build_%d_%s", appKey, appName)
 }
 
+func BuildDockerPullID(appKey uint64, appName string) string {
+	return fmt.Sprintf("pull_%d_%s", appKey, appName)
+}
+
 func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string {
 	stringArray := make([]string, 0)
 

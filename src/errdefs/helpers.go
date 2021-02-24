@@ -194,24 +194,24 @@ func DockerBuildFilesNotFound(err error) error {
 
 /*-----------*/
 
-type ErrDockerBuildCanceled struct {
+type ErrDockerStreamCanceled struct {
 	error
 }
 
-func (e ErrDockerBuildCanceled) Cause() error {
+func (e ErrDockerStreamCanceled) Cause() error {
 	return e.error
 }
 
-func (e ErrDockerBuildCanceled) Unwrap() error {
+func (e ErrDockerStreamCanceled) Unwrap() error {
 	return e.error
 }
 
-func DockerBuildCanceled(err error) error {
-	if err == nil || IsDockerBuildCanceled(err) {
+func DockerStreamCanceled(err error) error {
+	if err == nil || IsDockerStreamCanceled(err) {
 		return err
 	}
 
-	return ErrDockerBuildCanceled{err}
+	return ErrDockerStreamCanceled{err}
 }
 
 /*-----------*/

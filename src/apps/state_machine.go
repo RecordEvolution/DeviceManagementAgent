@@ -107,8 +107,8 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.DOWNLOADING: {
 			common.PRESENT:     sm.pullApp,
-			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: sm.uninstallApp,
+			common.REMOVED:     sm.cancelPull,
+			common.UNINSTALLED: sm.cancelPull,
 		},
 		common.STARTING: {
 			common.PRESENT:     sm.stopApp,

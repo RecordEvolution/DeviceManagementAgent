@@ -79,13 +79,13 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	var buildMessage string
 	streamErr := sm.LogManager.StreamBlocking(topicForLogStream, common.BUILD, reader)
 	if streamErr != nil {
-		if errdefs.IsDockerBuildCanceled(streamErr) {
+		if errdefs.IsDockerStreamCanceled(streamErr) {
 			buildMessage = "The build stream was canceled"
 			writeErr := sm.LogManager.Write(topicForLogStream, buildMessage)
 			if writeErr != nil {
 				return writeErr
 			}
-			// a canceled build will transition to 'REMOVED|Another State' so no need to return the error
+			// a canceled build will transition to 'REMOVED' so no need to return the error
 			return nil
 		}
 
