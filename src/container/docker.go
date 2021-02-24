@@ -291,6 +291,11 @@ func (docker *Docker) GetImage(ctx context.Context, fullImageName string, tag st
 	}, nil
 }
 
+func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) error {
+	_, err := docker.client.ImagesPrune(ctx, filters.NewArgs())
+	return err
+}
+
 // ListImages lists all images available on the host.
 func (docker *Docker) ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error) {
 	allKw := options["all"]

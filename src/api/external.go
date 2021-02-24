@@ -39,7 +39,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.RequestAppState:        ex.requestAppStateHandler,
 		topics.WriteToFile:            ex.writeToFileHandler,
 		topics.Handshake:              ex.deviceHandshakeHandler,
-		topics.ContainerImages:        ex.getImagesHandler,
+		topics.GetImages:              ex.getImagesHandler,
 		topics.RequestTerminalSession: ex.requestTerminalSessHandler,
 		topics.StartTerminalSession:   ex.startTerminalSessHandler,
 		topics.StopTerminalSession:    ex.stopTerminalSession,
@@ -52,6 +52,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.RestartWifi:             ex.wifiRebootHandler,
 		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
 		topics.UpdateAgent:             ex.updateReagent,
+		topics.PruneImages:             ex.pruneImageHandler,
 	}
 }
 
@@ -66,25 +67,12 @@ func (ex *External) RegisterAll() error {
 		if err != nil {
 			// on reconnect we will reregister, which could cause a already exists exception
 			if strings.Contains(err.Error(), "wamp.error.procedure_already_exists") {
-				log.Warn().Msgf("API: Tried to register already existing topic: %s, will unregister", fullTopic)
+				log.Warn().Msgf("API: Tried to register already existing topic: %s", fullTopic)
 			} else {
 				return err
 			}
 		}
 		log.Info().Msgf("API: Registered topic %s on the device", fullTopic)
-	}
-	return nil
-}
-
-func (ex *External) UnregisterAll() error {
-	serialNumber := ex.Config.ReswarmConfig.SerialNumber
-	topicHandlerMap := ex.getTopicHandlerMap()
-	for topic := range topicHandlerMap {
-		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
-		err := ex.Messenger.Unregister(topics.Topic(fullTopic))
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }

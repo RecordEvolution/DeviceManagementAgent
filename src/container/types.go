@@ -100,6 +100,7 @@ type Container interface {
 	RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
 	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error
+	PruneImages(ctx context.Context, options common.Dict) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	GetConfig() *config.Config

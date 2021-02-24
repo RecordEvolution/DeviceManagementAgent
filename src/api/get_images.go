@@ -6,18 +6,18 @@ import (
 )
 
 func (ex *External) getImagesHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	images, err := ex.Container.ListImages(ctx, nil)
+	result, err := ex.Container.ListImages(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// See https://github.com/golang/go/wiki/InterfaceSlice
-	args := make([]interface{}, 0)
-	for _, image := range images {
-		args = append(args, image)
+	images := make([]interface{}, 0)
+	for _, image := range result {
+		images = append(images, image)
 	}
 
 	return &messenger.InvokeResult{
-		Arguments: args,
+		Arguments: images,
 	}, nil
 }
