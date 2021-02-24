@@ -73,7 +73,12 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
-	err := agent.Messenger.SetupTestament()
+	_, err := agent.System.UpdateIfRequired()
+	if err != nil {
+		log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+	}
+
+	err = agent.Messenger.SetupTestament()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
 	}

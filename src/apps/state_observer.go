@@ -236,12 +236,16 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			latestAppState, err := common.ContainerStateToAppState(state.Status, state.ExitCode)
 			if err != nil {
 				errorC <- err
+
+				log.Error().Err(err).Msg("failed to parse latestAppState")
 				return
 			}
 
 			app, err := so.AppStore.GetApp(appKey, stage)
 			if err != nil {
 				errorC <- err
+				log.Error().Err(err).Msg("failed to get app")
+
 				return
 			}
 
@@ -262,6 +266,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				err := so.Notify(app, latestAppState)
 				if err != nil {
 					errorC <- err
+					log.Error().Err(err).Msg("failed to notify state")
 					return
 				}
 			}

@@ -53,6 +53,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
 		topics.UpdateAgent:             ex.updateReagent,
 		topics.PruneImages:             ex.pruneImageHandler,
+		topics.GetAgentMetaData:        ex.getAgentMetadataHandler,
 	}
 }
 

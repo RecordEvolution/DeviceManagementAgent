@@ -434,6 +434,9 @@ func (docker *Docker) Logs(ctx context.Context, containerName string, options co
 		if strings.Contains(err.Error(), "No such container") {
 			return nil, errdefs.ContainerNotFound(err)
 		}
+		if strings.Contains(err.Error(), "container which is dead or marked for removal") {
+			return nil, errdefs.ContainerNotFound(err)
+		}
 		return nil, err
 	}
 

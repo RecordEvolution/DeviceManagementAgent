@@ -2,18 +2,29 @@ package system
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"reagent/config"
 	"reagent/filesystem"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
 
+const version = "0.0.3"
+
 type System struct {
 	config     *config.Config
 	updateLock *semaphore.Weighted
+}
+
+type UpdateResult struct {
+	CurrentVersion string
+	LatestVersion  string
+	WillUpdate     bool
 }
 
 func New(config *config.Config) System {
@@ -84,6 +95,45 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 	}()
 
 	return errC
+}
+
+func (system *System) GetVersion() string {
+	return version
+}
+
+func (system *System) GetLatestVersion() (string, error) {
+	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
+	resp, err := http.Get(reagentBucketURL + "/version.txt")
+	if err != nil {
+		return "", err
+	}
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.Join(strings.Fields(strings.TrimSpace(buf.String())), " "), nil
+}
+
+func (system *System) UpdateIfRequired() (UpdateResult, error) {
+	latestVersion, err := system.GetLatestVersion()
+	if err != nil {
+		return UpdateResult{}, err
+	}
+
+	currentVersion := system.GetVersion()
+	log.Info().Msgf("System: Latest version: %s, Current version: %s", latestVersion, currentVersion)
+	if latestVersion != currentVersion {
+		log.Info().Msgf("System: Agent not up to date, downloading: v%s", latestVersion)
+		system.UpdateAgent("v" + latestVersion)
+	}
+
+	return UpdateResult{
+		CurrentVersion: currentVersion,
+		LatestVersion:  latestVersion,
+		WillUpdate:     latestVersion != currentVersion,
+	}, nil
 }
 
 // ------------------------------------------------------------------------- //
