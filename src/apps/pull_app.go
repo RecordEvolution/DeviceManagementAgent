@@ -23,11 +23,6 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	err = sm.setState(app, common.DOWNLOADING)
-	if err != nil {
-		return err
-	}
-
 	ctx := context.Background()
 
 	// Need to authenticate to private registry to determine proper privileges to pull the app
@@ -46,6 +41,11 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	if err != nil {
 		errorMessage := fmt.Sprintf("Error occured while trying to pull the image: %s", err.Error())
 		sm.LogManager.Write(payload.ContainerName.Prod, errorMessage)
+		return err
+	}
+
+	err = sm.setState(app, common.DOWNLOADING)
+	if err != nil {
 		return err
 	}
 
