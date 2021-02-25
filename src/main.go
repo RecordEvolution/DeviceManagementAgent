@@ -83,9 +83,13 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
-	_, err := agent.System.UpdateIfRequired()
+	updateResult, err := agent.System.UpdateIfRequired()
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+	}
+
+	if updateResult.DidUpdate {
+		log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
 	}
 
 	err = agent.Messenger.SetupTestament()

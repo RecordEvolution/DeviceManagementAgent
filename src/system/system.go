@@ -28,7 +28,7 @@ type System struct {
 type UpdateResult struct {
 	CurrentVersion string
 	LatestVersion  string
-	WillUpdate     bool
+	DidUpdate      bool
 }
 
 func New(config *config.Config) System {
@@ -50,7 +50,7 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
-func (sys *System) UpdateAgent(versionString string) chan error {
+func (sys *System) UpdateAgent(versionString string) error {
 
 	// The update is already in progress
 	agentDir := sys.config.CommandLineArguments.AgentDir
@@ -59,46 +59,38 @@ func (sys *System) UpdateAgent(versionString string) chan error {
 
 	newAgentDestination := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
 	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-" + versionString
-	errC := make(chan error, 1)
 
-	go func() {
-		if !sys.updateLock.TryAcquire(1) {
-			return
-		}
+	if !sys.updateLock.TryAcquire(1) {
+		return nil
+	}
 
-		defer sys.updateLock.Release(1)
+	defer sys.updateLock.Release(1)
 
-		log.Debug().Msg("Reagent update Initialized...")
+	log.Debug().Msg("Reagent update Initialized...")
 
-		// download it to /tmp first
-		err := filesystem.DownloadURL(tmpFilePath, agentURL)
-		if err != nil {
-			errC <- err
-			log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
-			return
-		}
+	// download it to /tmp first
+	err := filesystem.DownloadURL(tmpFilePath, agentURL)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
+		return err
+	}
 
-		err = os.Chmod(tmpFilePath, 0755)
-		if err != nil {
-			errC <- err
-			log.Error().Err(err).Msg("Failed to set permissions for agent binary")
-			return
-		}
+	err = os.Chmod(tmpFilePath, 0755)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to set permissions for agent binary")
+		return err
+	}
 
-		// move it to the actual agent dir
-		err = os.Rename(tmpFilePath, newAgentDestination)
-		if err != nil {
-			errC <- err
-			log.Error().Err(err).Msg("Failed to move agent to AgentDir")
-			return
-		}
+	// move it to the actual agent dir
+	err = os.Rename(tmpFilePath, newAgentDestination)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to move agent to AgentDir")
+		return err
+	}
 
-		log.Debug().Msg("Reagent update finished...")
+	log.Debug().Msg("Reagent update finished...")
 
-		errC <- nil
-	}()
-
-	return errC
+	return nil
 }
 
 func (system *System) GetVersion() string {
@@ -135,13 +127,16 @@ func (system *System) UpdateIfRequired() (UpdateResult, error) {
 	log.Info().Msgf("System: Latest version: %s, Current version: %s", latestVersion, currentVersion)
 	if latestVersion != currentVersion {
 		log.Info().Msgf("System: Agent not up to date, downloading: v%s", latestVersion)
-		system.UpdateAgent("v" + latestVersion)
+		err := system.UpdateAgent("v" + latestVersion)
+		if err != nil {
+			return UpdateResult{}, err
+		}
 	}
 
 	return UpdateResult{
 		CurrentVersion: currentVersion,
 		LatestVersion:  latestVersion,
-		WillUpdate:     latestVersion != currentVersion,
+		DidUpdate:      latestVersion != currentVersion,
 	}, nil
 }
 
