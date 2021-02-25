@@ -69,9 +69,10 @@ func UpdateRemoteDeviceStatus(messenger messenger.Messenger, status DeviceStatus
 	ctx := context.Background()
 
 	payload := common.Dict{
-		"swarm_key":  config.ReswarmConfig.SwarmKey,
-		"device_key": config.ReswarmConfig.DeviceKey,
-		"status":     string(status),
+		"swarm_key":       config.ReswarmConfig.SwarmKey,
+		"device_key":      config.ReswarmConfig.DeviceKey,
+		"status":          string(status),
+		"wamp_session_id": messenger.GetSessionID(),
 	}
 
 	_, err := messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)

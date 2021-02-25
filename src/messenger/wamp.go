@@ -269,9 +269,10 @@ func (wampSession *WampSession) SetupTestament() error {
 		topics.SetDeviceTestament,
 		[]interface{}{
 			common.Dict{
-				"swarm_key":     config.ReswarmConfig.SwarmKey,
-				"device_key":    config.ReswarmConfig.DeviceKey,
-				"serial_number": config.ReswarmConfig.SerialNumber,
+				"swarm_key":       config.ReswarmConfig.SwarmKey,
+				"device_key":      config.ReswarmConfig.DeviceKey,
+				"serial_number":   config.ReswarmConfig.SerialNumber,
+				"wamp_session_id": wampSession.GetSessionID(),
 			},
 		},
 		common.Dict{},
