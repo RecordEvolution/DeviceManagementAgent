@@ -81,9 +81,8 @@ func createConnectConfig(config *config.Config) (*client.Config, error) {
 
 // New creates a new wamp session from a ReswarmConfig file
 func NewWamp(config *config.Config) (*WampSession, error) {
-	ctx := context.Background()
 	session := &WampSession{config: config}
-	clientChannel := EstablishSocketConnection(ctx, config)
+	clientChannel := EstablishSocketConnection(config)
 
 	select {
 	case client := <-clientChannel:
@@ -95,7 +94,7 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 
 func (wampSession *WampSession) Reconnect() {
 	wampSession.Close()
-	clientChannel := EstablishSocketConnection(context.Background(), wampSession.config)
+	clientChannel := EstablishSocketConnection(wampSession.config)
 	select {
 	case client := <-clientChannel:
 		wampSession.client = client
@@ -106,28 +105,39 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
-func EstablishSocketConnection(ctx context.Context, config *config.Config) chan *client.Client {
+func EstablishSocketConnection(config *config.Config) chan *client.Client {
 	resChan := make(chan *client.Client, 1)
 
 	go func() {
 		for {
 			connectionConfig, err := createConnectConfig(config)
+			requestStart := time.Now() // time request
+
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*1250)
 			client, err := client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 
+			var duration time.Duration
+
 			if err != nil {
-				log.Debug().Msg("Failed to establish a websocket connection, reattempting in half a second...")
-				time.Sleep(time.Second / 2)
+				cancelFunc()
+				duration = time.Since(requestStart)
+				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 100ms", duration.String())
+				time.Sleep(time.Millisecond * 100)
 				continue
 			}
 
+			cancelFunc()
 			if client.Connected() {
+				duration = time.Since(requestStart)
+				log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
 				resChan <- client
 				break
+			} else {
+				duration = time.Since(requestStart)
+				log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
 			}
 
 		}
-
-		log.Debug().Msgf("Succesfully established a socket connection")
 	}()
 
 	return resChan
