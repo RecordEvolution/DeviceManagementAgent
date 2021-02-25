@@ -249,11 +249,6 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				return
 			}
 
-			if app.IsTransitioning() {
-				time.Sleep(pollingRate)
-				continue
-			}
-
 			app.StateLock.Lock()
 			curAppState := app.CurrentState
 			app.StateLock.Unlock()

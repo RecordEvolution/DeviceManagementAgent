@@ -17,7 +17,13 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return errors.New("cannot pull dev apps")
 	}
 
-	err := sm.setState(app, common.DOWNLOADING)
+	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
+	err := sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.DOWNLOADING)
 	if err != nil {
 		return err
 	}

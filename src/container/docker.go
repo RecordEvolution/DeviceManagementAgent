@@ -388,13 +388,14 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 	}
 
 	pullID := options.PullID
+	pullStream := DockerStream{
+		Stream:   ioReader,
+		StreamID: pullID,
+	}
 
 	if pullID != "" {
 		docker.streamMapMutex.Lock()
-		docker.activeStreams[pullID] = &DockerStream{
-			Stream:   ioReader,
-			StreamID: pullID,
-		}
+		docker.activeStreams[pullID] = &pullStream
 		docker.streamMapMutex.Unlock()
 	}
 
@@ -833,6 +834,7 @@ func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 	defer docker.streamMapMutex.Unlock()
 
 	activeStreamEntry := docker.activeStreams[streamID]
+
 	log.Debug().Msgf("Active Stream: %+v", activeStreamEntry)
 
 	if activeStreamEntry == nil {
@@ -845,9 +847,9 @@ func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 		if err != nil {
 			return err
 		}
+		delete(docker.activeStreams, streamID)
+		log.Debug().Msgf("Closed stream for %s", streamID)
 	}
-
-	delete(docker.activeStreams, streamID)
 
 	return nil
 }

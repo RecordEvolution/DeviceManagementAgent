@@ -1,8 +1,12 @@
 package common
 
 import (
+	"errors"
 	"reagent/config"
 	"sync"
+
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
 )
 
 type Dict map[string]interface{}
@@ -21,41 +25,52 @@ type App struct {
 	ReleaseBuild        bool
 	Version             string
 	LastUpdated         Timestamp
-	Transitioning       bool
-	TransitionLock      sync.Mutex
+	TransitionLock      *semaphore.Weighted
 	StateLock           sync.Mutex
 }
 
-func (app *App) IsTransitioning() bool {
-	app.TransitionLock.Lock()
-	isTransitioning := app.Transitioning
-	app.TransitionLock.Unlock()
-
-	return isTransitioning
-}
-
-// SecureTransition acquires a transition lock and returns whether or not it is currently transitioning
 func (app *App) SecureTransition() bool {
-	app.TransitionLock.Lock()
-	isTransitioning := app.Transitioning
-	app.TransitionLock.Unlock()
-
-	if isTransitioning {
-		return true
+	if app.TransitionLock == nil {
+		log.Error().Err(errors.New("no semaphore initialized"))
+		return false
 	}
-
-	app.TransitionLock.Lock()
-	app.Transitioning = true
-	app.TransitionLock.Unlock()
-
-	return false
+	return !app.TransitionLock.TryAcquire(1)
 }
 
 func (app *App) UnlockTransition() {
-	app.TransitionLock.Lock()
-	app.Transitioning = false
-	app.TransitionLock.Unlock()
+	app.TransitionLock.Release(1)
 }
+
+// func (app *App) IsTransitioning() bool {
+// 	app.TransitionLock.Lock()
+// 	isTransitioning := app.Transitioning
+// 	app.TransitionLock.Unlock()
+
+// 	return isTransitioning
+// }
+
+// // SecureTransition acquires a transition lock and returns whether or not it is currently transitioning
+// func (app *App) SecureTransition() bool {
+// 	app.TransitionLock.Lock()
+// 	isTransitioning := app.Transitioning
+// 	app.TransitionLock.Unlock()
+
+// 	if isTransitioning {
+// 		return true
+// 	}
+
+// 	app.TransitionLock.Lock()
+// 	app.Transitioning = true
+// 	app.TransitionLock.Unlock()
+
+// 	return false
+// }
+
+// func (app *App) UnlockTransition() {
+// 	app.TransitionLock.Lock()
+// 	app.Transitioning = false
+// 	app.TransitionLock.Unlock()
+// }
 
 func (app *App) IsCancelable() bool {
 	app.StateLock.Lock()
