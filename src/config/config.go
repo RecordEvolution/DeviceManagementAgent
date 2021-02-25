@@ -80,7 +80,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	appsDir := defaultAgentDir + "/apps"
 
 	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
-	debug := flag.Bool("debug", false, "sets the log level to debug")
+	debug := flag.Bool("debug", true, "sets the log level to debug")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
