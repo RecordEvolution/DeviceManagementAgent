@@ -109,17 +109,14 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 func EstablishSocketConnection(ctx context.Context, config *config.Config) chan *client.Client {
 	resChan := make(chan *client.Client, 1)
 
-	timeoutInSeconds := 2
-	retryTimeout := time.Second * time.Duration(timeoutInSeconds)
-
 	go func() {
 		for {
 			connectionConfig, err := createConnectConfig(config)
 			client, err := client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 
 			if err != nil {
-				log.Debug().Msgf("Failed to establish a websocket connection, reattempting in %d seconds...", timeoutInSeconds)
-				time.Sleep(retryTimeout)
+				log.Debug().Msg("Failed to establish a websocket connection, reattempting in half a second...")
+				time.Sleep(time.Second / 2)
 				continue
 			}
 

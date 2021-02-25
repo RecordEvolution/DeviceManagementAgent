@@ -54,6 +54,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.UpdateAgent:             ex.updateReagent,
 		topics.PruneImages:             ex.pruneImageHandler,
 		topics.GetAgentMetaData:        ex.getAgentMetadataHandler,
+		topics.GetAgentLogs:            ex.getAgentLogs,
 	}
 }
 
