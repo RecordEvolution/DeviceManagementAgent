@@ -38,11 +38,6 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	// prod ready builds will not be set to exists until after they are pushed
 	app.ReleaseBuild = releaseBuild
 
-	err = sm.setState(app, common.BUILDING)
-	if err != nil {
-		return err
-	}
-
 	buildOptions := types.ImageBuildOptions{
 		Tags:       []string{payload.RegistryImageName.Dev},
 		Dockerfile: "Dockerfile",
@@ -73,6 +68,11 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			return messageErr
 		}
 
+		return err
+	}
+
+	err = sm.setState(app, common.BUILDING)
+	if err != nil {
 		return err
 	}
 
