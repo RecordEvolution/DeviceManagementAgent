@@ -41,6 +41,16 @@ type LogManager struct {
 	mapMutex   sync.Mutex
 }
 
+func NewLogManager(cont container.Container, msg messenger.Messenger, db persistence.Database, as store.AppStore) LogManager {
+	return LogManager{
+		activeLogs: make(map[string]*ActiveLog, 0),
+		Container:  cont,
+		Messenger:  msg,
+		Database:   db,
+		AppStore:   as,
+	}
+}
+
 // Amount of lines that will be stored for each app
 const historyStorageLimit = 200
 
@@ -71,6 +81,10 @@ type JSONMessage struct {
 	Error           *JSONError       `json:"errorDetail,omitempty"`
 	ErrorMessage    string           `json:"error,omitempty"` // deprecated
 	Aux             *json.RawMessage `json:"aux,omitempty"`
+}
+
+func (lm *LogManager) SetMessenger(messenger messenger.Messenger) {
+	lm.Messenger = messenger
 }
 
 func (lm *LogManager) ClearLogHistory(containerName string) error {
@@ -181,8 +195,11 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			logEntry.logHistory = logEntry.logHistory[1:]
 		}
 
-		logEntry.logHistory = append(logEntry.logHistory, chunk)
+		if strings.Contains(chunk, "cannot validate certificate") {
+			return errors.New("Invalid certificate")
+		}
 
+		logEntry.logHistory = append(logEntry.logHistory, chunk)
 		shouldPublish := logEntry.Publish
 		logEntry.StateLock.Unlock()
 
@@ -323,8 +340,6 @@ func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]stri
 }
 
 func (lm *LogManager) SetupEndpoints() error {
-	lm.activeLogs = make(map[string]*ActiveLog)
-
 	_ = lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
 		subscriptionID := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was created
 
@@ -338,6 +353,7 @@ func (lm *LogManager) SetupEndpoints() error {
 			return err
 		}
 
+		lm.Publish(activeLog.ContainerName, fmt.Sprintf("Subscribed to the logs for %s (%s)", activeLog.ContainerName, time.Now().Format(time.RFC850)))
 		for _, logEntry := range history {
 			err := lm.Publish(activeLog.ContainerName, logEntry)
 			if err != nil {
@@ -520,7 +536,7 @@ func (lm *LogManager) buildTopic(containerName string) string {
 
 // StreamBlocking publishes an stream of string data to a specific subscribable container synchronisly.
 func (lm *LogManager) StreamBlocking(containerName string, logType common.LogType, reader io.ReadCloser) error {
-	if reader != nil {
+	if reader != nil && lm.Messenger.Connected() {
 		return lm.initLogStream(containerName, logType, reader)
 	}
 	return nil
@@ -535,12 +551,12 @@ func (lm *LogManager) Stream(containerName string, logType common.LogType, other
 		}
 	}
 
-	if reader != nil {
+	if reader != nil && lm.Messenger.Connected() {
 		go lm.initLogStream(containerName, logType, reader)
 		return nil
 	}
 
-	if otherReader != nil {
+	if otherReader != nil && lm.Messenger.Connected() {
 		go lm.initLogStream(containerName, logType, otherReader)
 	}
 

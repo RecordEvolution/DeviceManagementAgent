@@ -121,6 +121,18 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	return nil
 }
 
+func (am *AppManager) EnsureLocalRequestedStates() error {
+	rStates, err := am.AppStore.GetRequestedStates()
+	if err != nil {
+		return err
+	}
+	for _, payload := range rStates {
+		go am.RequestAppState(payload)
+	}
+
+	return nil
+}
+
 func (am *AppManager) VerifyState(app *common.App) error {
 	log.Printf("App Manager: Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
 
@@ -157,6 +169,47 @@ func (am *AppManager) VerifyState(app *common.App) error {
 			_ = am.RequestAppState(requestedStatePayload)
 		}()
 	}
+
+	return nil
+}
+
+func TempUpdateCurrentAppState(appStore *store.AppStore, payload common.TransitionPayload) error {
+	app, err := appStore.GetApp(payload.AppKey, payload.Stage)
+	if err != nil {
+		return err
+	}
+
+	app.StateLock.Lock()
+
+	curAppState := app.CurrentState
+
+	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
+	if curAppState == common.BUILT || curAppState == common.PUBLISHED {
+		if payload.CurrentState != "" {
+			app.CurrentState = payload.CurrentState
+		}
+	}
+
+	if payload.PresentVersion != "" {
+		app.Version = payload.PresentVersion
+	}
+
+	app.StateLock.Unlock()
+
+	go func() {
+		app.StateLock.Lock()
+		curAppState := app.CurrentState
+		app.StateLock.Unlock()
+
+		timestamp, err := appStore.UpdateLocalAppState(app, curAppState)
+		if err != nil {
+			log.Error().Err(err)
+		}
+
+		app.StateLock.Lock()
+		app.LastUpdated = timestamp
+		app.StateLock.Unlock()
+	}()
 
 	return nil
 }

@@ -50,6 +50,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	}
 
 	// Need to make sure we close this reader later on
+	log.Debug().Msgf("Building for path: %s", filePath)
 	reader, err := sm.Container.Build(ctx, filePath, buildOptions)
 	if err != nil {
 		errorMessage := err.Error()

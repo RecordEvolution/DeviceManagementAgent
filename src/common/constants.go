@@ -49,6 +49,7 @@ func IsTransientState(appState AppState) bool {
 		PUBLISHING,
 		PUBLISHED,
 		DOWNLOADING,
+		STOPPING,
 		UPDATING,
 		STARTING:
 		return true

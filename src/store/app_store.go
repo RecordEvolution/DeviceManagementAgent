@@ -27,6 +27,10 @@ func NewAppStore(database persistence.Database, messenger messenger.Messenger) A
 	}
 }
 
+func (am *AppStore) SetMessenger(messenger messenger.Messenger) {
+	am.messenger = messenger
+}
+
 func (am *AppStore) GetAllApps() ([]*common.App, error) {
 	return am.database.GetAppStates()
 }
@@ -113,6 +117,11 @@ func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	if resp.Arguments == nil {
+		return "", nil
+	}
+
 	registryTokenArg := resp.Arguments[0]
 	registryToken, ok := registryTokenArg.(string)
 

@@ -346,7 +346,7 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 	return termSession, nil
 }
 
-func (tm *TerminalManager) initUnregisterWatcher() error {
+func (tm *TerminalManager) InitUnregisterWatcher() error {
 	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) error {
 		metaRegistrationID := r.Arguments[1]
 
@@ -370,7 +370,7 @@ func (tm *TerminalManager) initUnregisterWatcher() error {
 	return nil
 }
 
-func NewTerminalManager(messenger messenger.Messenger, container container.Container) (TerminalManager, error) {
+func NewTerminalManager(messenger messenger.Messenger, container container.Container) TerminalManager {
 	sessionsMap := make(map[string]*TerminalSession)
 
 	manager := TerminalManager{
@@ -380,12 +380,11 @@ func NewTerminalManager(messenger messenger.Messenger, container container.Conta
 		mapMutex:       &sync.Mutex{},
 	}
 
-	err := manager.initUnregisterWatcher()
-	if err != nil {
-		return TerminalManager{}, err
-	}
+	return manager
+}
 
-	return manager, nil
+func (tm *TerminalManager) SetMessenger(messenger messenger.Messenger) {
+	tm.Messenger = messenger
 }
 
 func (tm *TerminalManager) RequestTerminalSession(containerName string) (*TerminalSession, error) {

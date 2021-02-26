@@ -51,7 +51,7 @@ func main() {
 	}
 	log.Info().Msg("Got reply from Docker Daemon, continuing")
 
-	err = agent.Init()
+	err = agent.OnConnect()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
@@ -82,7 +82,7 @@ type Agent struct {
 	StateMachine    *apps.StateMachine
 }
 
-func (agent *Agent) Init() error {
+func (agent *Agent) OnConnect() error {
 	updateResult, err := agent.System.UpdateIfRequired(nil)
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
@@ -151,38 +151,46 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		log.Fatal().Stack().Err(err).Msg("failed to initalize SQLite database")
 	}
 
-	messenger, err := messenger.NewWamp(generalConfig)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
-	}
-
+	// setup the agent struct with a dummy/offline implementation of the messenger
+	dummyMessenger := messenger.NewOffline(generalConfig)
 	container, err := container.NewDocker(generalConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup docker")
 	}
 
-	appStore := store.NewAppStore(database, messenger)
-
+	appStore := store.NewAppStore(database, dummyMessenger)
 	stateObserver := apps.NewObserver(container, &appStore)
-
-	logManager := logging.LogManager{
-		Messenger: messenger,
-		AppStore:  appStore,
-		Database:  database,
-		Container: container,
-	}
-
+	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
+	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
-	terminalManager, err := terminal.NewTerminalManager(messenger, container)
+	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed init terminal manager")
+		log.Fatal().Stack().Err(err).Msg("failed to correct local states")
 	}
+
+	// setup the containers on start
+	err = appManager.EnsureLocalRequestedStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to ensure local app states")
+	}
+
+	// try to establish a wamp connection
+	wamp, err := messenger.NewWamp(generalConfig)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
+	}
+
+	// established a connection, replace the dummy messenger
+	appStore.SetMessenger(wamp)
+	logManager.SetMessenger(wamp)
+	terminalManager.SetMessenger(wamp)
+	terminalManager.InitUnregisterWatcher()
 
 	external := api.External{
 		Container:       container,
-		Messenger:       messenger,
+		Messenger:       wamp,
 		Database:        database,
 		System:          &systemAPI,
 		AppManager:      &appManager,
@@ -201,7 +209,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,
 		Container:       container,
-		Messenger:       messenger,
+		Messenger:       wamp,
 		Database:        database,
 	}
 }
@@ -231,9 +239,9 @@ func (agent *Agent) ListenForDisconnect() {
 					log.Debug().Msg("Reconnect: was able to reconnect, running setup again")
 
 					// rerun setup
-					err := agent.Init()
+					err := agent.OnConnect()
 					if err != nil {
-						log.Fatal().Stack().Err(err).Msg("failed to init")
+						log.Fatal().Stack().Err(err).Msg("failed to run on connect handler")
 						break
 					}
 

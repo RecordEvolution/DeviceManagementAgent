@@ -45,6 +45,7 @@ type CommandLineArguments struct {
 	RemoteUpdateURL          string
 	Debug                    bool
 	DebugMessaging           bool
+	Version                  bool
 	LogFileLocation          string
 	ConfigFileLocation       string
 	DatabaseFileName         string
@@ -81,6 +82,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 
 	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", true, "sets the log level to debug")
+	version := flag.Bool("version", false, "displays the current version of the agent")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
@@ -102,6 +104,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		RemoteUpdateURL:          *remoteUpdateURL,
 		CompressedBuildExtension: *compressedBuildExtension,
 		Debug:                    *debug,
+		Version:                  *version,
 		DebugMessaging:           *debugMessaging,
 		LogFileLocation:          *logFile,
 		ConfigFileLocation:       *cfgFile,
