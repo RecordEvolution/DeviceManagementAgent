@@ -6,6 +6,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"reagent/safe"
 	"strconv"
 
 	"github.com/rs/zerolog/log"
@@ -19,7 +20,7 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 
 	log.Debug().Msgf("Received Requested State %s for %s (%s)", payload.RequestedState, payload.AppName, payload.Stage)
 
-	go func() {
+	safe.Go(func() {
 		err = ex.AppManager.CreateOrUpdateApp(payload)
 		if err != nil {
 			log.Error().Stack().Err(err)
@@ -31,7 +32,7 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 			log.Error().Stack().Err(err)
 			return
 		}
-	}()
+	})
 
 	return &messenger.InvokeResult{}, nil
 }

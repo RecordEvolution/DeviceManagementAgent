@@ -8,6 +8,7 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
+	"reagent/safe"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
@@ -91,7 +92,7 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 
 	am.apps = append(am.apps, app)
 
-	go func() {
+	safe.Go(func() {
 		// Insert the newly created app state data into the database
 		app.StateLock.Lock()
 		curAppState := app.CurrentState
@@ -101,7 +102,7 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 		if err != nil {
 			log.Error().Stack().Err(err)
 		}
-	}()
+	})
 
 	return app, nil
 }

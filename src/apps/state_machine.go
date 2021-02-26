@@ -5,6 +5,7 @@ import (
 	"reagent/container"
 	"reagent/errdefs"
 	"reagent/logging"
+	"reagent/safe"
 
 	"github.com/rs/zerolog/log"
 )
@@ -150,7 +151,7 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 func (sm *StateMachine) executeTransition(app *common.App, payload common.TransitionPayload, transitionFunc TransitionFunc) chan error {
 	errChannel := make(chan error)
 
-	go func() {
+	safe.Go(func() {
 		log.Info().Msgf("State Machine: Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		err := transitionFunc(payload, app)
 
@@ -160,7 +161,7 @@ func (sm *StateMachine) executeTransition(app *common.App, payload common.Transi
 
 		// we are done sending, should close the channel
 		close(errChannel)
-	}()
+	})
 
 	return errChannel
 }

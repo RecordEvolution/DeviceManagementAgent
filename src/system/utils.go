@@ -1,6 +1,8 @@
 package system
 
-import "os"
+import (
+	"os"
+)
 
 // getEnv env variable by key if exist otherwise returns defaultValue
 func GetEnv(key string, defaultValue ...string) string {

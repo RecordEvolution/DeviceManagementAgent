@@ -9,6 +9,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger/topics"
+	"reagent/safe"
 
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/transport"
@@ -108,7 +109,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 func EstablishSocketConnection(config *config.Config) chan *client.Client {
 	resChan := make(chan *client.Client, 1)
 
-	go func() {
+	safe.Go(func() {
 		for {
 			connectionConfig, err := createConnectConfig(config)
 			requestStart := time.Now() // time request
@@ -138,7 +139,7 @@ func EstablishSocketConnection(config *config.Config) chan *client.Client {
 			}
 
 		}
-	}()
+	})
 
 	return resChan
 }

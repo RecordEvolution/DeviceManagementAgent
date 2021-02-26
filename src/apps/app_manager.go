@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/safe"
 	"reagent/store"
 
 	"github.com/rs/zerolog/log"
@@ -156,7 +157,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedStatePayload.RequestedState)
 
 		// transition again
-		go func() {
+		safe.Go(func() {
 			builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
 				(curAppState == common.BUILT || curAppState == common.PUBLISHED)
 
@@ -167,7 +168,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 			}
 
 			_ = am.RequestAppState(requestedStatePayload)
-		}()
+		})
 	}
 
 	return nil
@@ -196,7 +197,7 @@ func TempUpdateCurrentAppState(appStore *store.AppStore, payload common.Transiti
 
 	app.StateLock.Unlock()
 
-	go func() {
+	safe.Go(func() {
 		app.StateLock.Lock()
 		curAppState := app.CurrentState
 		app.StateLock.Unlock()
@@ -209,7 +210,7 @@ func TempUpdateCurrentAppState(appStore *store.AppStore, payload common.Transiti
 		app.StateLock.Lock()
 		app.LastUpdated = timestamp
 		app.StateLock.Unlock()
-	}()
+	})
 
 	return nil
 }
@@ -237,7 +238,7 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 
 	app.StateLock.Unlock()
 
-	go func() {
+	safe.Go(func() {
 		app.StateLock.Lock()
 		curAppState := app.CurrentState
 		app.StateLock.Unlock()
@@ -250,7 +251,7 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 		app.StateLock.Lock()
 		app.LastUpdated = timestamp
 		app.StateLock.Unlock()
-	}()
+	})
 
 	return nil
 }
@@ -285,12 +286,12 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	app.RequestedState = payload.RequestedState
 	app.StateLock.Unlock()
 
-	go func() {
+	safe.Go(func() {
 		err = am.AppStore.UpdateLocalRequestedState(payload)
 		if err != nil {
 			log.Error().Stack().Err(err)
 		}
-	}()
+	})
 
 	return nil
 }

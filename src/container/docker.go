@@ -11,6 +11,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
+	"reagent/safe"
 	"strings"
 	"sync"
 	"time"
@@ -649,7 +650,7 @@ func (docker *Docker) PollContainerState(ctx context.Context, containerID string
 	errC := make(chan error, 1)
 	stateC := make(chan ContainerState, 1)
 
-	go func() {
+	safe.Go(func() {
 		for {
 			state, err := docker.GetContainerState(ctx, containerID)
 			if err != nil {
@@ -666,7 +667,7 @@ func (docker *Docker) PollContainerState(ctx context.Context, containerID string
 			stateC <- state
 			time.Sleep(pollingRate)
 		}
-	}()
+	})
 
 	return stateC, errC
 }
@@ -677,7 +678,7 @@ func (docker *Docker) WaitForRunning(ctx context.Context, containerID string, po
 	errC := make(chan error, 1)
 	runningC := make(chan struct{}, 1)
 
-	go func() {
+	safe.Go(func() {
 		for {
 			state, err := docker.GetContainerState(ctx, containerID)
 			if err != nil {
@@ -703,7 +704,7 @@ func (docker *Docker) WaitForRunning(ctx context.Context, containerID string, po
 
 			time.Sleep(pollingRate)
 		}
-	}()
+	})
 
 	return runningC, errC
 }

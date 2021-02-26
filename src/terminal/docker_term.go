@@ -9,6 +9,7 @@ import (
 	"reagent/container"
 	"reagent/messenger"
 	"reagent/messenger/topics"
+	"reagent/safe"
 	"regexp"
 	"strings"
 	"sync"
@@ -168,7 +169,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 	}
 
 	// read incoming (WAMP) data from the channel and write it to the attached terminal
-	go func() {
+	safe.Go(func() {
 		defer log.Debug().Msgf("Terminal Manager: term writer goroutine for %s has exited", termSess.ContainerName)
 		defer termSess.Session.Conn.Close() // will close both read and write if goroutine breaks
 
@@ -187,10 +188,10 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 				}
 			}
 		}
-	}()
+	})
 
 	// read outgoing data from the channel and 'publish' it (WAMP) to a given topic
-	go func() {
+	safe.Go(func() {
 		defer log.Debug().Msgf("Terminal Manager: term reader goroutine for %s has exited", termSess.ContainerName)
 
 		ctx := context.Background()
@@ -225,7 +226,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 			}
 			return
 		}
-	}()
+	})
 
 	return nil
 }

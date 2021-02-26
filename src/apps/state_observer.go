@@ -5,6 +5,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"reagent/safe"
 	"reagent/store"
 	"sync"
 	"time"
@@ -49,14 +50,14 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 		// ignore
 	}
 
-	go func() {
+	safe.Go(func() {
 		// update locally
 		_, err = so.AppStore.UpdateLocalAppState(app, achievedState)
 		if err != nil {
 			log.Error().Stack().Err(err)
 			return
 		}
-	}()
+	})
 
 	return nil
 }
@@ -207,7 +208,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 	errorC := make(chan error, 1)
 	pollingRate := time.Second * 1
 
-	go func() {
+	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
 
 		defer so.removeObserver(stage, appKey, appName)
@@ -271,7 +272,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 
 			time.Sleep(pollingRate)
 		}
-	}()
+	})
 
 	return errorC
 }
@@ -281,7 +282,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 
 	errChan := make(chan error, 1)
 
-	go func() {
+	safe.Go(func() {
 	loop:
 		for {
 			select {
@@ -307,7 +308,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 		}
 
 		// log.Warn().Msgf("Observer spawner died")
-	}()
+	})
 
 	return errChan
 }
