@@ -78,6 +78,7 @@ type Container interface {
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
 	ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
+	GetContainers(ctx context.Context) ([]types.Container, error)
 	Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error)
 	ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error)
 	ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error)

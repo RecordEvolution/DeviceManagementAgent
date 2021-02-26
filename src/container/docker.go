@@ -615,6 +615,11 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	return resp.ID, nil
 }
 
+func (docker *Docker) GetContainers(ctx context.Context) ([]types.Container, error) {
+	options := types.ContainerListOptions{All: true}
+	return docker.client.ContainerList(ctx, options)
+}
+
 func (docker *Docker) GetContainerState(ctx context.Context, containerName string) (ContainerState, error) {
 	res, err := docker.client.ContainerInspect(ctx, containerName)
 	if err != nil {

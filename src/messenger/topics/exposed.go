@@ -10,6 +10,7 @@ const StartTerminalSession Topic = "start_terminal_session"
 const StopTerminalSession Topic = "stop_terminal_session"
 const GetLogHistory Topic = "get_log_history"
 const StreamLogHistory Topic = "stream_log_history"
+const ListContainers Topic = "list_containers"
 
 const ListWiFiNetworks Topic = "list_wifi_networks"
 const AddWiFiConfiguration Topic = "add_wifi_configuration"
