@@ -12,7 +12,7 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 	// find active network interface
 	ifaces, err := system.ListNetworkInterfaces()
 	if err != nil {
-		return nil, nil
+		return &messenger.InvokeResult{Arguments: []interface{}{}}, nil
 	}
 
 	var ifaceActive system.NetworkIface

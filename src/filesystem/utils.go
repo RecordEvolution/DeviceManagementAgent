@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -33,27 +34,33 @@ func OverwriteFile(filePath string, value string) error {
 	return err
 }
 
-// WriteCounter counts the number of bytes written to it. It implements to the io.Writer interface
-// and we can pass this into io.TeeReader() which will report progress on each write cycle.
 type WriteCounter struct {
-	Total uint64
+	callback func(increment uint64, currentBytes uint64, totalFileSize uint64)
+	Size     uint64
+	Total    uint64
 }
 
 func (wc *WriteCounter) Write(p []byte) (int, error) {
 	n := len(p)
 	wc.Total += uint64(n)
-	wc.PrintProgress()
+
+	printCallBack(uint64(n), wc.Total)
+
+	// custom download callback
+	if wc.callback != nil {
+		wc.callback(uint64(n), wc.Total, wc.Size)
+	}
 	return n, nil
 }
 
-func (wc WriteCounter) PrintProgress() {
-	megabytes := float64(wc.Total) * math.Pow(10, -6)
+func printCallBack(increment uint64, totalBytes uint64) {
+	megabytes := float64(totalBytes) * math.Pow(10, -6)
 	fmt.Printf("\r%s", strings.Repeat(" ", 35))
 	fmt.Printf("\rDownloading... %.3f MB", megabytes)
 }
 
 // Downloads any data from a given URL to a given filePath. Progress is logged to CLI
-func DownloadURL(filePath string, url string) error {
+func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	// open the required file
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -69,8 +76,13 @@ func DownloadURL(filePath string, url string) error {
 
 	defer resp.Body.Close()
 
+	size, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if err != nil {
+		return err
+	}
+
 	// copy the http body into the file
-	counter := &WriteCounter{}
+	counter := &WriteCounter{callback: callback, Size: uint64(size)}
 	if _, err = io.Copy(out, io.TeeReader(resp.Body, counter)); err != nil {
 		return err
 	}

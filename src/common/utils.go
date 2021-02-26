@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reagent/config"
+	"reagent/messenger/topics"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +24,10 @@ func BuildImageName(stage Stage, arch string, appKey uint64, appName string) str
 
 func BuildRegistryImageName(registryURL string, mainRepositoryName string, imageName string) string {
 	return strings.ToLower(fmt.Sprintf("%s%s%s", registryURL, mainRepositoryName, imageName))
+}
+
+func BuildAgentUpdateProgress(serialNumber string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.AgentProgress)
 }
 
 const topicPrefix = "re.mgmt"

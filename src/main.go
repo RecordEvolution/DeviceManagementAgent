@@ -83,7 +83,7 @@ type Agent struct {
 }
 
 func (agent *Agent) Init() error {
-	updateResult, err := agent.System.UpdateIfRequired()
+	updateResult, err := agent.System.UpdateIfRequired(nil)
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
 	}

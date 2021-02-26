@@ -54,3 +54,8 @@ func IsDockerBuildFilesNotFound(err error) bool {
 	_, ok := err.(ErrDockerBuildFilesNotFound)
 	return ok
 }
+
+func IsInProgress(err error) bool {
+	_, ok := err.(ErrInProgress)
+	return ok
+}

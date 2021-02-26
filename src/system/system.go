@@ -1,12 +1,14 @@
 package system
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"reagent/config"
+	"reagent/errdefs"
 	"reagent/filesystem"
 	"strings"
 	"time"
@@ -29,6 +31,8 @@ type UpdateResult struct {
 	CurrentVersion string
 	LatestVersion  string
 	DidUpdate      bool
+	InProgress     bool
+	TotalFileSize  uint64
 }
 
 func New(config *config.Config) System {
@@ -50,7 +54,7 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
-func (sys *System) UpdateAgent(versionString string) error {
+func (sys *System) UpdateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 
 	// The update is already in progress
 	agentDir := sys.config.CommandLineArguments.AgentDir
@@ -61,7 +65,7 @@ func (sys *System) UpdateAgent(versionString string) error {
 	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-" + versionString
 
 	if !sys.updateLock.TryAcquire(1) {
-		return nil
+		return errdefs.InProgress(errors.New("update already in progress"))
 	}
 
 	defer sys.updateLock.Release(1)
@@ -69,7 +73,7 @@ func (sys *System) UpdateAgent(versionString string) error {
 	log.Debug().Msg("Reagent update Initialized...")
 
 	// download it to /tmp first
-	err := filesystem.DownloadURL(tmpFilePath, agentURL)
+	err := filesystem.DownloadURL(tmpFilePath, agentURL, progressCallback)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
 		return err
@@ -117,7 +121,7 @@ func (system *System) GetLatestVersion() (string, error) {
 	return strings.Join(strings.Fields(strings.TrimSpace(buf.String())), " "), nil
 }
 
-func (system *System) UpdateIfRequired() (UpdateResult, error) {
+func (system *System) UpdateIfRequired(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
 	latestVersion, err := system.GetLatestVersion()
 	if err != nil {
 		return UpdateResult{}, err
@@ -127,8 +131,16 @@ func (system *System) UpdateIfRequired() (UpdateResult, error) {
 	log.Info().Msgf("System: Latest version: %s, Current version: %s", latestVersion, currentVersion)
 	if latestVersion != currentVersion {
 		log.Info().Msgf("System: Agent not up to date, downloading: v%s", latestVersion)
-		err := system.UpdateAgent("v" + latestVersion)
+		err = system.UpdateAgent("v"+latestVersion, progressCallback)
 		if err != nil {
+			if errdefs.IsInProgress(err) {
+				return UpdateResult{
+					CurrentVersion: currentVersion,
+					LatestVersion:  latestVersion,
+					DidUpdate:      false,
+					InProgress:     true,
+				}, err
+			}
 			return UpdateResult{}, err
 		}
 	}

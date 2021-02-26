@@ -23,3 +23,4 @@ const GetAgentMetaData Topic = "get_agent_metadata"
 const GetAgentLogs Topic = "get_agent_logs"
 
 const UpdateAgent Topic = "update_agent"
+const AgentProgress Topic = "agent_update_progress"

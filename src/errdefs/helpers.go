@@ -231,3 +231,21 @@ func (e ErrNoActionTransition) Unwrap() error {
 func NoActionTransition() error {
 	return ErrNoActionTransition{errors.New("no action")}
 }
+
+/*-----------*/
+
+type ErrInProgress struct {
+	error
+}
+
+func (e ErrInProgress) Cause() error {
+	return e.error
+}
+
+func (e ErrInProgress) Unwrap() error {
+	return e.error
+}
+
+func InProgress(err error) error {
+	return ErrInProgress{err}
+}
