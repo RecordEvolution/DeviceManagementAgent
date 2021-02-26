@@ -13,6 +13,7 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
+	"reagent/safe"
 	"reagent/store"
 	"strings"
 	"sync"
@@ -39,6 +40,15 @@ type LogManager struct {
 	AppStore   store.AppStore
 	activeLogs map[string]*ActiveLog
 	mapMutex   sync.Mutex
+}
+
+type ErrorChunk struct {
+	Error       string      `json:"error"`
+	ErrorDetail ErrorDetail `json:"errorDetail"`
+}
+
+type ErrorDetail struct {
+	Message string `json:"message"`
 }
 
 func NewLogManager(cont container.Container, msg messenger.Messenger, db persistence.Database, as store.AppStore) LogManager {
@@ -155,7 +165,7 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 
 	// cleanup func, closes the stream + saves the current logs in the database
 	defer func() {
-		go func() {
+		safe.Go(func() {
 			logEntry.StateLock.Lock()
 			logEntry.Active = false
 			logEntry.StateLock.Unlock()
@@ -181,22 +191,20 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			}
 
 			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
-		}()
+		})
 	}()
 
 	logEntry.StateLock.Lock()
 	logEntry.Active = true
 	logEntry.StateLock.Unlock()
+
+	var lastChunk string // if theres an error it will always be the last chunk of the stream
 	for scanner.Scan() {
 		chunk := scanner.Text()
 
 		logEntry.StateLock.Lock()
 		if len(logEntry.logHistory) == historyStorageLimit {
 			logEntry.logHistory = logEntry.logHistory[1:]
-		}
-
-		if strings.Contains(chunk, "cannot validate certificate") {
-			return errors.New("Invalid certificate")
 		}
 
 		logEntry.logHistory = append(logEntry.logHistory, chunk)
@@ -206,6 +214,8 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 		if shouldPublish {
 			lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
 		}
+
+		lastChunk = chunk
 	}
 
 	err := scanner.Err()
@@ -214,6 +224,12 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			return errdefs.DockerStreamCanceled(err)
 		}
 		return err
+	}
+
+	errChunk := &ErrorChunk{}
+	json.Unmarshal([]byte(lastChunk), errChunk)
+	if errChunk.Error != "" {
+		return errors.New(errChunk.Error)
 	}
 
 	return nil
@@ -340,7 +356,7 @@ func (lm *LogManager) getLogHistoryByContainerName(containerName string) ([]stri
 }
 
 func (lm *LogManager) SetupEndpoints() error {
-	_ = lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
+	err := lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
 		subscriptionID := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was created
 
 		activeLog := lm.getLogTaskBySubscriptionID(subscriptionID)
@@ -364,7 +380,7 @@ func (lm *LogManager) SetupEndpoints() error {
 		return nil
 	}, nil)
 
-	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
+	err = lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		_ = r.Arguments[0]                // the id of the client session that used to be listening
 		subscriptionArg := r.Arguments[1] // the id of the subscription that was created
 		subscription, ok := subscriptionArg.(map[string]interface{})
