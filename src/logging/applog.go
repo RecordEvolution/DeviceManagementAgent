@@ -117,22 +117,7 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 	}
 
 	// clear in database
-	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.APP, []string{})
-	if err != nil {
-		return err
-	}
-
-	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.BUILD, []string{})
-	if err != nil {
-		return err
-	}
-
-	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.PULL, []string{})
-	if err != nil {
-		return err
-	}
-
-	err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), common.PUSH, []string{})
+	err = lm.Database.ClearAllLogHistory(appName, appKey, common.Stage(stage))
 	if err != nil {
 		return err
 	}

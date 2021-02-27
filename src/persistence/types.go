@@ -14,6 +14,7 @@ type Database interface {
 	BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error
 	GetAppLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType) ([]string, error)
 	UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType, logs []string) error
+	ClearAllLogHistory(appName string, appKey uint64, stage common.Stage) error
 	GetAppState(appKey uint64, stage common.Stage) (*common.App, error)
 	GetAppStates() ([]*common.App, error)
 	GetRequestedState(aKey uint64, aStage common.Stage) (common.TransitionPayload, error)

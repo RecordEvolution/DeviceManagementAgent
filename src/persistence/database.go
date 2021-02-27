@@ -24,13 +24,16 @@ type AppStateDatabase struct {
 const (
 	driver      = "sqlite3"
 	cacheShared = "cache=shared"
-	busyTimeout = "_busy_timeout=5000"
+	busyTimeout = "_busy_timeout=1000"
+	journalMode = "_journal_mode=WAL"
+	syncOff     = "_synchronous=OFF"
 	maxOpenConn = 1
 )
 
 func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 	databaseFileName := config.CommandLineArguments.DatabaseFileName
-	connectionString := fmt.Sprintf("./%s?%s&%s", databaseFileName, cacheShared, busyTimeout)
+	connectionString := fmt.Sprintf("./%s?%s&%s&%s&%s", databaseFileName, cacheShared, busyTimeout, journalMode, syncOff)
+	log.Debug().Msgf("Db: Setup database with %s as connection string", connectionString)
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return nil, err
@@ -503,6 +506,40 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 	}
 
 	return nil
+}
+
+func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, stage common.Stage) error {
+	logsBytes, err := json.Marshal([]string{})
+	if err != nil {
+		return err
+	}
+
+	tx, err := ast.db.Begin()
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	for _, logType := range []common.LogType{common.APP, common.BUILD, common.PULL, common.PUSH} {
+		upsertStatement, err := tx.Prepare(QueryUpsertLogHistoryEntry)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		_, err = upsertStatement.Exec(appName, appKey, stage, logType, string(logsBytes))
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType, logs []string) error {
