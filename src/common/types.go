@@ -108,6 +108,7 @@ type TransitionPayload struct {
 	NewReleaseKey        uint64
 	Version              string
 	RequestUpdate        bool
+	CancelTransition     bool
 }
 
 func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,

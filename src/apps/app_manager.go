@@ -39,15 +39,9 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		return nil
 	}
 
-	// If appState is already up to date we should do nothing
-	// transition cancellation will ignore the app lock
-	isBuilding := payload.RequestedState == common.REMOVED && curAppState == common.BUILDING
-	isDownloading := (payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED) && curAppState == common.DOWNLOADING
-	if app.IsCancelable() {
-		if isBuilding || isDownloading {
-			am.StateMachine.CancelTransition(app, payload)
-			return nil
-		}
+	if payload.CancelTransition {
+		am.StateMachine.CancelTransition(app, payload)
+		return nil
 	}
 
 	locked := app.SecureTransition() // if the app is not locked, it will lock the app

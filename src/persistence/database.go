@@ -201,15 +201,18 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 	hasRow := rows.Next()
 	if !hasRow {
 		if err != nil {
+			rows.Close()
 			return &common.App{}, err
 		}
 
+		rows.Close()
 		return nil, nil
 	}
 
 	app := &common.App{}
 	err = rows.Scan(&app.AppName, &app.AppKey, &app.Version, &app.ReleaseKey, &app.Stage, &app.CurrentState, &app.LastUpdated)
 	if err != nil {
+		rows.Close()
 		return &common.App{}, err
 	}
 

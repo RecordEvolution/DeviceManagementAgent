@@ -837,9 +837,8 @@ func (docker *Docker) Ping(ctx context.Context) (Ping, error) {
 
 func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 	docker.streamMapMutex.Lock()
-	defer docker.streamMapMutex.Unlock()
-
 	activeStreamEntry := docker.activeStreams[streamID]
+	docker.streamMapMutex.Unlock()
 
 	log.Debug().Msgf("Active Stream: %+v", activeStreamEntry)
 
@@ -853,8 +852,9 @@ func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 		if err != nil {
 			return err
 		}
+		docker.streamMapMutex.Lock()
 		delete(docker.activeStreams, streamID)
-		log.Debug().Msgf("Closed stream for %s", streamID)
+		docker.streamMapMutex.Unlock()
 	}
 
 	return nil

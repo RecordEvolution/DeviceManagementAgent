@@ -57,6 +57,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	presentVersionKw := kwargs["present_version"]
 	newestVersionKw := kwargs["newest_version"]
 	requestUpdateKw := kwargs["request_update"]
+	cancelTransitionKw := kwargs["cancel_transition"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -70,6 +71,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var presentVersion string
 	var newestVersion string
 	var requestUpdate bool
+	var cancelTransition bool
 	var ok bool
 	var environment map[string]interface{}
 
@@ -187,6 +189,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if cancelTransitionKw != nil {
+		cancelTransition, ok = cancelTransitionKw.(bool)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse cancel_transition")
+		}
+	}
+
 	if environmentKw != nil {
 		environment, ok = environmentKw.(map[string]interface{})
 		if !ok {
@@ -220,6 +229,9 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	payload.PresentVersion = presentVersion
 
 	payload.EnvironmentVariables = environment
+
+	payload.CancelTransition = cancelTransition
+
 	// registryToken is added before we transition state and is not part of the response payload
 	return payload, nil
 }

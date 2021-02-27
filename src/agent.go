@@ -40,9 +40,24 @@ func (agent *Agent) OnConnect() error {
 		log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
 	}
 
+	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
 	err = agent.Messenger.SetupTestament()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	}
+
+	err = agent.LogManager.SetupEndpoints()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
+	}
+
+	err = agent.External.RegisterAll()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
 	}
 
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
@@ -66,24 +81,9 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
-	err = agent.LogManager.SetupEndpoints()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
-	}
-
 	err = agent.LogManager.ReviveDeadLogs()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
-	}
-
-	err = agent.External.RegisterAll()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
-	}
-
-	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	agent.ListenForDisconnect()

@@ -107,7 +107,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 }
 
 func EstablishSocketConnection(config *config.Config) chan *client.Client {
-	resChan := make(chan *client.Client, 1)
+	resChan := make(chan *client.Client)
 
 	safe.Go(func() {
 		for {
@@ -132,11 +132,15 @@ func EstablishSocketConnection(config *config.Config) chan *client.Client {
 				duration = time.Since(requestStart)
 				log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
 				resChan <- client
-				break
-			} else {
-				duration = time.Since(requestStart)
-				log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
+				close(resChan)
+				return
 			}
+
+			duration = time.Since(requestStart)
+			if client != nil {
+				client.Close()
+			}
+			log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
 
 		}
 	})
