@@ -116,13 +116,33 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	return nil
 }
 
+func IsOnlineOnlyTransition(payload common.TransitionPayload) bool {
+	notInstalled := payload.CurrentState == common.REMOVED || payload.CurrentState == common.UNINSTALLED
+	removalRequest := payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED
+
+	// if the app is not on the device and we do any transition that would require internet we return true
+	if notInstalled && payload.Stage == common.PROD && !removalRequest {
+		return true
+	}
+
+	// cannot publish apps while offline
+	if payload.RequestedState == common.PUBLISHED {
+		return true
+	}
+
+	return false
+}
+
 func (am *AppManager) EnsureLocalRequestedStates() error {
 	rStates, err := am.AppStore.GetRequestedStates()
 	if err != nil {
 		return err
 	}
+
 	for _, payload := range rStates {
-		go am.RequestAppState(payload)
+		if !IsOnlineOnlyTransition(payload) {
+			go am.RequestAppState(payload)
+		}
 	}
 
 	return nil
