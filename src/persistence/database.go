@@ -24,7 +24,7 @@ type AppStateDatabase struct {
 const (
 	driver      = "sqlite3"
 	cacheShared = "cache=shared"
-	busyTimeout = "_busy_timeout=1000"
+	busyTimeout = "_busy_timeout=2500"
 	journalMode = "_journal_mode=WAL"
 	syncOff     = "_synchronous=OFF"
 	maxOpenConn = 1
