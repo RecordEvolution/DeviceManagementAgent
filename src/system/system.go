@@ -73,7 +73,7 @@ func (sys *System) UpdateAgent(versionString string, progressCallback func(incre
 	log.Debug().Msg("Reagent update Initialized...")
 
 	// download it to /tmp first
-	err := filesystem.DownloadURL(tmpFilePath, agentURL, progressCallback)
+	err := filesystem.DownloadURL(tmpFilePath, agentURL, progressCallback, time.Second*3)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
 		return err

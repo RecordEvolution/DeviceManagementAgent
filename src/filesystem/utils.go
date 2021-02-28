@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func FileExists(filename string) (bool, error) {
@@ -60,7 +61,7 @@ func printCallBack(increment uint64, totalBytes uint64) {
 }
 
 // Downloads any data from a given URL to a given filePath. Progress is logged to CLI
-func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
+func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64), timeout time.Duration) error {
 	// open the required file
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -69,7 +70,12 @@ func DownloadURL(filePath string, url string, callback func(increment uint64, cu
 
 	defer out.Close()
 
-	resp, err := http.Get(url)
+	client := http.Client{}
+	if timeout != 0 {
+		client.Timeout = timeout
+	}
+
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
