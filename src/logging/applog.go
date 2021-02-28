@@ -298,7 +298,7 @@ func readLines(reader io.Reader) ([]string, error) {
 
 func (lm *LogManager) getContainerLogHistory(activeLog *ActiveLog) ([]string, error) {
 	ctx := context.Background()
-	options := common.Dict{"stdout": true, "stderr": true, "tail": "200"}
+	options := common.Dict{"stdout": true, "stderr": true, "tail": "100"}
 	reader, err := lm.Container.Logs(ctx, activeLog.ContainerName, options)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {

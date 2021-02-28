@@ -9,11 +9,13 @@ import (
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	currentVersion := ex.System.GetVersion()
+	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
 	dict := common.Dict{
-		"oos":     runtime.GOOS,
-		"arch":    runtime.GOARCH,
-		"version": currentVersion,
+		"oos":          runtime.GOOS,
+		"arch":         runtime.GOARCH,
+		"version":      currentVersion,
+		"serialNumber": serialNumber,
 	}
 
 	latestVersion, err := ex.System.GetLatestVersion()
