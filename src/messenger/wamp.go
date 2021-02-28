@@ -100,6 +100,11 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 		session.client = client
 	}
 
+	err := session.SetupTestament()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	}
+
 	return session, nil
 }
 
@@ -109,6 +114,11 @@ func (wampSession *WampSession) Reconnect() {
 	select {
 	case client := <-clientChannel:
 		wampSession.client = client
+	}
+
+	err := wampSession.SetupTestament()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
 	}
 }
 

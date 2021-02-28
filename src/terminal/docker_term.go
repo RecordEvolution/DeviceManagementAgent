@@ -266,9 +266,11 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 	// closes both reader and writer goroutine
 	session.Close()
 
-	// is ok if this errors
-	payload := []interface{}{[]byte("TERMINAL_EOF")}
-	_, _ = tm.Messenger.Call(context.Background(), topics.Topic(session.DataTopic), payload, nil, nil, nil)
+	safe.Go(func() {
+		// is ok if this errors
+		payload := []interface{}{[]byte("TERMINAL_EOF")}
+		_, _ = tm.Messenger.Call(context.Background(), topics.Topic(session.DataTopic), payload, nil, nil, nil)
+	})
 
 	_, ok := tm.Messenger.RegistrationID(topics.Topic(session.ResizeTopic))
 	if ok {
