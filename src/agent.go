@@ -200,7 +200,8 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 			} else {
 				log.Debug().Msg("Heartbeat: updated connection status, will retry in 5 seconds...")
 			}
-			time.Sleep(5)
+
+			time.Sleep(time.Second * 2)
 		}
 	})
 
