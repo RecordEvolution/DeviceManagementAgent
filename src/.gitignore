@@ -1,3 +1,5 @@
 reagent.db
+reagent.db-shm
+reagent.db-wal
 *.reswarm
 *.tar
