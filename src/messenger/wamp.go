@@ -3,6 +3,7 @@ package messenger
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"time"
 
@@ -49,6 +50,8 @@ func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
 	return wrapper
 }
 
+var ErrNotConnected = errors.New("not connected")
+
 func createConnectConfig(config *config.Config) (*client.Config, error) {
 	reswarmConfig := config.ReswarmConfig
 
@@ -66,7 +69,7 @@ func createConnectConfig(config *config.Config) (*client.Config, error) {
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
 		Debug:           config.CommandLineArguments.DebugMessaging,
-		ResponseTimeout: 4 * time.Second,
+		ResponseTimeout: 3 * time.Second,
 		Logger:          wrapZeroLogger(log.Logger),
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
@@ -149,6 +152,9 @@ func EstablishSocketConnection(config *config.Config) chan *client.Client {
 }
 
 func (wampSession *WampSession) Connected() bool {
+	if wampSession.client == nil {
+		return false
+	}
 	return wampSession.client.Connected()
 }
 func (wampSession *WampSession) Done() <-chan struct{} {
@@ -168,6 +174,10 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 		if err != nil {
 			log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
 		}
+	}
+
+	if !wampSession.Connected() {
+		return ErrNotConnected
 	}
 
 	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
@@ -208,6 +218,10 @@ func (wampSession *WampSession) Call(
 		}
 	}
 
+	if !wampSession.Connected() {
+		return Result{}, ErrNotConnected
+	}
+
 	result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
 	if err != nil {
 		return Result{}, err
@@ -224,6 +238,10 @@ func (wampSession *WampSession) Call(
 }
 
 func (wampSession *WampSession) GetSessionID() uint64 {
+	if !wampSession.Connected() {
+		return 0
+	}
+
 	return uint64(wampSession.client.ID())
 }
 
@@ -265,10 +283,18 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 }
 
 func (wampSession *WampSession) Unregister(topic topics.Topic) error {
+	if !wampSession.Connected() {
+		return ErrNotConnected
+	}
+
 	return wampSession.client.Unregister(string(topic))
 }
 
 func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
+	if !wampSession.Connected() {
+		return ErrNotConnected
+	}
+
 	return wampSession.client.Unsubscribe(string(topic))
 }
 
@@ -292,6 +318,11 @@ func (wampSession *WampSession) SetupTestament() error {
 		},
 		common.Dict{},
 	}
+
+	if !wampSession.Connected() {
+		return ErrNotConnected
+	}
+
 	_, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
 	if err != nil {
 		return err
@@ -304,7 +335,6 @@ func (wampSession *WampSession) Close() {
 	if wampSession.client != nil {
 		wampSession.client.Close() // only possible error is if it's already closed
 	}
-	wampSession.client = nil
 }
 
 func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) {
