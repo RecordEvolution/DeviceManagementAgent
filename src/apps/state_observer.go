@@ -141,18 +141,12 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 						correctedStage = common.PRESENT
 					}
 				}
-
-				curAppState := app.CurrentState
 				app.StateLock.Unlock()
 
-				if correctedStage != curAppState {
-					log.Debug().Msgf("State Correcter: irregular state was found for app %s (%s) that has no container on the device", rState.AppName, rState.Stage)
-					log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedStage)
-
-					err = so.Notify(app, correctedStage)
-					if err != nil {
-						return err
-					}
+				// notify the remote database of any changed states due to correction
+				err = so.Notify(app, correctedStage)
+				if err != nil {
+					return err
 				}
 
 				// should be all good iterate over next app

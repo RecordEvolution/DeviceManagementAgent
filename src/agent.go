@@ -40,11 +40,6 @@ func (agent *Agent) OnConnect() error {
 		log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
 	}
 
-	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	}
-
 	err = agent.Messenger.SetupTestament()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
@@ -84,6 +79,11 @@ func (agent *Agent) OnConnect() error {
 	err = agent.LogManager.ReviveDeadLogs()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
+	}
+
+	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	agent.ListenForDisconnect()

@@ -122,8 +122,8 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	return nil
 }
 
-func IsOnlineOnlyTransition(payload common.TransitionPayload) bool {
-	notInstalled := payload.CurrentState == common.REMOVED || payload.CurrentState == common.UNINSTALLED
+func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayload) bool {
+	notInstalled := app.CurrentState == common.REMOVED || app.CurrentState == common.UNINSTALLED
 	removalRequest := payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED
 
 	// if the app is not on the device and we do any transition that would require internet we return true
@@ -145,12 +145,22 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 		return err
 	}
 
-	for _, payload := range rStates {
-		if !IsOnlineOnlyTransition(payload) {
-			safe.Go(func() {
-				am.RequestAppState(payload)
-			})
+	for idx := range rStates {
+		payload := rStates[idx]
+
+		app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+		if err != nil {
+			return err
 		}
+
+		safe.Go(func() {
+			if !IsInvalidOfflineTransition(app, payload) && payload.RequestedState != app.CurrentState {
+				err := am.RequestAppState(payload)
+				if err != nil {
+					log.Error().Err(err)
+				}
+			}
+		})
 	}
 
 	return nil

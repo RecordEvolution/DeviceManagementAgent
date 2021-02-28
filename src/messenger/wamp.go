@@ -112,6 +112,14 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 func EstablishSocketConnection(config *config.Config) chan *client.Client {
 	resChan := make(chan *client.Client)
 
+	// never returns a established connection
+	if config.CommandLineArguments.Offline {
+		log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
+		return resChan
+	}
+
+	log.Debug().Msg("Attempting to establish a socket connection...")
+
 	safe.Go(func() {
 		for {
 			connectionConfig, err := createConnectConfig(config)

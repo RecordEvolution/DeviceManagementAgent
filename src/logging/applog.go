@@ -561,6 +561,14 @@ func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, err
 		return "", err
 	}
 
+	if result.Arguments == nil {
+		return "", nil
+	}
+
+	if len(result.Arguments) == 0 {
+		return "", nil
+	}
+
 	id := result.Arguments[0]
 	if id != nil {
 		return fmt.Sprint(id), nil
