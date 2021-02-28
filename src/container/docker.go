@@ -807,10 +807,6 @@ func (docker *Docker) WaitForDaemon(ctx context.Context) error {
 	for {
 		_, err := docker.Ping(ctx)
 		if err != nil {
-			if !strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
-				return err
-			}
-
 			log.Debug().Msg("Ping to Docker Daemon failed, retrying...")
 			time.Sleep(time.Millisecond * 100)
 		} else {

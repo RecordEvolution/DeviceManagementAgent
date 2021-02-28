@@ -74,3 +74,7 @@ func (om OfflineMessenger) Reconnect() {
 func (om OfflineMessenger) Close() {
 
 }
+
+func (om OfflineMessenger) UpdateRemoteDeviceStatus(status DeviceStatus) error {
+	return nil
+}

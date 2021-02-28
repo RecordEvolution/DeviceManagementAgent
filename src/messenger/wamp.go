@@ -29,6 +29,13 @@ type wampLogWrapper struct {
 	logger *zerolog.Logger
 }
 
+type DeviceStatus string
+
+const (
+	CONNECTED    DeviceStatus = "CONNECTED"
+	DISCONNECTED DeviceStatus = "DISCONNECTED"
+)
+
 func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
 	return wampLogWrapper{logger: zeroLogger}
 }
@@ -349,4 +356,23 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 	return func(c *wamp.Challenge) (string, wamp.Dict) {
 		return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
 	}
+}
+
+func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
+	config := wampSession.GetConfig()
+	ctx := context.Background()
+
+	payload := common.Dict{
+		"swarm_key":       config.ReswarmConfig.SwarmKey,
+		"device_key":      config.ReswarmConfig.DeviceKey,
+		"status":          string(status),
+		"wamp_session_id": wampSession.GetSessionID(),
+	}
+
+	_, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

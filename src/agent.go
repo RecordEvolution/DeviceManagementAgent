@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"reagent/api"
 	"reagent/apps"
+	"reagent/common"
 	"reagent/config"
 	"reagent/container"
 	"reagent/logging"
 	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/persistence"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -40,10 +44,10 @@ func (agent *Agent) OnConnect() error {
 		log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
 	}
 
-	err = agent.Messenger.SetupTestament()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
-	}
+	// err = agent.Messenger.SetupTestament()
+	// if err != nil {
+	// 	log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	// }
 
 	err = agent.LogManager.SetupEndpoints()
 	if err != nil {
@@ -81,9 +85,14 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
 	}
 
-	err = system.UpdateRemoteDeviceStatus(agent.Messenger, system.CONNECTED)
+	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
+	err = agent.SetupConnectionStatusHeartbeat()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed setup connection status heartbeat")
 	}
 
 	agent.ListenForDisconnect()
@@ -164,6 +173,36 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 }
 
+func (agent *Agent) SetupConnectionStatusHeartbeat() error {
+	config := agent.Config
+	ctx := context.Background()
+
+	safe.Go(func() {
+		for {
+			var status messenger.DeviceStatus
+
+			if agent.Messenger.Connected() {
+				status = messenger.CONNECTED
+			} else {
+				status = messenger.DISCONNECTED
+			}
+
+			payload := common.Dict{
+				"swarm_key":       config.ReswarmConfig.SwarmKey,
+				"device_key":      config.ReswarmConfig.DeviceKey,
+				"status":          status,
+				"wamp_session_id": agent.Messenger.GetSessionID(),
+			}
+
+			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+
+			time.Sleep(5)
+		}
+	})
+
+	return nil
+}
+
 func (agent *Agent) ListenForDisconnect() {
 	safe.Go(func() {
 		doneSignal := agent.Messenger.Done()
@@ -176,7 +215,7 @@ func (agent *Agent) ListenForDisconnect() {
 				agent.Messenger.Reconnect() // will block until a session is established
 
 				reconnectSignal <- struct{}{}
-				break
+				return
 			}
 		})
 

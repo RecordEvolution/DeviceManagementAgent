@@ -337,6 +337,24 @@ func (am *AppManager) EvaluateRequestedStates() error {
 		return err
 	}
 
+	/*
+			apps, err := am.AppStore.GetAllApps()
+		if err != nil {
+			return err
+		}
+
+		for _, app := range apps {
+			locked := app.SecureTransition()
+			if !locked {
+				app.UnlockTransition() // we don't want to actually hold the transition, just check if it's transitioning
+				continue
+			}
+
+			// update the remote with the currently transitioning
+			am.AppStore.UpdateRemoteAppState(app, app.CurrentState)
+		}
+	*/
+
 	for i := range payloads {
 		payload := payloads[i]
 		safe.Go(func() {
