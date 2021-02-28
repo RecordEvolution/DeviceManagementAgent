@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -61,7 +62,7 @@ func printCallBack(increment uint64, totalBytes uint64) {
 }
 
 // Downloads any data from a given URL to a given filePath. Progress is logged to CLI
-func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64), timeout time.Duration) error {
+func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	// open the required file
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -70,9 +71,16 @@ func DownloadURL(filePath string, url string, callback func(increment uint64, cu
 
 	defer out.Close()
 
-	client := http.Client{}
-	if timeout != 0 {
-		client.Timeout = timeout
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 10 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
+		Timeout: 120 * time.Second, // timeout for the entire request, i.e. the download itself
 	}
 
 	resp, err := client.Get(url)
