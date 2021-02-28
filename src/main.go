@@ -2,22 +2,23 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"reagent/config"
 	"reagent/filesystem"
 	"reagent/logging"
 	"runtime"
+	"runtime/debug"
 
 	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	defer func() {
-		if err := recover(); err != nil {
-			log.Fatal().Str("panic", fmt.Sprint(err)).Msgf("recovered from a panic, will exit...")
-			os.Exit(1)
+		err := recover()
+
+		if err != nil {
+			log.Fatal().Msgf("Panic: %+v \n Stack Trace: %s", err, debug.Stack())
 		}
 	}()
 

@@ -142,7 +142,9 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 
 	for _, payload := range rStates {
 		if !IsOnlineOnlyTransition(payload) {
-			go am.RequestAppState(payload)
+			safe.Go(func() {
+				am.RequestAppState(payload)
+			})
 		}
 	}
 
@@ -322,7 +324,9 @@ func (am *AppManager) EvaluateRequestedStates() error {
 
 	for i := range payloads {
 		payload := payloads[i]
-		go am.RequestAppState(payload)
+		safe.Go(func() {
+			am.RequestAppState(payload)
+		})
 	}
 
 	return nil

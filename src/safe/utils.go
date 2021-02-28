@@ -1,18 +1,21 @@
 package safe
 
 import (
-	"fmt"
-	"os"
+	"runtime/debug"
 
 	"github.com/rs/zerolog/log"
 )
 
 func Go(f func()) {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Fatal().Str("panic", fmt.Sprint(err)).Msgf("recovered from a panic, will exit...")
-			os.Exit(1)
-		}
+	go func() {
+		defer func() {
+			err := recover()
+
+			if err != nil {
+				log.Fatal().Msgf("Panic: %+v \n Stack Trace: %s", err, debug.Stack())
+			}
+		}()
+
+		f()
 	}()
-	go f()
 }
