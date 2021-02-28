@@ -85,8 +85,13 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			return nil
 		}
 
-		if err == nil {
-			log.Info().Msgf("App Manager: Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
+		isCanceled := errdefs.IsDockerStreamCanceled(err)
+		if err == nil || isCanceled {
+			if !isCanceled {
+				log.Info().Msgf("App Manager: Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
+			} else {
+				log.Info().Msgf("App Manager: Successfully canceled transition for App (%s, %s)", app.AppName, app.Stage)
+			}
 
 			// Verify if app has the latest requested state
 			// TODO: properly handle it when verifying fails

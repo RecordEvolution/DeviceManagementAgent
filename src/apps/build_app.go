@@ -86,8 +86,8 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			if writeErr != nil {
 				return writeErr
 			}
-			// a canceled build will transition to 'REMOVED' so no need to return the error
-			return nil
+			// this error will not cause a failed state and is handled upstream
+			return streamErr
 		}
 
 		return streamErr

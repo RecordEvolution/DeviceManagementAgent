@@ -116,11 +116,10 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 		return err
 	}
 
-	// clear in database
-	err = lm.Database.ClearAllLogHistory(appName, appKey, common.Stage(stage))
-	if err != nil {
-		return err
-	}
+	safe.Go(func() {
+		// clear in database
+		lm.Database.ClearAllLogHistory(appName, appKey, common.Stage(stage))
+	})
 
 	return nil
 }

@@ -62,8 +62,8 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 			if writeErr != nil {
 				return writeErr
 			}
-			// a canceled pull will transition to 'REMOVED' so no need to return the error
-			return nil
+			// this error will not cause a failed state and is handled upstream
+			return streamErr
 		}
 
 		return streamErr

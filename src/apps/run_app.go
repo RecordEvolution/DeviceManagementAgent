@@ -37,7 +37,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 			}
 
 			pullErr := sm.pullApp(payload, app)
-			if err != nil {
+			if pullErr != nil {
 				return pullErr
 			}
 		}
