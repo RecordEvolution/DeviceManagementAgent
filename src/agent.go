@@ -44,10 +44,10 @@ func (agent *Agent) OnConnect() error {
 		log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
 	}
 
-	// err = agent.Messenger.SetupTestament()
-	// if err != nil {
-	// 	log.Fatal().Stack().Err(err).Msg("failed to setup testament")
-	// }
+	err = agent.Messenger.SetupTestament()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	}
 
 	err = agent.LogManager.SetupEndpoints()
 	if err != nil {
@@ -194,8 +194,12 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 				"wamp_session_id": agent.Messenger.GetSessionID(),
 			}
 
-			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
-
+			_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+			if err != nil {
+				log.Error().Err(err).Msgf("Heartbeat: Failed to send connection heartbeat")
+			} else {
+				log.Debug().Msg("Heartbeat: updated connection status, will retry in 5 seconds...")
+			}
 			time.Sleep(5)
 		}
 	})

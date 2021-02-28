@@ -2,13 +2,14 @@ package persistence
 
 import (
 	"reagent/common"
+	"reagent/messenger"
 	"reagent/system"
 )
 
 type Database interface {
 	Init() error // responsible for creating tables etc.
 	UpsertAppState(app *common.App, newState common.AppState) (common.Timestamp, error)
-	UpdateDeviceStatus(system.DeviceStatus) error
+	UpdateDeviceStatus(messenger.DeviceStatus) error
 	UpdateNetworkInterface(system.NetworkInterface) error
 	UpsertRequestedStateChange(payload common.TransitionPayload) error
 	BulkUpsertRequestedStateChanges(payloads []common.TransitionPayload) error

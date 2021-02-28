@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"reagent/common"
 	"reagent/config"
+	"reagent/messenger"
 	"reagent/system"
 	"strings"
 	"time"
@@ -309,7 +310,7 @@ func (ast *AppStateDatabase) insertAppState(app *common.App) (common.Timestamp, 
 	return common.Timestamp(timestamp), nil
 }
 
-func (ast *AppStateDatabase) UpdateDeviceStatus(status system.DeviceStatus) error {
+func (ast *AppStateDatabase) UpdateDeviceStatus(status messenger.DeviceStatus) error {
 	return ast.updateDeviceState(status, "")
 }
 
@@ -605,7 +606,7 @@ func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, sta
 	return logsArray, nil
 }
 
-func (ast *AppStateDatabase) updateDeviceState(newStatus system.DeviceStatus, newInt system.NetworkInterface) error {
+func (ast *AppStateDatabase) updateDeviceState(newStatus messenger.DeviceStatus, newInt system.NetworkInterface) error {
 	selectStatement, err := ast.db.Prepare(QuerySelectAllDeviceState)
 	if err != nil {
 		return err

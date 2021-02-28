@@ -76,7 +76,7 @@ func createConnectConfig(config *config.Config) (*client.Config, error) {
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
 		Debug:           config.CommandLineArguments.DebugMessaging,
-		ResponseTimeout: 3 * time.Second,
+		ResponseTimeout: 5 * time.Second,
 		Logger:          wrapZeroLogger(log.Logger),
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
