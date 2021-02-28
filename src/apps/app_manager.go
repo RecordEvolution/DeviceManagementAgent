@@ -40,6 +40,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	if payload.CancelTransition {
+		log.Debug().Msgf("App Manager: Cancel request was received for %s (%s) (currently: %s)", app.AppName, app.Stage, app.CurrentState)
 		am.StateMachine.CancelTransition(app, payload)
 		return nil
 	}
