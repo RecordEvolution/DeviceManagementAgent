@@ -57,6 +57,11 @@ func main() {
 	}
 	log.Info().Msg("Got reply from Docker Daemon, continuing")
 
+	err = agent.SetupConnectionStatusHeartbeat()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed setup connection status heartbeat")
+	}
+
 	err = agent.OnConnect()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
