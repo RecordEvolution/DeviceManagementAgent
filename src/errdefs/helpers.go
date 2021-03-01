@@ -2,6 +2,10 @@ package errdefs
 
 import "errors"
 
+var ErrNotYetImplemented = errors.New("not yet implemented")
+
+/*------------*/
+
 type ErrBuildFailed struct{ error }
 
 func (e ErrBuildFailed) Cause() error {

@@ -21,8 +21,9 @@ import (
 )
 
 type WampSession struct {
-	client *client.Client
-	config *config.Config
+	client       *client.Client
+	agentConfig  *config.Config
+	socketConfig *SocketConfig
 }
 
 type wampLogWrapper struct {
@@ -35,6 +36,8 @@ const (
 	CONNECTED    DeviceStatus = "CONNECTED"
 	DISCONNECTED DeviceStatus = "DISCONNECTED"
 )
+
+var ErrNotConnected = errors.New("not connected")
 
 func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
 	return wampLogWrapper{logger: zeroLogger}
@@ -57,14 +60,23 @@ func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
 	return wrapper
 }
 
-var ErrNotConnected = errors.New("not connected")
+type SocketConfig struct {
+	PingPongTimeout time.Duration
+	ResponseTimeout time.Duration
+	SetupTestament  bool
+}
 
-func createConnectConfig(config *config.Config) (*client.Config, error) {
+func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
 	reswarmConfig := config.ReswarmConfig
 
 	tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
 	if err != nil {
 		return nil, err
+	}
+
+	wsConfig := transport.WebsocketConfig{}
+	if socketConfig.PingPongTimeout != 0 {
+		wsConfig.KeepAlive = socketConfig.PingPongTimeout
 	}
 
 	cfg := client.Config{
@@ -75,34 +87,37 @@ func createConnectConfig(config *config.Config) (*client.Config, error) {
 		AuthHandlers: map[string]client.AuthFunc{
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
-		Debug:           config.CommandLineArguments.DebugMessaging,
-		ResponseTimeout: 5 * time.Second,
-		Logger:          wrapZeroLogger(log.Logger),
+		Debug:  config.CommandLineArguments.DebugMessaging,
+		Logger: wrapZeroLogger(log.Logger),
 		TlsCfg: &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
 			InsecureSkipVerify: true,
 		},
-		WsCfg: transport.WebsocketConfig{
-			KeepAlive: time.Second * 4,
-		},
+		WsCfg: wsConfig,
+	}
+
+	if socketConfig.ResponseTimeout != 0 {
+		cfg.ResponseTimeout = socketConfig.ResponseTimeout
 	}
 
 	return &cfg, nil
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config *config.Config) (*WampSession, error) {
-	session := &WampSession{config: config}
-	clientChannel := EstablishSocketConnection(config)
+func NewWamp(config *config.Config, socketConfig *SocketConfig) (*WampSession, error) {
+	session := &WampSession{agentConfig: config}
+	clientChannel := EstablishSocketConnection(config, socketConfig)
 
 	select {
 	case client := <-clientChannel:
 		session.client = client
 	}
 
-	err := session.SetupTestament()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	if session.socketConfig.SetupTestament {
+		err := session.SetupTestament()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return session, nil
@@ -110,15 +125,17 @@ func NewWamp(config *config.Config) (*WampSession, error) {
 
 func (wampSession *WampSession) Reconnect() {
 	wampSession.Close()
-	clientChannel := EstablishSocketConnection(wampSession.config)
+	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig)
 	select {
 	case client := <-clientChannel:
 		wampSession.client = client
 	}
 
-	err := wampSession.SetupTestament()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+	if wampSession.socketConfig.SetupTestament {
+		err := wampSession.SetupTestament()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+		}
 	}
 }
 
@@ -126,11 +143,11 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
-func EstablishSocketConnection(config *config.Config) chan *client.Client {
+func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketConfig) chan *client.Client {
 	resChan := make(chan *client.Client)
 
 	// never returns a established connection
-	if config.CommandLineArguments.Offline {
+	if agentConfig.CommandLineArguments.Offline {
 		log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
 		return resChan
 	}
@@ -139,11 +156,11 @@ func EstablishSocketConnection(config *config.Config) chan *client.Client {
 
 	safe.Go(func() {
 		for {
-			connectionConfig, err := createConnectConfig(config)
+			connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
 			requestStart := time.Now() // time request
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*1250)
-			client, err := client.ConnectNet(ctx, config.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+			client, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 
 			var duration time.Duration
 
@@ -209,7 +226,7 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 }
 
 func (wampSession *WampSession) GetConfig() *config.Config {
-	return wampSession.config
+	return wampSession.agentConfig
 }
 
 func (wampSession *WampSession) SubscriptionID(topic topics.Topic) (id uint64, ok bool) {
@@ -370,7 +387,8 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 
 func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 	config := wampSession.GetConfig()
-	ctx := context.Background()
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancelFunc()
 
 	payload := common.Dict{
 		"swarm_key":       config.ReswarmConfig.SwarmKey,

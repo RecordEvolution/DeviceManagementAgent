@@ -22,6 +22,7 @@ import (
 type External struct {
 	Container       container.Container
 	Messenger       messenger.Messenger
+	LogMessenger    messenger.Messenger
 	Database        persistence.Database
 	System          *system.System
 	AppManager      *apps.AppManager

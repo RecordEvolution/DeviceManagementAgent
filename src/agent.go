@@ -23,6 +23,7 @@ import (
 type Agent struct {
 	Container       container.Container
 	Messenger       messenger.Messenger
+	LogMessenger    messenger.Messenger
 	Database        persistence.Database
 	System          *system.System
 	Config          *config.Config
@@ -127,21 +128,32 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		log.Fatal().Stack().Err(err).Msg("failed to ensure local app states")
 	}
 
-	// try to establish a wamp connection
-	wamp, err := messenger.NewWamp(generalConfig)
+	// try to establish the main session
+	mainSocketConfig := messenger.SocketConfig{
+		PingPongTimeout: 5,
+		ResponseTimeout: 5,
+		SetupTestament:  true,
+	}
+
+	mainSession, err := messenger.NewWamp(generalConfig, &mainSocketConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
 
+	// try to establish the log session
+	logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})
+
 	// established a connection, replace the dummy messenger
-	appStore.SetMessenger(wamp)
-	logManager.SetMessenger(wamp)
-	terminalManager.SetMessenger(wamp)
+	appStore.SetMessenger(mainSession)
+	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
+
+	logManager.SetMessenger(logSession)
 
 	external := api.External{
 		Container:       container,
-		Messenger:       wamp,
+		Messenger:       mainSession,
+		LogMessenger:    logSession,
 		Database:        database,
 		System:          &systemAPI,
 		AppManager:      &appManager,
@@ -160,7 +172,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,
 		Container:       container,
-		Messenger:       wamp,
+		Messenger:       mainSession,
+		LogMessenger:    logSession,
 		Database:        database,
 	}
 }
@@ -168,7 +181,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 	safe.Go(func() {
 		for {
-			if !agent.Messenger.Connected() {
+			if !agent.Connected() {
 				continue
 			}
 
@@ -180,7 +193,7 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 				"wamp_session_id": agent.Messenger.GetSessionID(),
 			}
 
-			ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancelFunc := context.WithTimeout(context.Background(), 3*time.Second)
 			_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
 			if err != nil {
 				log.Error().Err(err).Msgf("Heartbeat: Failed to send connection heartbeat")
@@ -197,6 +210,17 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 	return nil
 }
 
+// Reconnect reconnects all websocket sessions that are used in use by the agent
+func (agent *Agent) Reconnect() {
+	agent.Messenger.Reconnect()
+	agent.LogMessenger.Reconnect()
+}
+
+// Connected returns whether or not all sessions are connected
+func (agent *Agent) Connected() bool {
+	return agent.Messenger.Connected() && agent.LogMessenger.Connected()
+}
+
 func (agent *Agent) ListenForDisconnect() {
 	reconnectSignal := make(chan struct{})
 	reconnectedSignal := make(chan struct{})
@@ -207,8 +231,7 @@ func (agent *Agent) ListenForDisconnect() {
 			select {
 			case <-agent.Messenger.Done():
 				log.Debug().Msg("Reconnect: Received done signal from web socket, attempting to create a new session")
-				agent.Messenger.Reconnect() // will block until a session is established
-
+				agent.Reconnect()
 				reconnectSignal <- struct{}{}
 				close(reconnectSignal)
 
@@ -225,7 +248,7 @@ func (agent *Agent) ListenForDisconnect() {
 		case <-reconnectSignal:
 			for {
 				// did we reconnect successfully? new internal client should be set now
-				if agent.Messenger.Connected() {
+				if agent.Connected() {
 					log.Debug().Msg("Reconnect: was able to reconnect, running setup again")
 
 					// rerun setup
@@ -241,7 +264,7 @@ func (agent *Agent) ListenForDisconnect() {
 				}
 
 				log.Debug().Msg("Reconnect: it appears the socket disconnected right after reconnecting, retrying...")
-				agent.Messenger.Reconnect()
+				agent.Reconnect()
 
 				time.Sleep(time.Second * 1)
 			}
