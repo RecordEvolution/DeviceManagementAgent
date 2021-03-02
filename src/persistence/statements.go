@@ -20,7 +20,8 @@ const QueryInsertAppStateEntry = `INSERT INTO AppStates(app_name, app_key, versi
 const QueryInsertAppStateHistoryEntry = `INSERT INTO AppStateHistory(app_name, app_key, version, release_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`
 const QueryInsertDeviceStateHistoryEntry = `INSERT INTO DeviceStateHistory(interface_type, device_status, timestamp) VALUES (?, ?, ?)`
 
-const QueryUpsertLogHistoryEntry = `INSERT INTO LogHistory(app_name, app_key, stage, log) VALUES (?, ?, ?, ?) ON conflict(app_name, app_key, stage) do update set log = excluded.log`
+const QueryUpsertLogHistoryEntry = `INSERT INTO LogHistory(app_name, app_key, stage, log_type, log) VALUES (?, ?, ?, ?, ?) ON conflict(app_name, app_key, stage, log_type) do update set log = excluded.log`
+const QueryUpdateLogHistoryEntries = `UPDATE LogHistory SET log = ? WHERE app_name = ? AND app_key = ? AND stage = ?`
 
 const QueryUpsertRequestedStateEntry = `INSERT INTO RequestedAppStates(app_name, app_key, stage, version, present_version, newest_version, current_state, manually_requested_state, requestor_account_key, release_key, new_release_key, request_update, environment_variables, timestamp)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(app_name, app_key, stage) do update set

@@ -312,6 +312,7 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, er
 	// not found in memory, lets check database
 	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage)
 	if err != nil {
+		log.Error().Err(err)
 		if strings.Contains(err.Error(), "No logs found") {
 			return []string{}, nil
 		}

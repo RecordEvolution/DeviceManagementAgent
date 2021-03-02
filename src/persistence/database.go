@@ -515,11 +515,36 @@ func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, s
 		return err
 	}
 
+	updateStatement, err := ast.db.Prepare(QueryUpdateLogHistoryEntries)
+	if err != nil {
+		return err
+	}
+
+	defer updateStatement.Close()
+
+	_, err = updateStatement.Exec(string(logsBytes), appName, appKey, stage)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logs []string) error {
+
+	fmt.Printf("Upserting logs %v \n", logs)
 	tx, err := ast.db.Begin()
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
+
+	logsBytes, err := json.Marshal(logs)
+	if err != nil {
+		return err
+	}
+
+	logsString := string(logsBytes)
 
 	upsertStatement, err := tx.Prepare(QueryUpsertLogHistoryEntry)
 	if err != nil {
@@ -527,7 +552,20 @@ func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, s
 		return err
 	}
 
-	_, err = upsertStatement.Exec(appName, appKey, stage, string(logsBytes))
+	_, err = upsertStatement.Exec(appName, appKey, stage, "APP", logsString)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// since we don't have a logtype anymore, have to update all logtypes...
+	updateStatement, err := tx.Prepare(QueryUpdateLogHistoryEntries)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	_, err = updateStatement.Exec(logsString, appName, appKey, stage)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -539,27 +577,6 @@ func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, s
 	}
 
 	return tx.Commit()
-}
-
-func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logs []string) error {
-	upsertStatement, err := ast.db.Prepare(QueryUpsertLogHistoryEntry)
-	if err != nil {
-		return err
-	}
-
-	defer upsertStatement.Close()
-
-	logsBytes, err := json.Marshal(logs)
-	if err != nil {
-		return err
-	}
-
-	_, err = upsertStatement.Exec(appName, appKey, stage, string(logsBytes))
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, stage common.Stage) ([]string, error) {
