@@ -90,6 +90,8 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
+	benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
+
 	return err
 }
 

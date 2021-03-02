@@ -30,6 +30,7 @@ func main() {
 	benchmark.PreConnectInit = time.Now()
 	benchmark.OnConnectInit = time.Now()
 	benchmark.SocketConnectionInitFromLaunch = time.Now()
+	benchmark.GreenInit = time.Now()
 
 	cliArgs, err := config.GetCliArguments()
 	if err != nil {
