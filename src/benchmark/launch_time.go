@@ -13,6 +13,7 @@ var SocketConnectionInit time.Time
 var SocketConnectionInitFromLaunch time.Time
 var OnConnectInit time.Time
 var OnConnectInitAfterConnection time.Time
+var GreenInit time.Time
 
 var TimeTillPreConnectInit time.Duration
 var TimeTillSocketConnection time.Duration
@@ -20,6 +21,7 @@ var TimeTillOnConnect time.Duration
 var TimeTillOnConnectAfterConnection time.Duration
 var TimeTillSocketConnectionFromLaunch time.Duration
 var TimeTillAgentInit time.Duration
+var TimeTillGreen time.Duration
 
 func LogResults() {
 	initCompletionTimestamp := fmt.Sprintf("Time until pre connection initialization completion (From agent launch): %s", TimeTillPreConnectInit)
@@ -27,6 +29,8 @@ func LogResults() {
 	connectionCompletionFromLaunchTimestamp := fmt.Sprintf("Time until socket connection established (from connection start): %s", TimeTillSocketConnection)
 	onConnectCompletionTimestamp := fmt.Sprintf("Time until Onconnect handler finished (from agent launch): %s", TimeTillOnConnect)
 	onConnectAfterSocketCompletionTimestamp := fmt.Sprintf("Time until Onconnect handler finished (From socket connection): %s", TimeTillOnConnectAfterConnection)
+
+	greenTimestamp := fmt.Sprintf("Time until 'green': %s", TimeTillGreen)
 	agentInitTimestamp := fmt.Sprintf("Time agent fully initialised: %s", TimeTillAgentInit)
 
 	// print to stdout
@@ -40,6 +44,7 @@ func LogResults() {
 	fmt.Println(onConnectCompletionTimestamp)
 	fmt.Println(onConnectAfterSocketCompletionTimestamp)
 	fmt.Println()
+	fmt.Println(greenTimestamp)
 	fmt.Println(agentInitTimestamp)
 	fmt.Println("----------------------------------")
 
