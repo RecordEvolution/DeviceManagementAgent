@@ -7,6 +7,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/container"
+	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
 	"reagent/messenger/topics"
@@ -30,6 +31,7 @@ type Agent struct {
 	External        *api.External
 	LogManager      *logging.LogManager
 	TerminalManager *terminal.TerminalManager
+	Filesystem      *filesystem.Filesystem
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
 	StateMachine    *apps.StateMachine
@@ -86,10 +88,6 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
-	safe.Go(func() {
-		agent.ListenForDisconnect()
-	})
-
 	return err
 }
 
@@ -116,6 +114,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
+	filesystem := filesystem.New()
 
 	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
@@ -130,8 +129,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	// try to establish the main session
 	mainSocketConfig := messenger.SocketConfig{
-		PingPongTimeout: 5,
-		ResponseTimeout: 5,
+		PingPongTimeout: 5 * time.Second,
+		ResponseTimeout: 5 * time.Second,
 		SetupTestament:  true,
 	}
 
@@ -141,20 +140,21 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	// try to establish the log session
-	logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})
+	// logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})
 
 	// established a connection, replace the dummy messenger
 	appStore.SetMessenger(mainSession)
 	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
 
-	logManager.SetMessenger(logSession)
+	logManager.SetMessenger(mainSession)
 
 	external := api.External{
 		Container:       container,
 		Messenger:       mainSession,
-		LogMessenger:    logSession,
+		LogMessenger:    mainSession,
 		Database:        database,
+		Filesystem:      &filesystem,
 		System:          &systemAPI,
 		AppManager:      &appManager,
 		TerminalManager: &terminalManager,
@@ -171,9 +171,10 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		AppManager:      &appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,
+		Filesystem:      &filesystem,
 		Container:       container,
 		Messenger:       mainSession,
-		LogMessenger:    logSession,
+		LogMessenger:    mainSession,
 		Database:        database,
 	}
 }
@@ -181,7 +182,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 	safe.Go(func() {
 		for {
-			if !agent.Connected() {
+			if !agent.Messenger.Connected() {
 				continue
 			}
 
@@ -194,12 +195,7 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 			}
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 3*time.Second)
-			_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
-			if err != nil {
-				log.Error().Err(err).Msgf("Heartbeat: Failed to send connection heartbeat")
-			} else {
-				log.Debug().Msg("Heartbeat: updated connection status, sleeping for 5 seconds...")
-			}
+			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
 
 			cancelFunc()
 
@@ -210,75 +206,46 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 	return nil
 }
 
-// Reconnect reconnects all websocket sessions that are used in use by the agent
-func (agent *Agent) Reconnect() {
-	agent.Messenger.Reconnect()
-	agent.LogMessenger.Reconnect()
-}
-
-// Connected returns whether or not all sessions are connected
-func (agent *Agent) Connected() bool {
-	return agent.Messenger.Connected() && agent.LogMessenger.Connected()
-}
-
 func (agent *Agent) ListenForDisconnect() {
-	reconnectSignal := make(chan struct{})
-	reconnectedSignal := make(chan struct{})
-
-	safe.Go(func() {
-	doneSignalCheck:
-		for {
-			select {
-			case <-agent.Messenger.Done():
-				log.Debug().Msg("Reconnect: Received done signal from web socket, attempting to create a new session")
-				agent.Reconnect()
-				reconnectSignal <- struct{}{}
-				close(reconnectSignal)
-
-				break doneSignalCheck
-			}
-		}
-
-		log.Debug().Msg("Reconnect: Done signal goroutine has exited")
-	})
-
 	safe.Go(func() {
 	reconnect:
 		select {
-		case <-reconnectSignal:
+		case <-agent.Messenger.Done():
+			log.Debug().Msg("Received done signal for main session")
+
+			err := agent.Container.CancelAllStreams()
+			if err != nil {
+				log.Error().Err(err).Msg("error closing stream")
+			}
+
 			for {
+				agent.Messenger.Reconnect()
+
 				// did we reconnect successfully? new internal client should be set now
-				if agent.Connected() {
-					log.Debug().Msg("Reconnect: was able to reconnect, running setup again")
+				if agent.Messenger.Connected() {
+					safe.Go(func() {
+						log.Debug().Msg("Reconnect: was able to reconnect, running setup again")
+						err := agent.OnConnect()
+						if err != nil {
+							log.Fatal().Stack().Err(err).Msg("failed to run on connect handler")
+						}
 
-					// rerun setup
-					err := agent.OnConnect()
-					if err != nil {
-						log.Fatal().Stack().Err(err).Msg("failed to run on connect handler")
-					}
+						agent.ListenForDisconnect()
 
-					reconnectedSignal <- struct{}{}
-					close(reconnectedSignal)
-
+						log.Debug().Msg("Reconnect: Successfully reconnected main session")
+					})
 					break reconnect
 				}
 
 				log.Debug().Msg("Reconnect: it appears the socket disconnected right after reconnecting, retrying...")
-				agent.Reconnect()
+				agent.Messenger.Reconnect()
 
 				time.Sleep(time.Second * 1)
 			}
+
 		}
 		log.Debug().Msg("Reconnect: Reconnect signal goroutine has exited")
 	})
 
 	log.Debug().Msg("Reconnect: Setup Reconnect loop")
-
-	select {
-	case <-reconnectedSignal:
-		log.Debug().Msg("Reconnect: received the 'reconnected' signal...")
-		break
-	}
-
-	log.Debug().Msg("Reconnect: Successfully reconnected")
 }

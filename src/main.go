@@ -50,6 +50,8 @@ func main() {
 
 	agent := NewAgent(&generalConfig)
 
+	agent.ListenForDisconnect()
+
 	log.Info().Msg("Waiting for Docker Daemon to be available...")
 	err = agent.Container.WaitForDaemon(context.Background())
 	if err != nil {
