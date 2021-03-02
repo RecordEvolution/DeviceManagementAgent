@@ -150,7 +150,6 @@ func PrettyFormat(data interface{}) (string, error) {
 	//    var err := error
 	p, err := json.MarshalIndent(data, "", "\t")
 	if err != nil {
-		fmt.Println(err)
 		return "", err
 	}
 

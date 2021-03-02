@@ -1,7 +1,6 @@
 package apps
 
 import (
-	"context"
 	"errors"
 	"reagent/common"
 )
@@ -12,10 +11,9 @@ func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *commo
 	}
 
 	buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
-	ctx := context.Background()
 
 	// ignore potential error
-	_ = sm.Container.CancelStream(ctx, buildID)
+	_ = sm.Container.CancelStream(buildID)
 
 	return sm.setState(app, common.REMOVED)
 }
@@ -26,10 +24,9 @@ func (sm *StateMachine) cancelPull(payload common.TransitionPayload, app *common
 	}
 
 	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
-	ctx := context.Background()
 
 	// ignore potential error
-	_ = sm.Container.CancelStream(ctx, pullID)
+	_ = sm.Container.CancelStream(pullID)
 
 	return sm.setState(app, common.REMOVED)
 }

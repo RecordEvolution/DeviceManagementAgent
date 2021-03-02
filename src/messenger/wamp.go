@@ -74,11 +74,6 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 		return nil, err
 	}
 
-	wsConfig := transport.WebsocketConfig{}
-	if socketConfig.PingPongTimeout != 0 {
-		wsConfig.KeepAlive = socketConfig.PingPongTimeout
-	}
-
 	cfg := client.Config{
 		Realm: "realm1",
 		HelloDetails: wamp.Dict{
@@ -93,7 +88,12 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 			Certificates:       []tls.Certificate{tlscert},
 			InsecureSkipVerify: true,
 		},
-		WsCfg: wsConfig,
+	}
+
+	if socketConfig.PingPongTimeout != 0 {
+		cfg.WsCfg = transport.WebsocketConfig{
+			KeepAlive: socketConfig.PingPongTimeout,
+		}
 	}
 
 	if socketConfig.ResponseTimeout != 0 {
@@ -105,7 +105,7 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 
 // New creates a new wamp session from a ReswarmConfig file
 func NewWamp(config *config.Config, socketConfig *SocketConfig) (*WampSession, error) {
-	session := &WampSession{agentConfig: config}
+	session := &WampSession{agentConfig: config, socketConfig: socketConfig}
 	clientChannel := EstablishSocketConnection(config, socketConfig)
 
 	select {
@@ -218,9 +218,9 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 		}
 	}
 
-	if !wampSession.Connected() {
-		return ErrNotConnected
-	}
+	// if !wampSession.Connected() {
+	// 	return ErrNotConnected
+	// }
 
 	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
 }
@@ -260,9 +260,9 @@ func (wampSession *WampSession) Call(
 		}
 	}
 
-	if !wampSession.Connected() {
-		return Result{}, ErrNotConnected
-	}
+	// if !wampSession.Connected() {
+	// 	return Result{}, ErrNotConnected
+	// }
 
 	result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
 	if err != nil {
@@ -325,17 +325,17 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 }
 
 func (wampSession *WampSession) Unregister(topic topics.Topic) error {
-	if !wampSession.Connected() {
-		return ErrNotConnected
-	}
+	// if !wampSession.Connected() {
+	// 	return ErrNotConnected
+	// }
 
 	return wampSession.client.Unregister(string(topic))
 }
 
 func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
-	if !wampSession.Connected() {
-		return ErrNotConnected
-	}
+	// if !wampSession.Connected() {
+	// 	return ErrNotConnected
+	// }
 
 	return wampSession.client.Unsubscribe(string(topic))
 }
@@ -361,9 +361,9 @@ func (wampSession *WampSession) SetupTestament() error {
 		common.Dict{},
 	}
 
-	if !wampSession.Connected() {
-		return ErrNotConnected
-	}
+	// if !wampSession.Connected() {
+	// 	return ErrNotConnected
+	// }
 
 	_, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
 	if err != nil {

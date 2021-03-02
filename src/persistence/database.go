@@ -521,29 +521,27 @@ func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, s
 		return err
 	}
 
-	for _, logType := range []common.LogType{common.APP, common.BUILD, common.PULL, common.PUSH} {
-		upsertStatement, err := tx.Prepare(QueryUpsertLogHistoryEntry)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
+	upsertStatement, err := tx.Prepare(QueryUpsertLogHistoryEntry)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 
-		_, err = upsertStatement.Exec(appName, appKey, stage, logType, string(logsBytes))
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
+	_, err = upsertStatement.Exec(appName, appKey, stage, string(logsBytes))
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
+	if err != nil {
+		tx.Rollback()
+		return err
 	}
 
 	return tx.Commit()
 }
 
-func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType, logs []string) error {
+func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logs []string) error {
 	upsertStatement, err := ast.db.Prepare(QueryUpsertLogHistoryEntry)
 	if err != nil {
 		return err
@@ -556,7 +554,7 @@ func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, sta
 		return err
 	}
 
-	_, err = upsertStatement.Exec(appName, appKey, stage, logType, string(logsBytes))
+	_, err = upsertStatement.Exec(appName, appKey, stage, string(logsBytes))
 	if err != nil {
 		return err
 	}
@@ -564,13 +562,13 @@ func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, sta
 	return nil
 }
 
-func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, stage common.Stage, logType common.LogType) ([]string, error) {
+func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, stage common.Stage) ([]string, error) {
 	preppedStatement, err := ast.db.Prepare(QuerySelectLogHistoryByAppKeyStageAndType)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := preppedStatement.Query(appKey, stage, logType)
+	rows, err := preppedStatement.Query(appKey, stage)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +580,7 @@ func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, sta
 			return nil, err
 		}
 
-		return nil, fmt.Errorf("No logs found (%s) for %d (%s) ", logType, appKey, stage)
+		return nil, fmt.Errorf("No logs found for %d (%s) ", appKey, stage)
 	}
 
 	var logsString string

@@ -95,7 +95,6 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 // CorrectLocalAndUpdateRemoteAppStates ensures that the app state corresponds with the container status of the app.
 // Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely.
 func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
-	ctx := context.Background()
 
 	rStates, err := so.AppStore.GetRequestedStates()
 	if err != nil {
@@ -110,6 +109,7 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			return err
 		}
 
+		ctx := context.Background()
 		container, err := so.Container.GetContainerState(ctx, containerName)
 		if err != nil {
 			if errdefs.IsContainerNotFound(err) {

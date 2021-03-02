@@ -27,7 +27,6 @@ type ActiveLog struct {
 	ContainerName  string
 	Stream         io.ReadCloser
 	logHistory     []string
-	LogType        common.LogType
 	Publish        bool
 	Active         bool
 	StateLock      sync.Mutex
@@ -160,11 +159,10 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			}
 
 			logEntry.StateLock.Lock()
-			logType := logEntry.LogType
 			logHistory := logEntry.logHistory
 			logEntry.StateLock.Unlock()
 
-			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logType, logHistory)
+			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logHistory)
 			if err != nil {
 				return
 			}
@@ -186,19 +184,14 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			logEntry.logHistory = logEntry.logHistory[1:]
 		}
 
-		// only store non-app related history
-		if logEntry.LogType != common.APP {
-			logEntry.logHistory = append(logEntry.logHistory, chunk)
-		}
+		logEntry.logHistory = append(logEntry.logHistory, chunk)
 
 		shouldPublish := logEntry.Publish
 
 		logEntry.StateLock.Unlock()
 
 		if shouldPublish {
-			safe.Go(func() {
-				lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
-			})
+			lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
 		}
 
 		lastChunk = chunk
@@ -249,12 +242,6 @@ func (lm *LogManager) ReviveDeadLogs() error {
 		}
 
 		id := result.Arguments[0]
-
-		app.StateLock.Lock()
-		curAppState := app.CurrentState
-		app.StateLock.Unlock()
-
-		logType := common.GetCurrentLogType(curAppState)
 		reader, err := lm.getLogStream(containerName)
 		if err != nil {
 			if !errdefs.IsContainerNotFound(err) {
@@ -265,7 +252,6 @@ func (lm *LogManager) ReviveDeadLogs() error {
 		subscriptionEntry := ActiveLog{
 			ContainerName: containerName,
 			logHistory:    make([]string, 0),
-			LogType:       logType,
 			Stream:        reader,
 			Active:        false,
 			Publish:       true,
@@ -295,27 +281,13 @@ func readLines(reader io.Reader) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-func (lm *LogManager) getContainerLogHistory(activeLog *ActiveLog) ([]string, error) {
-	ctx := context.Background()
-	options := common.Dict{"stdout": true, "stderr": true, "tail": "100"}
-	reader, err := lm.Container.Logs(ctx, activeLog.ContainerName, options)
-	if err != nil {
-		if !errdefs.IsContainerNotFound(err) {
-			return nil, err
-		}
-		return []string{}, nil
-	}
-
-	return readLines(reader)
-}
-
-func (lm *LogManager) getPersistedLogHistory(activeLog *ActiveLog) ([]string, error) {
+func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, error) {
 	lm.mapMutex.Lock()
 	activeLogs := lm.activeLogs
 	lm.mapMutex.Unlock()
 
 	for _, logSession := range activeLogs {
-		if logSession.ContainerName == activeLog.ContainerName {
+		if logSession.ContainerName == containerName {
 			logSession.StateLock.Lock()
 			logHistory := logSession.logHistory
 			logSession.StateLock.Unlock()
@@ -326,7 +298,7 @@ func (lm *LogManager) getPersistedLogHistory(activeLog *ActiveLog) ([]string, er
 		}
 	}
 
-	stage, appKey, appName, err := common.ParseContainerName(activeLog.ContainerName)
+	stage, appKey, appName, err := common.ParseContainerName(containerName)
 
 	app, err := lm.AppStore.GetApp(appKey, stage)
 	if err != nil {
@@ -337,14 +309,8 @@ func (lm *LogManager) getPersistedLogHistory(activeLog *ActiveLog) ([]string, er
 		return []string{}, nil
 	}
 
-	app.StateLock.Lock()
-	curAppState := app.CurrentState
-	app.StateLock.Unlock()
-
-	logType := common.GetCurrentLogType(curAppState)
-
 	// not found in memory, lets check database
-	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage, logType)
+	logs, err := lm.Database.GetAppLogHistory(appName, appKey, stage)
 	if err != nil {
 		if strings.Contains(err.Error(), "No logs found") {
 			return []string{}, nil
@@ -354,20 +320,13 @@ func (lm *LogManager) getPersistedLogHistory(activeLog *ActiveLog) ([]string, er
 	return logs, nil
 }
 
-func (lm *LogManager) GetLogHistory(activeLog *ActiveLog) ([]string, error) {
+func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 	var history []string
 	var err error
 
-	if activeLog.LogType == common.APP {
-		history, err = lm.getContainerLogHistory(activeLog)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		history, err = lm.getPersistedLogHistory(activeLog)
-		if err != nil {
-			return nil, err
-		}
+	history, err = lm.getPersistedLogHistory(containerName)
+	if err != nil {
+		return nil, err
 	}
 
 	if err != nil {
@@ -379,35 +338,58 @@ func (lm *LogManager) GetLogHistory(activeLog *ActiveLog) ([]string, error) {
 
 func (lm *LogManager) SetupEndpoints() error {
 	err := lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
-		subscriptionID := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was created
+		subscriptionID := r.Arguments[1] // the id of the subscription that was created
+		safe.Go(func() {
+			ctx := context.Background()
 
-		activeLog := lm.GetLogTaskBySubscriptionID(subscriptionID)
-		if activeLog == nil {
-			return nil
-		}
+			r, err := lm.Messenger.Call(ctx, topics.MetaProcGetSubscription, []interface{}{subscriptionID}, nil, nil, nil)
+			if err != nil {
+				return
+			}
 
-		activeLog.StateLock.Lock()
-		containerName := activeLog.ContainerName
-		activeLog.StateLock.Unlock()
+			subscriptionArg := r.Arguments[0] // the id of the subscription that was created
+			subscription, ok := subscriptionArg.(map[string]interface{})
+			if !ok {
+				return
+			}
 
-		history, err := lm.GetLogHistory(activeLog)
-		if err != nil {
-			return err
-		}
+			uri := fmt.Sprint(subscription["uri"])
 
-		lm.Publish(containerName, fmt.Sprintf("Subscribed to the logs for %s (%s)", containerName, time.Now().Format(time.RFC850)))
+			// ignore any non log subscriptions
+			if !strings.HasPrefix(uri, "reswarm.logs.") {
+				return
+			}
 
-		if len(history) > 0 {
-			safe.Go(func() {
-				for _, logEntry := range history {
-					lm.Publish(containerName, logEntry)
-				}
-			})
+			topicSplit := strings.Split(uri, ".")
+			serialNumber := topicSplit[2]
+			containerName := topicSplit[3]
 
-			return nil
-		}
+			// if the request is not for my device
+			if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
+				return
+			}
 
-		return lm.Publish(containerName, fmt.Sprintf("No logs were found for %s", containerName))
+			lm.Publish(containerName, fmt.Sprintf("Fetching logs for %s, this can take a while... (%s)", containerName, time.Now().Format(time.RFC3339)))
+			history, err := lm.GetLogHistory(containerName)
+			if err != nil {
+				lm.Publish(containerName, fmt.Sprintf("Failed to fetch the logs for %s, reason: %s", containerName, err.Error()))
+				return
+			}
+
+			if len(history) > 0 {
+				safe.Go(func() {
+					for _, logEntry := range history {
+						lm.Publish(containerName, logEntry)
+					}
+				})
+
+				return
+			}
+
+			lm.Publish(containerName, fmt.Sprintf("No logs were found for %s", containerName))
+		})
+
+		return nil
 	}, nil)
 
 	err = lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
@@ -522,7 +504,6 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 
 	// found an entry without an active stream, populate the stream
 	if exisitingLog != nil {
-		exisitingLog.LogType = logType
 		exisitingLog.Stream = stream
 		return lm.emitStream(exisitingLog)
 	}
@@ -536,7 +517,6 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 	activeLog := ActiveLog{
 		ContainerName: containerName,
 		logHistory:    make([]string, 0),
-		LogType:       logType,
 		Stream:        stream,
 		Active:        false,
 		Publish:       false,
@@ -601,21 +581,27 @@ func (lm *LogManager) StreamBlocking(containerName string, logType common.LogTyp
 
 // Stream publishes an stream of string data to a specific subscribable container
 func (lm *LogManager) Stream(containerName string, logType common.LogType, otherReader io.ReadCloser) error {
-	reader, err := lm.getLogStream(containerName)
-	if err != nil {
-		if !errdefs.IsContainerNotFound(err) {
-			return err
+	safe.Go(func() {
+		reader, err := lm.getLogStream(containerName)
+		if err != nil {
+			if !errdefs.IsContainerNotFound(err) {
+				return
+			}
 		}
-	}
 
-	if reader != nil {
-		go lm.initLogStream(containerName, logType, reader)
-		return nil
-	}
+		if reader != nil {
+			safe.Go(func() {
+				lm.initLogStream(containerName, logType, reader)
+			})
+			return
+		}
 
-	if otherReader != nil {
-		go lm.initLogStream(containerName, logType, otherReader)
-	}
+		if otherReader != nil {
+			safe.Go(func() {
+				lm.initLogStream(containerName, logType, otherReader)
+			})
+		}
+	})
 
 	return nil
 }
@@ -626,7 +612,6 @@ func (lm *LogManager) Publish(containerName string, text string) error {
 	entry := common.Dict{"type": "build", "chunk": text}
 	args := make([]interface{}, 0)
 	args = append(args, entry)
-
 	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
 	if err != nil {
 		return err

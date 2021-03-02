@@ -23,6 +23,11 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
+	err = sm.setState(app, common.DOWNLOADING)
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 
 	// Need to authenticate to private registry to determine proper privileges to pull the app
@@ -45,11 +50,6 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	}
 
 	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
-	if err != nil {
-		return err
-	}
-
-	err = sm.setState(app, common.DOWNLOADING)
 	if err != nil {
 		return err
 	}

@@ -74,7 +74,6 @@ type Container interface {
 	Login(ctx context.Context, username string, password string) error
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
-	CancelStream(ctx context.Context, buildID string) error
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
 	ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)
@@ -107,5 +106,7 @@ type Container interface {
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	WaitForDaemon(ctx context.Context) error
 	Ping(ctx context.Context) (Ping, error)
+	CancelStream(buildID string) error
+	CancelAllStreams() error
 	GetConfig() *config.Config
 }

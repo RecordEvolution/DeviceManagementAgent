@@ -31,10 +31,15 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	app.StateLock.Lock()
+
+	log.Debug().Msgf("Received Requested State (FROM %s to) %s for %s (%s)", app.CurrentState, payload.RequestedState, payload.AppName, payload.Stage)
 	curAppState := app.CurrentState
+	requestedAppState := app.RequestedState
+
 	app.StateLock.Unlock()
 
-	if curAppState == payload.RequestedState && !payload.RequestUpdate {
+	builtState := app.CurrentState == common.BUILT && app.RequestedState == common.BUILT
+	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
 		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
 		return nil
 	}
@@ -260,7 +265,9 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 	curAppState := app.CurrentState
 
 	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
-	if curAppState == common.BUILT || curAppState == common.PUBLISHED {
+	if curAppState == common.BUILT ||
+		curAppState == common.PUBLISHED ||
+		(curAppState == common.PRESENT && app.RequestedState == common.BUILT) {
 		if payload.CurrentState != "" {
 			app.CurrentState = payload.CurrentState
 		}
@@ -336,24 +343,6 @@ func (am *AppManager) EvaluateRequestedStates() error {
 	if err != nil {
 		return err
 	}
-
-	/*
-			apps, err := am.AppStore.GetAllApps()
-		if err != nil {
-			return err
-		}
-
-		for _, app := range apps {
-			locked := app.SecureTransition()
-			if !locked {
-				app.UnlockTransition() // we don't want to actually hold the transition, just check if it's transitioning
-				continue
-			}
-
-			// update the remote with the currently transitioning
-			am.AppStore.UpdateRemoteAppState(app, app.CurrentState)
-		}
-	*/
 
 	for i := range payloads {
 		payload := payloads[i]

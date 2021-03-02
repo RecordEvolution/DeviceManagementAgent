@@ -18,8 +18,6 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	log.Debug().Msgf("Received Requested State %s for %s (%s)", payload.RequestedState, payload.AppName, payload.Stage)
-
 	safe.Go(func() {
 		err = ex.AppManager.CreateOrUpdateApp(payload)
 		if err != nil {

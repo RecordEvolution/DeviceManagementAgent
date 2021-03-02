@@ -153,21 +153,6 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Dev, "latest")
-	if err != nil {
-		// if we can't find the dev image, we should try to build it first
-		if errdefs.IsImageNotFound(err) {
-			imageNotFoundMessage := "WARNING: The image " + payload.RegistryImageName.Dev + " was not found on the device, attempting to build it first..."
-			sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
-
-			buildAppErr := sm.buildApp(payload, app)
-			// this can fail if the build files are for example not available on the device
-			if buildAppErr != nil {
-				return buildAppErr
-			}
-		}
-	}
-
 	config := sm.Container.GetConfig()
 	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
 
@@ -206,11 +191,6 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 			return err
 		}
 	} else {
-		err := sm.setState(app, common.STOPPING)
-		if err != nil {
-			return err
-		}
-
 		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
 		if removeContainerErr != nil {
 			// It's possible we're trying to remove the container when it's already being removed
@@ -249,9 +229,22 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 
 	newContainerID, err := sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
 	if err != nil {
-		if !errdefs.IsContainerNameAlreadyInUse(err) {
-			return err
+		if errdefs.IsImageNotFound(err) {
+			imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
+			sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
+
+			// buildAppErr := sm.buildApp(payload, app)
+			// // this can fail if the build files are for example not available on the device
+			// if buildAppErr != nil {
+			// 	return buildAppErr
+			// }
 		}
+
+		// newContainerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
+		// if err != nil {
+		// 	return err
+		// }
+		return err
 	}
 
 	err = sm.Container.StartContainer(ctx, newContainerID)

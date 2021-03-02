@@ -37,7 +37,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 	var stateTransitionMap = map[common.AppState]map[common.AppState]TransitionFunc{
 		common.REMOVED: {
 			common.PRESENT:     sm.removedToPresent,
-			common.RUNNING:     sm.removedToRuning,
+			common.RUNNING:     sm.removedToRunning,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: sm.uninstallApp,
@@ -172,6 +172,11 @@ func (sm *StateMachine) CancelTransition(app *common.App, payload common.Transit
 	app.StateLock.Unlock()
 
 	transitionFunc := sm.getTransitionFunc(curAppState, payload.RequestedState)
+	if transitionFunc == nil {
+		log.Debug().Msgf("It appears the cancel transition function does not exist. In %s to %s for %s (%s)", curAppState, payload.RequestedState, payload.AppName, payload.Stage)
+		return nil
+	}
+
 	return sm.executeTransition(app, payload, transitionFunc)
 }
 

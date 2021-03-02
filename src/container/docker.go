@@ -610,6 +610,10 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 			return "", errdefs.ContainerNameAlreadyInUse(err)
 		}
 
+		if strings.Contains(err.Error(), "No such image") {
+			return "", errdefs.ImageNotFound(err)
+		}
+
 		return "", err
 	}
 
@@ -831,7 +835,7 @@ func (docker *Docker) Ping(ctx context.Context) (Ping, error) {
 	}, nil
 }
 
-func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
+func (docker *Docker) CancelStream(streamID string) error {
 	docker.streamMapMutex.Lock()
 	activeStreamEntry := docker.activeStreams[streamID]
 	docker.streamMapMutex.Unlock()
@@ -848,9 +852,22 @@ func (docker *Docker) CancelStream(ctx context.Context, streamID string) error {
 		if err != nil {
 			return err
 		}
-		docker.streamMapMutex.Lock()
-		delete(docker.activeStreams, streamID)
-		docker.streamMapMutex.Unlock()
+	}
+
+	return nil
+}
+
+func (docker *Docker) CancelAllStreams() error {
+	docker.streamMapMutex.Lock()
+	defer docker.streamMapMutex.Unlock()
+
+	for _, stream := range docker.activeStreams {
+		if stream != nil {
+			err := stream.Stream.Close()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

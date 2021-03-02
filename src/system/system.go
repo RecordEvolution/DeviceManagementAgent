@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -103,7 +104,20 @@ func (system *System) GetVersion() string {
 
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
-	resp, err := http.Get(reagentBucketURL + "/version.txt")
+
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 5 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ExpectContinueTimeout: 5 * time.Second,
+			ResponseHeaderTimeout: 5 * time.Second,
+		},
+		Timeout: 10 * time.Second, // timeout for the entire request, i.e. the download itself
+	}
+
+	resp, err := client.Get(reagentBucketURL + "/version.txt")
 	if err != nil {
 		// happens when time is not set yet
 		if strings.Contains(err.Error(), "certificate has expired or is not yet valid") {
