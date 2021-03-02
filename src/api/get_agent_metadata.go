@@ -4,11 +4,12 @@ import (
 	"context"
 	"reagent/common"
 	"reagent/messenger"
+	"reagent/system"
 	"runtime"
 )
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	currentVersion := ex.System.GetVersion()
+	currentVersion := system.GetVersion()
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
 	dict := common.Dict{

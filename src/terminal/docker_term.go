@@ -351,17 +351,21 @@ func (tm *TerminalManager) createTerminalSession(containerName string, shell str
 
 func (tm *TerminalManager) InitUnregisterWatcher() error {
 	err := tm.Messenger.Subscribe(topics.MetaEventRegOnUnregister, func(r messenger.Result) error {
-		metaRegistrationID := r.Arguments[1]
+		safe.Go(func() {
+			metaRegistrationID := r.Arguments[1]
 
-		tm.mapMutex.Lock()
-		for _, session := range tm.ActiveSessions {
-			if session.RegistrationID == metaRegistrationID {
-				tm.mapMutex.Unlock()
-				go tm.cleanupSession(session)
-				return nil
+			tm.mapMutex.Lock()
+			for _, session := range tm.ActiveSessions {
+				if session.RegistrationID == metaRegistrationID {
+					tm.mapMutex.Unlock()
+					safe.Go(func() {
+						tm.cleanupSession(session)
+					})
+					return
+				}
 			}
-		}
-		tm.mapMutex.Unlock()
+			tm.mapMutex.Unlock()
+		})
 
 		return nil
 	}, nil)

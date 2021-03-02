@@ -223,52 +223,58 @@ func (lm *LogManager) ReviveDeadLogs() error {
 		return err
 	}
 
-	for _, app := range appStates {
-		containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
-		topic := lm.buildTopic(containerName)
+	safe.Go(func() {
+		for _, app := range appStates {
+			containerName := common.BuildContainerName(app.Stage, uint64(app.AppKey), app.AppName)
+			topic := lm.buildTopic(containerName)
 
-		lm.mapMutex.Lock()
-		existingEntry := lm.activeLogs[containerName]
-		lm.mapMutex.Unlock()
+			lm.mapMutex.Lock()
+			existingEntry := lm.activeLogs[containerName]
+			lm.mapMutex.Unlock()
 
-		if existingEntry != nil && existingEntry.Active && existingEntry.Stream != nil {
-			continue
-		}
+			if existingEntry != nil && existingEntry.Active && existingEntry.Stream != nil {
+				continue
+			}
 
-		ctx := context.Background()
-		result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
-		if err != nil {
-			return err
-		}
+			ctx := context.Background()
+			result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to lookup subscription")
+			}
 
-		id := result.Arguments[0]
-		reader, err := lm.getLogStream(containerName)
-		if err != nil {
-			if !errdefs.IsContainerNotFound(err) {
-				return err
+			id := result.Arguments[0]
+			reader, err := lm.getLogStream(containerName)
+			if err != nil {
+				if !errdefs.IsContainerNotFound(err) {
+					log.Error().Err(err).Msg("failed to get log stream")
+				}
+			}
+
+			subscriptionEntry := ActiveLog{
+				ContainerName: containerName,
+				logHistory:    make([]string, 0),
+				Stream:        reader,
+				Active:        false,
+				Publish:       true,
+			}
+
+			if id != nil {
+				subscriptionEntry.SubscriptionID = fmt.Sprint(id)
+			}
+
+			lm.mapMutex.Lock()
+			lm.activeLogs[containerName] = &subscriptionEntry
+			lm.mapMutex.Unlock()
+
+			if reader != nil {
+				safe.Go(func() {
+					lm.emitStream(&subscriptionEntry)
+				})
 			}
 		}
 
-		subscriptionEntry := ActiveLog{
-			ContainerName: containerName,
-			logHistory:    make([]string, 0),
-			Stream:        reader,
-			Active:        false,
-			Publish:       true,
-		}
+	})
 
-		if id != nil {
-			subscriptionEntry.SubscriptionID = fmt.Sprint(id)
-		}
-
-		lm.mapMutex.Lock()
-		lm.activeLogs[containerName] = &subscriptionEntry
-		lm.mapMutex.Unlock()
-
-		if reader != nil {
-			go lm.emitStream(&subscriptionEntry)
-		}
-	}
 	return nil
 }
 
@@ -394,70 +400,62 @@ func (lm *LogManager) SetupEndpoints() error {
 	}, nil)
 
 	err = lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
-		_ = r.Arguments[0]                // the id of the client session that used to be listening
-		subscriptionArg := r.Arguments[1] // the id of the subscription that was created
-		subscription, ok := subscriptionArg.(map[string]interface{})
-		if !ok {
-			return errors.New("failed to parse subscription args")
-		}
+		safe.Go(func() {
+			_ = r.Arguments[0]                // the id of the client session that used to be listening
+			subscriptionArg := r.Arguments[1] // the id of the subscription that was created
+			subscription, ok := subscriptionArg.(map[string]interface{})
+			if !ok {
+				log.Error().Err(errors.New("failed to parse subscription args"))
+			}
 
-		uri := fmt.Sprint(subscription["uri"])
-		id := fmt.Sprint(subscription["id"])
+			uri := fmt.Sprint(subscription["uri"])
+			id := fmt.Sprint(subscription["id"])
 
-		// ignore any non log subscriptions
-		if !strings.HasPrefix(uri, "reswarm.logs.") {
-			return nil
-		}
+			// ignore any non log subscriptions
+			if !strings.HasPrefix(uri, "reswarm.logs.") {
+				return
+			}
 
-		topicSplit := strings.Split(uri, ".")
-		serialNumber := topicSplit[2]
-		containerName := topicSplit[3]
+			topicSplit := strings.Split(uri, ".")
+			serialNumber := topicSplit[2]
+			containerName := topicSplit[3]
 
-		// if the request is not for my device
-		if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
-			return nil
-		}
-
-		lm.mapMutex.Lock()
-		activeLog := lm.activeLogs[containerName]
-		lm.mapMutex.Unlock()
-
-		// there is at least one client subscribed, we should publish
-		if activeLog != nil {
-
-			activeLog.StateLock.Lock()
-			activeLog.SubscriptionID = id // set the current subscriptionID
-			activeLog.Publish = true
-			activeLog.StateLock.Unlock()
-
-			// active := activeLog.Active
-
-			// ensure we are actually actively streaming
-			// if activeLog.LogType == common.APP && !activeLog.Active {
-			// 	log.Debug().Msgf("Log Manager: Started streaming logs for %s", activeLog.ContainerName)
-			// 	activeLog.StateLock.Unlock()
-
-			// 	return lm.Stream(containerName, activeLog.LogType, nil)
-			// }
-
-			log.Debug().Msgf("Log Manager: A subscription was created, enabling publishing for %s", activeLog.ContainerName)
-		} else {
-			// we don't have an active stream yet, and also don't know the logtype
-			// but we want to add an entry so we can populate the stream later on
-			newActiveLog := ActiveLog{
-				SubscriptionID: id,
-				Publish:        true,
-				logHistory:     make([]string, 0),
-				Active:         false,
-				ContainerName:  containerName,
+			// if the request is not for my device
+			if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
+				return
 			}
 
 			lm.mapMutex.Lock()
-			lm.activeLogs[containerName] = &newActiveLog
+			activeLog := lm.activeLogs[containerName]
 			lm.mapMutex.Unlock()
 
-			log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream...", newActiveLog.ContainerName)
-		}
+			// there is at least one client subscribed, we should publish
+			if activeLog != nil {
+
+				activeLog.StateLock.Lock()
+				activeLog.SubscriptionID = id // set the current subscriptionID
+				activeLog.Publish = true
+				activeLog.StateLock.Unlock()
+
+				log.Debug().Msgf("Log Manager: A subscription was created, enabling publishing for %s", activeLog.ContainerName)
+			} else {
+				// we don't have an active stream yet, and also don't know the logtype
+				// but we want to add an entry so we can populate the stream later on
+				newActiveLog := ActiveLog{
+					SubscriptionID: id,
+					Publish:        true,
+					logHistory:     make([]string, 0),
+					Active:         false,
+					ContainerName:  containerName,
+				}
+
+				lm.mapMutex.Lock()
+				lm.activeLogs[containerName] = &newActiveLog
+				lm.mapMutex.Unlock()
+
+				log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream...", newActiveLog.ContainerName)
+			}
+		})
 
 		return nil
 	}, nil)
@@ -467,19 +465,21 @@ func (lm *LogManager) SetupEndpoints() error {
 	}
 
 	return lm.Messenger.Subscribe(topics.MetaEventSubOnDelete, func(r messenger.Result) error {
-		_ = r.Arguments[0]               // the id of the client session that used to be listening
-		id := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was deleted, in the delete we only receive the ID
+		safe.Go(func() {
+			_ = r.Arguments[0]               // the id of the client session that used to be listening
+			id := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was deleted, in the delete we only receive the ID
 
-		subscription := lm.GetLogTaskBySubscriptionID(id)
+			subscription := lm.GetLogTaskBySubscriptionID(id)
 
-		if subscription != nil {
-			// no clients are subscribed, should stop publishing
-			subscription.StateLock.Lock()
-			subscription.Publish = false
-			subscription.StateLock.Unlock()
+			if subscription != nil {
+				// no clients are subscribed, should stop publishing
+				subscription.StateLock.Lock()
+				subscription.Publish = false
+				subscription.StateLock.Unlock()
 
-			log.Print("Log Manager: Stopped publishing logs for", subscription.ContainerName)
-		}
+				log.Print("Log Manager: Stopped publishing logs for", subscription.ContainerName)
+			}
+		})
 
 		return nil
 	}, nil)

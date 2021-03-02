@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"reagent/api"
 	"reagent/apps"
+	"reagent/benchmark"
 	"reagent/common"
 	"reagent/config"
 	"reagent/container"
@@ -134,10 +136,22 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		SetupTestament:  true,
 	}
 
+	benchmark.TimeTillPreConnectInit = time.Since(benchmark.PreConnectInit)
+
+	fmt.Println("Attempting to establish a socket connection...")
+
+	benchmark.OnConnectInitAfterConnection = time.Now()
+	benchmark.SocketConnectionInit = time.Now()
+
 	mainSession, err := messenger.NewWamp(generalConfig, &mainSocketConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
+
+	benchmark.TimeTillSocketConnection = time.Since(benchmark.SocketConnectionInit)
+	benchmark.TimeTillSocketConnectionFromLaunch = time.Since(benchmark.SocketConnectionInitFromLaunch)
+
+	fmt.Println("Connected!")
 
 	// try to establish the log session
 	// logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})

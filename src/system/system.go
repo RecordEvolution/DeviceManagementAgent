@@ -98,7 +98,7 @@ func (sys *System) UpdateAgent(versionString string, progressCallback func(incre
 	return nil
 }
 
-func (system *System) GetVersion() string {
+func GetVersion() string {
 	return version
 }
 
@@ -141,7 +141,7 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 		return UpdateResult{}, err
 	}
 
-	currentVersion := system.GetVersion()
+	currentVersion := GetVersion()
 	log.Info().Msgf("System: Latest version: %s, Current version: %s", latestVersion, currentVersion)
 	if latestVersion != currentVersion {
 		log.Info().Msgf("System: Agent not up to date, downloading: v%s", latestVersion)

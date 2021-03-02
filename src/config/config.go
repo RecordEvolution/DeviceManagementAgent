@@ -93,7 +93,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	cfgFile := flag.String("config", "", "reswarm configuration file")
 	flag.Parse()
 
-	if *cfgFile == "" {
+	if *cfgFile == "" && !*version {
 		return nil, errors.New("the config file path cannot be empty")
 	}
 

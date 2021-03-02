@@ -20,6 +20,9 @@ const RestartWifi Topic = "restart_wifi"
 
 const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"
+
+const GetNetworkMetaData Topic = "get_network_metadata"
+
 const GetAgentMetaData Topic = "get_agent_metadata"
 const GetAgentLogs Topic = "get_agent_logs"
 
