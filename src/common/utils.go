@@ -32,6 +32,10 @@ func BuildAgentUpdateProgress(serialNumber string) string {
 
 const topicPrefix = "re.mgmt"
 
+func BuildLogTopic(serialNumber string, containerName string) string {
+	return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
+}
+
 func BuildExternalApiTopic(serialNumber string, topic string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
 }

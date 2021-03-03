@@ -4,6 +4,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/safe"
 
@@ -14,17 +15,19 @@ type TransitionFunc func(TransitionPayload common.TransitionPayload, app *common
 
 type StateMachine struct {
 	StateObserver *StateObserver
+	Filesystem    *filesystem.Filesystem
 	Container     container.Container
 	LogManager    *logging.LogManager
 	appStates     []*common.App
 }
 
-func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver) StateMachine {
+func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, filesystem *filesystem.Filesystem) StateMachine {
 	appStates := make([]*common.App, 0)
 	return StateMachine{
 		StateObserver: observer,
 		Container:     container,
 		LogManager:    logManager,
+		Filesystem:    filesystem,
 		appStates:     appStates,
 	}
 }

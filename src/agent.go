@@ -116,13 +116,14 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		log.Fatal().Stack().Err(err).Msg("failed to setup docker")
 	}
 
+	filesystem := filesystem.New()
+
 	appStore := store.NewAppStore(database, dummyMessenger)
 	stateObserver := apps.NewObserver(container, &appStore)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
-	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver)
+	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
-	filesystem := filesystem.New()
 
 	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {

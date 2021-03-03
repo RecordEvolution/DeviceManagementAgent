@@ -38,6 +38,12 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	app.StateLock.Unlock()
 
+	// TODO: get rid of this ugly patch: cancel any filetransfers for this container on stop press
+	if (curAppState == common.REMOVED || curAppState == common.PRESENT || curAppState == common.FAILED) &&
+		(requestedAppState == common.PRESENT || requestedAppState == common.BUILT) && payload.Stage == common.DEV {
+		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
+	}
+
 	builtState := app.CurrentState == common.BUILT && app.RequestedState == common.BUILT
 	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
 		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)

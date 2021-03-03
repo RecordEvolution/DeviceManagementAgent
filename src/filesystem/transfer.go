@@ -7,43 +7,111 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reagent/common"
+	"sync"
+
+	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 )
 
 type Filesystem struct {
-	activeTransfers common.Dict
+	activeTransfers     map[string]*ActiveFileTransfer // containerName --> transferID
+	activeTransfersLock sync.Mutex
+}
+
+type ActiveFileTransfer struct {
+	ID       string
+	Current  uint64
+	Total    uint64
+	Canceled bool
+}
+
+type FileChunk struct {
+	ID            string
+	FileName      string
+	FilePath      string
+	Data          string
+	ContainerName string
+	Total         uint64
 }
 
 func New() Filesystem {
-	return Filesystem{activeTransfers: make(common.Dict)}
+	return Filesystem{activeTransfers: make(map[string]*ActiveFileTransfer)}
+}
+
+func (fs *Filesystem) CancelFileTransfer(containerName string) {
+	fileTransfer := fs.GetActiveTransfer(containerName)
+	if fileTransfer == nil {
+		return
+	}
+
+	fileTransfer.Canceled = true
+}
+
+func (fs *Filesystem) GetActiveTransfer(containerName string) *ActiveFileTransfer {
+	fs.activeTransfersLock.Lock()
+	activeTransfer := fs.activeTransfers[containerName]
+	fs.activeTransfersLock.Unlock()
+
+	return activeTransfer
 }
 
 // Write decodes hex encoded data chunks and writes to a file.
 //
 // Matches implementation in file_transfer.ts (Reswarm Backend)
-func (fs *Filesystem) Write(fileName string, filePath string, chunk string) error {
-	f, err := os.OpenFile(filePath+"/"+fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func (fs *Filesystem) Write(chunk FileChunk) error {
+
+	fs.activeTransfersLock.Lock()
+	activeTransfer := fs.activeTransfers[chunk.ContainerName]
+	fs.activeTransfersLock.Unlock()
+
+	f, err := os.OpenFile(chunk.FilePath+"/"+chunk.FileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 
-	if chunk == "END" {
+	if chunk.Data == "END" {
+		fs.activeTransfersLock.Lock()
+		delete(fs.activeTransfers, chunk.ContainerName)
+		fs.activeTransfersLock.Unlock()
+
 		return f.Close()
 	}
 
-	if chunk == "BEGIN" {
-		return os.Remove(filePath + "/" + fileName)
+	if chunk.Data == "BEGIN" {
+		fs.activeTransfersLock.Lock()
+		fs.activeTransfers[chunk.ContainerName] = &ActiveFileTransfer{
+			ID:    chunk.ID,
+			Total: chunk.Total,
+		}
+		fs.activeTransfersLock.Unlock()
+
+		return os.Remove(chunk.FilePath + "/" + chunk.FileName)
 	}
 
-	data, err := hex.DecodeString(chunk)
+	if activeTransfer.Canceled {
+		return errors.New("canceled")
+	}
+
+	if activeTransfer == nil {
+		return errors.New("We received a chunk without an active transfer")
+	}
+
+	if activeTransfer != nil && activeTransfer.ID != chunk.ID {
+		log.Debug().Msg("Received a chunk from transfer that was reset")
+		return nil
+	}
+
+	data, err := hex.DecodeString(chunk.Data)
 	if err != nil {
 		return err
 	}
 
-	_, err = f.Write(data)
+	n, err := f.Write(data)
 	if err != nil {
 		return err
 	}
+
+	activeTransfer.Current += uint64(n)
 
 	return nil
 }

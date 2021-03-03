@@ -607,13 +607,21 @@ func (lm *LogManager) Stream(containerName string, logType common.LogType, other
 	return nil
 }
 
+func (lm *LogManager) PublishProgress(containerName string, id string, status string, progress string) error {
+	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
+	entry := common.Dict{"id": id, "status": status, "progress": progress}
+	err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{entry}, nil, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Publish publishes a message to a specific subscribable container.
 func (lm *LogManager) Publish(containerName string, text string) error {
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
 	entry := common.Dict{"type": "build", "chunk": text}
-	args := make([]interface{}, 0)
-	args = append(args, entry)
-	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
+	err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{entry}, nil, nil)
 	if err != nil {
 		return err
 	}
