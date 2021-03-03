@@ -4,6 +4,9 @@ build-arm7:
 publish-arm7:
 	./publish-arm7.sh
 
+publish-intel:
+	./publish-intel.sh
+
 build-arm64:
 	rm reagent-linux-arm64 || true && ${GOPATH}/bin/xgo -v --targets=linux/arm64 .
 

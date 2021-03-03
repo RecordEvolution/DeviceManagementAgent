@@ -47,6 +47,8 @@ type CommandLineArguments struct {
 	DebugMessaging           bool
 	Version                  bool
 	Offline                  bool
+	EnsureNameserver         bool
+	ShouldUpdate             bool
 	LogFileLocation          string
 	ConfigFileLocation       string
 	DatabaseFileName         string
@@ -83,6 +85,8 @@ func GetCliArguments() (*CommandLineArguments, error) {
 
 	logFile := flag.String("logFile", defaultLogFilePath, "Log file used by the ReAgent to store all its log messages")
 	debug := flag.Bool("debug", true, "sets the log level to debug")
+	resolve := flag.Bool("ensureNameserver", true, "whether or not to make sure 8.8.8.8 is in the resolv.conf of the OS")
+	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on connection")
 	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. primarily meant for testing")
 	version := flag.Bool("version", false, "displays the current version of the agent")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent")
@@ -111,6 +115,8 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		DebugMessaging:           *debugMessaging,
 		LogFileLocation:          *logFile,
 		ConfigFileLocation:       *cfgFile,
+		EnsureNameserver:         *resolve,
+		ShouldUpdate:             *shouldUpdate,
 		DatabaseFileName:         *databaseFileName,
 	}
 

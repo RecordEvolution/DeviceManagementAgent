@@ -40,16 +40,18 @@ type Agent struct {
 }
 
 func (agent *Agent) OnConnect() error {
-	safe.Go(func() {
-		updateResult, err := agent.System.UpdateIfRequired(nil)
-		if err != nil {
-			log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
-		}
+	if agent.Config.CommandLineArguments.ShouldUpdate {
+		safe.Go(func() {
+			updateResult, err := agent.System.UpdateIfRequired(nil)
+			if err != nil {
+				log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+			}
 
-		if updateResult.DidUpdate {
-			log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
-		}
-	})
+			if updateResult.DidUpdate {
+				log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
+			}
+		})
+	}
 
 	err := agent.LogManager.SetupEndpoints()
 	if err != nil {

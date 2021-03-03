@@ -53,9 +53,11 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to init reagent directories")
 	}
 
-	err = filesystem.EnsureResolvConf()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to ensure resolv.conf")
+	if cliArgs.EnsureNameserver {
+		err = filesystem.EnsureResolvConf()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to ensure resolv.conf")
+		}
 	}
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
