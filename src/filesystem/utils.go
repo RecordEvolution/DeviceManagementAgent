@@ -80,7 +80,6 @@ func DownloadURL(filePath string, url string, callback func(increment uint64, cu
 			ExpectContinueTimeout: 10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
 		},
-		Timeout: 120 * time.Second, // timeout for the entire request, i.e. the download itself
 	}
 
 	resp, err := client.Get(url)
