@@ -308,7 +308,8 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, er
 
 	app, err := lm.AppStore.GetApp(appKey, stage)
 	if err != nil {
-		return nil, err
+		log.Error().Err(err).Msg("Failed to get app")
+		return []string{}, nil
 	}
 
 	if app == nil {

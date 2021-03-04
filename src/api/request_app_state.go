@@ -45,6 +45,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	appNameKw := kwargs["app_name"]
 	stageKw := kwargs["stage"]
 	requestedStateKw := kwargs["target_state"]
+	manuallyRequestedStateKw := kwargs["manually_requested_state"]
 	releaseKeyKw := kwargs["release_key"]
 	newReleaseKeyKw := kwargs["new_release_key"]
 	currentStateKw := kwargs["current_state"]
@@ -64,6 +65,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var appName string
 	var stage string
 	var requestedState string
+	var manuallyRequestedState string
 	var currentState string
 	var version string
 	var presentVersion string
@@ -108,6 +110,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		requestedState, ok = requestedStateKw.(string)
 		if !ok {
 			return common.TransitionPayload{}, fmt.Errorf("Failed to parse requested_state")
+		}
+	}
+
+	if manuallyRequestedStateKw != nil {
+		manuallyRequestedState, ok = manuallyRequestedStateKw.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("Failed to parse manually requested state")
 		}
 	}
 
@@ -209,6 +218,11 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	// if !ok {
 	// 	return common.TransitionPayload{}, fmt.Errorf("Failed to parse callerAuthid")
 	// }
+
+	// happens where there is no app yet, for example, when you press stop on first build
+	if requestedState == "" && manuallyRequestedState != "" {
+		requestedState = manuallyRequestedState
+	}
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey,
 		common.Stage(stage), common.AppState(currentState),

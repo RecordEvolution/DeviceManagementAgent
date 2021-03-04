@@ -31,12 +31,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	app.StateLock.Lock()
-
-	log.Debug().Msgf("Received Requested State (FROM %s to) %s for %s (%s)", app.CurrentState, payload.RequestedState, payload.AppName, payload.Stage)
 	curAppState := app.CurrentState
 	requestedAppState := app.RequestedState
-
 	app.StateLock.Unlock()
+
+	log.Debug().Msgf("Received Requested State (FROM %s to) %s for %s (%s)", curAppState, requestedAppState, payload.AppName, payload.Stage)
 
 	// TODO: get rid of this ugly patch: cancel any filetransfers for this container on stop press
 	if (curAppState == common.REMOVED || curAppState == common.PRESENT || curAppState == common.FAILED) &&

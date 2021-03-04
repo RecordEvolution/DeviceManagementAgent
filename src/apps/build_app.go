@@ -26,7 +26,10 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	sm.setState(app, common.REMOVED)
+	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
 
 	config := sm.Container.GetConfig()
 	buildsDir := config.CommandLineArguments.AppsBuildDir
@@ -49,8 +52,16 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		topicForLogStream = payload.PublishContainerName
 	}
 
-	// Need to make sure we close this reader later on
-	log.Debug().Msgf("Building for path: %s", filePath)
+	err = sm.LogManager.Write(topicForLogStream, "Starting image build...")
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.BUILDING)
+	if err != nil {
+		return err
+	}
+
 	reader, err := sm.Container.Build(ctx, filePath, buildOptions)
 	if err != nil {
 		errorMessage := err.Error()
@@ -69,11 +80,6 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			return messageErr
 		}
 
-		return err
-	}
-
-	err = sm.setState(app, common.BUILDING)
-	if err != nil {
 		return err
 	}
 
