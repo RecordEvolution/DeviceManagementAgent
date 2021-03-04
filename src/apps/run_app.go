@@ -118,15 +118,14 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	// block and wait for running, if exited status then return as a failed state
 	select {
 	case err = <-errC:
+		sm.LogManager.Write(payload.ContainerName.Dev, "The app has failed to start.")
 		options := common.Dict{"follow": true, "stdout": true, "stderr": true}
-
 		ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
 		if logsErr != nil {
 			return logsErr
 		}
 
 		sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
-
 		return err
 	case <-runningSignal:
 		break
@@ -258,8 +257,8 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	// block and wait for running, if exited status then return as a failed state
 	select {
 	case err = <-errC:
+		sm.LogManager.Write(payload.ContainerName.Dev, "The app has failed to start.")
 		options := common.Dict{"follow": true, "stdout": true, "stderr": true}
-
 		ioReader, logsErr := sm.Container.Logs(context.Background(), newContainerID, options)
 		if logsErr != nil {
 			return logsErr
