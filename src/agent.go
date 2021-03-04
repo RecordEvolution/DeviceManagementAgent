@@ -1,18 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"reagent/api"
 	"reagent/apps"
 	"reagent/benchmark"
-	"reagent/common"
 	"reagent/config"
 	"reagent/container"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
-	"reagent/messenger/topics"
 	"reagent/persistence"
 	"reagent/safe"
 	"reagent/store"
@@ -138,9 +135,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	// try to establish the main session
 	mainSocketConfig := messenger.SocketConfig{
-		PingPongTimeout: 5 * time.Second,
-		ResponseTimeout: 5 * time.Second,
 		SetupTestament:  true,
+		ResponseTimeout: time.Second * 3,
 	}
 
 	benchmark.TimeTillPreConnectInit = time.Since(benchmark.PreConnectInit)
@@ -201,29 +197,29 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 }
 
 func (agent *Agent) SetupConnectionStatusHeartbeat() error {
-	safe.Go(func() {
-		for {
-			if !agent.Messenger.Connected() {
-				continue
-			}
+	// safe.Go(func() {
+	// 	for {
+	// 		if !agent.Messenger.Connected() {
+	// 			continue
+	// 		}
 
-			config := agent.Config
-			payload := common.Dict{
-				"swarm_key":       config.ReswarmConfig.SwarmKey,
-				"device_key":      config.ReswarmConfig.DeviceKey,
-				"status":          messenger.CONNECTED,
-				"wamp_session_id": agent.Messenger.GetSessionID(),
-			}
+	// 		config := agent.Config
+	// 		payload := common.Dict{
+	// 			"swarm_key":       config.ReswarmConfig.SwarmKey,
+	// 			"device_key":      config.ReswarmConfig.DeviceKey,
+	// 			"status":          messenger.CONNECTED,
+	// 			"wamp_session_id": agent.Messenger.GetSessionID(),
+	// 		}
 
-			ctx, cancelFunc := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			options := common.Dict{"timeout": 500}
-			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, options, nil)
+	// 		ctx, cancelFunc := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// 		options := common.Dict{"timeout": 100}
+	// 		agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, options, nil)
 
-			cancelFunc()
+	// 		cancelFunc()
 
-			time.Sleep(time.Second * 5)
-		}
-	})
+	// 		time.Sleep(time.Second * 5)
+	// 	}
+	// })
 
 	return nil
 }
