@@ -215,8 +215,9 @@ func (agent *Agent) SetupConnectionStatusHeartbeat() error {
 				"wamp_session_id": agent.Messenger.GetSessionID(),
 			}
 
-			ctx, cancelFunc := context.WithTimeout(context.Background(), 3*time.Second)
-			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+			ctx, cancelFunc := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			options := common.Dict{"timeout": 500}
+			agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, options, nil)
 
 			cancelFunc()
 

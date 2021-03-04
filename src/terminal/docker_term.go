@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -193,8 +194,6 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 	// read outgoing data from the channel and 'publish' it (WAMP) to a given topic
 	safe.Go(func() {
 		defer log.Debug().Msgf("Terminal Manager: term reader goroutine for %s has exited", termSess.ContainerName)
-
-		ctx := context.Background()
 		buf := make([]byte, 32*1024)
 
 	exit:
@@ -207,11 +206,17 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 			if nr > 0 {
 				bytesToPublish := buf[0:nr]
-				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, nil, nil)
+				ctx, cancelFunc := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				options := common.Dict{"timeout": 500}
+
+				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, options, nil)
 				if er != nil {
+					cancelFunc()
 					err = er
 					break exit
 				}
+
+				cancelFunc()
 			}
 		}
 
@@ -269,7 +274,11 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 	safe.Go(func() {
 		// is ok if this errors
 		payload := []interface{}{[]byte("TERMINAL_EOF")}
-		_, _ = tm.Messenger.Call(context.Background(), topics.Topic(session.DataTopic), payload, nil, nil, nil)
+		options := common.Dict{"timeout": 500}
+		ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*500)
+		defer cancelFunc()
+
+		tm.Messenger.Call(ctx, topics.Topic(session.DataTopic), payload, nil, options, nil)
 	})
 
 	_, ok := tm.Messenger.RegistrationID(topics.Topic(session.ResizeTopic))
