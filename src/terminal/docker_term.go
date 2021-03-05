@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -142,24 +141,25 @@ func (tm *TerminalManager) registerResizeTopic(termSess *TerminalSession) error 
 	}, nil)
 }
 
-func (tm *TerminalManager) registerWriteTopic(termSess *TerminalSession) error {
-	return tm.Messenger.Register(topics.Topic(termSess.WriteTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
-		dataArg := invocation.Arguments[0]
+func (tm *TerminalManager) subscribeWriteTopic(termSess *TerminalSession) error {
+	return tm.Messenger.Subscribe(topics.Topic(termSess.WriteTopic), func(r messenger.Result) error {
+		dataArg := r.Arguments[0]
+
 		data, ok := dataArg.(string)
 		if !ok {
-			return nil, errors.New("failed to parse args")
+			return errors.New("failed to parse args")
 		}
 
 		termSess.inputChan <- data
 
-		return &messenger.InvokeResult{}, nil
+		return nil
 	}, nil)
 }
 
 func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSession) error {
 	// Register in channel (receives data from WAMP sends it to channel)
 
-	err := tm.registerWriteTopic(termSess)
+	err := tm.subscribeWriteTopic(termSess)
 	if err != nil {
 		return err
 	}
@@ -206,17 +206,12 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 			if nr > 0 {
 				bytesToPublish := buf[0:nr]
-				ctx, cancelFunc := context.WithTimeout(context.Background(), 500*time.Millisecond)
-				options := common.Dict{"timeout": 500}
-
-				_, er := tm.Messenger.Call(ctx, topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, options, nil)
+				options := common.Dict{"acknowledge": true}
+				er := tm.Messenger.Publish(topics.Topic(termSess.DataTopic), []interface{}{bytesToPublish}, nil, options)
 				if er != nil {
-					cancelFunc()
 					err = er
 					break exit
 				}
-
-				cancelFunc()
 			}
 		}
 
@@ -274,11 +269,8 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 	safe.Go(func() {
 		// is ok if this errors
 		payload := []interface{}{[]byte("TERMINAL_EOF")}
-		options := common.Dict{"timeout": 500}
-		ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*500)
-		defer cancelFunc()
-
-		tm.Messenger.Call(ctx, topics.Topic(session.DataTopic), payload, nil, options, nil)
+		options := common.Dict{"acknowledge": true}
+		tm.Messenger.Publish(topics.Topic(session.DataTopic), payload, nil, options)
 	})
 
 	_, ok := tm.Messenger.RegistrationID(topics.Topic(session.ResizeTopic))
@@ -289,9 +281,9 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 		}
 	}
 
-	_, ok = tm.Messenger.RegistrationID(topics.Topic(session.WriteTopic))
+	_, ok = tm.Messenger.SubscriptionID(topics.Topic(session.WriteTopic))
 	if ok {
-		err := tm.Messenger.Unregister(topics.Topic(session.WriteTopic))
+		err := tm.Messenger.Unsubscribe(topics.Topic(session.WriteTopic))
 		if err != nil {
 			return err
 		}
