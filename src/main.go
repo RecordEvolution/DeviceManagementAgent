@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -26,7 +25,6 @@ func main() {
 		}
 	}()
 
-	benchmark.AgentInit = time.Now()
 	benchmark.PreConnectInit = time.Now()
 	benchmark.OnConnectInit = time.Now()
 	benchmark.SocketConnectionInitFromLaunch = time.Now()
@@ -73,10 +71,12 @@ func main() {
 
 	fmt.Println("Waiting for Docker Daemon to be available...")
 	log.Info().Msg("Waiting for Docker Daemon to be available...")
-	err = agent.Container.WaitForDaemon(context.Background())
+
+	err = agent.Container.WaitForDaemon(0)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("error occured while waiting for daemon")
 	}
+
 	log.Info().Msg("Got reply from Docker Daemon, continuing")
 	fmt.Println("Got reply from Docker Daemon, continuing")
 
@@ -91,14 +91,8 @@ func main() {
 
 	benchmark.TimeTillOnConnectAfterConnection = time.Since(benchmark.OnConnectInitAfterConnection)
 	benchmark.TimeTillOnConnect = time.Since(benchmark.OnConnectInit)
-	benchmark.TimeTillAgentInit = time.Since(benchmark.AgentInit)
-	log.Info().Msg("Finished Reagent initialization sequence")
 
-	fmt.Println()
-	fmt.Println("Finished Reagent Initialisation")
-	fmt.Println()
-
-	benchmark.LogResults()
+	benchmark.LogBenchmarkResultsWhenFinished()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)

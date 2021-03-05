@@ -50,18 +50,8 @@ func (agent *Agent) OnConnect() error {
 		})
 	}
 
-	err := agent.LogManager.SetupEndpoints()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
-	}
-
-	err = agent.External.RegisterAll()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
-	}
-
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
-	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
+	err := agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}
@@ -76,22 +66,36 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
-	err = agent.StateObserver.ObserveAppStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
-	}
+	safe.Go(func() {
+		err = agent.LogManager.ReviveDeadLogs()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
+		}
 
-	err = agent.LogManager.ReviveDeadLogs()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
-	}
+		err := agent.LogManager.SetupEndpoints()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
+		}
+	})
 
-	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	}
+	safe.Go(func() {
+		err = agent.StateObserver.ObserveAppStates()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
+		}
 
-	benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
+		err = agent.External.RegisterAll()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+		}
+
+		err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+		}
+
+		benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
+	})
 
 	return err
 }
