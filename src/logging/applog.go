@@ -382,7 +382,7 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 		reader, err := lm.Container.Logs(ctx, containerName, options)
 		if err != nil {
 			log.Error().Err(err).Msg("Error occurred while trying to get log history when none were found")
-			return []string{}, err
+			return []string{}, nil
 		}
 
 		var containerHistory []string
