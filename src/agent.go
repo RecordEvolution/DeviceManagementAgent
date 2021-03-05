@@ -118,7 +118,6 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	filesystem := filesystem.New()
-
 	appStore := store.NewAppStore(database, dummyMessenger)
 	stateObserver := apps.NewObserver(container, &appStore)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
@@ -138,9 +137,12 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	// try to establish the main session
+	cliArgs := generalConfig.CommandLineArguments
 	mainSocketConfig := messenger.SocketConfig{
-		SetupTestament:  true,
-		ResponseTimeout: time.Second * 3,
+		SetupTestament:    true,
+		ResponseTimeout:   time.Millisecond * time.Duration(cliArgs.ResponseTimeout),
+		PingPongTimeout:   time.Millisecond * time.Duration(cliArgs.PingPongTimeout),
+		ConnectionTimeout: time.Millisecond * time.Duration(cliArgs.ConnectionTimeout),
 	}
 
 	benchmark.TimeTillPreConnectInit = time.Since(benchmark.PreConnectInit)

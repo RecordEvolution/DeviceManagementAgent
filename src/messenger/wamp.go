@@ -61,9 +61,10 @@ func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
 }
 
 type SocketConfig struct {
-	PingPongTimeout time.Duration
-	ResponseTimeout time.Duration
-	SetupTestament  bool
+	PingPongTimeout   time.Duration
+	ResponseTimeout   time.Duration
+	ConnectionTimeout time.Duration
+	SetupTestament    bool
 }
 
 func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
@@ -159,20 +160,33 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 			connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
 			requestStart := time.Now() // time request
 
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Millisecond*1250)
+			var ctx context.Context
+			var cancelFunc context.CancelFunc
+			if socketConfig.ConnectionTimeout == 0 {
+				ctx = context.Background()
+			} else {
+				ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
+			}
+
 			client, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 
 			var duration time.Duration
 
 			if err != nil {
-				cancelFunc()
+				if cancelFunc != nil {
+					cancelFunc()
+				}
+
 				duration = time.Since(requestStart)
 				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 100ms", duration.String())
 				time.Sleep(time.Millisecond * 100)
 				continue
 			}
 
-			cancelFunc()
+			if cancelFunc != nil {
+				cancelFunc()
+			}
+
 			if client.Connected() {
 				duration = time.Since(requestStart)
 				log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
