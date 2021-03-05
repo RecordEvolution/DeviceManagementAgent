@@ -80,11 +80,6 @@ func main() {
 	log.Info().Msg("Got reply from Docker Daemon, continuing")
 	fmt.Println("Got reply from Docker Daemon, continuing")
 
-	err = agent.SetupConnectionStatusHeartbeat()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed setup connection status heartbeat")
-	}
-
 	log.Info().Msg("Running onConnect handler")
 	fmt.Println("Running onConnect handler")
 	err = agent.OnConnect()

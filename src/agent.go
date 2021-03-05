@@ -196,34 +196,6 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 }
 
-func (agent *Agent) SetupConnectionStatusHeartbeat() error {
-	// safe.Go(func() {
-	// 	for {
-	// 		if !agent.Messenger.Connected() {
-	// 			continue
-	// 		}
-
-	// 		config := agent.Config
-	// 		payload := common.Dict{
-	// 			"swarm_key":       config.ReswarmConfig.SwarmKey,
-	// 			"device_key":      config.ReswarmConfig.DeviceKey,
-	// 			"status":          messenger.CONNECTED,
-	// 			"wamp_session_id": agent.Messenger.GetSessionID(),
-	// 		}
-
-	// 		ctx, cancelFunc := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	// 		options := common.Dict{"timeout": 100}
-	// 		agent.Messenger.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, options, nil)
-
-	// 		cancelFunc()
-
-	// 		time.Sleep(time.Second * 5)
-	// 	}
-	// })
-
-	return nil
-}
-
 func (agent *Agent) ListenForDisconnect() {
 	safe.Go(func() {
 	reconnect:

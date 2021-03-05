@@ -7,6 +7,7 @@ import (
 	"reagent/errdefs"
 	"reagent/safe"
 	"reagent/store"
+	"regexp"
 	"sync"
 	"time"
 
@@ -283,14 +284,23 @@ func (so *StateObserver) initObserverSpawner() chan error {
 			case event := <-messageC:
 				switch event.Action {
 				case "create", "start":
-					// log.Debug().Msg("create or start event triggered")
 					containerName := event.Actor.Attributes["name"]
+
+					expr := `(.{3})_([0-9]*)_.*` // our containerName convention e.g.: dev_1_testapp
+					reg := regexp.MustCompile(expr)
+					match := reg.FindStringSubmatch(containerName)
+
+					// invalid container name, probably an intermediare container
+					// or a container spawned by the user
+					if len(match) == 0 {
+						continue
+					}
+
 					stage, key, name, err := common.ParseContainerName(containerName)
 					if err != nil {
-						errChan <- err
-						close(errChan)
-						break loop
+						continue
 					}
+
 					so.addObserver(stage, key, name)
 				}
 			case err := <-errC:
@@ -300,8 +310,6 @@ func (so *StateObserver) initObserverSpawner() chan error {
 				break loop
 			}
 		}
-
-		// log.Warn().Msgf("Observer spawner died")
 	})
 
 	return errChan
