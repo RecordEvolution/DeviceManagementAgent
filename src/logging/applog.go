@@ -22,14 +22,41 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type ActiveLog struct {
+type LogType string
+
+const CONTAINER LogType = "CONTAINER"
+const AGENT LogType = "AGENT"
+
+type LogEntry struct {
+	entry   string
+	logType LogType
+}
+
+type LogSubscription struct {
 	SubscriptionID string // The currently active subscriptionID for this log entry, can be empty
 	ContainerName  string
 	Stream         io.ReadCloser
-	logHistory     []string
-	Publish        bool
-	Active         bool
+	logHistory     []*LogEntry
+	Publish        bool // Publish defines if we are currently publishing the logs
+	Active         bool // Active defines wether or not we are currently iterating over the log stream
+	logMutex       sync.Mutex
 	StateLock      sync.Mutex
+}
+
+func logEntriesToString(logEntries []*LogEntry) []string {
+	var logs []string
+
+	for _, log := range logEntries {
+		logs = append(logs, log.entry)
+	}
+
+	return logs
+}
+
+func (ls *LogSubscription) appendLog(logEntry LogEntry) {
+	ls.logMutex.Lock()
+	ls.logHistory = append(ls.logHistory, &logEntry)
+	ls.logMutex.Unlock()
 }
 
 type LogManager struct {
@@ -37,7 +64,7 @@ type LogManager struct {
 	Messenger  messenger.Messenger
 	Database   persistence.Database
 	AppStore   store.AppStore
-	activeLogs map[string]*ActiveLog
+	activeLogs map[string]*LogSubscription
 	mapMutex   sync.Mutex
 }
 
@@ -52,7 +79,7 @@ type ErrorDetail struct {
 
 func NewLogManager(cont container.Container, msg messenger.Messenger, db persistence.Database, as store.AppStore) LogManager {
 	return LogManager{
-		activeLogs: make(map[string]*ActiveLog, 0),
+		activeLogs: make(map[string]*LogSubscription, 0),
 		Container:  cont,
 		Messenger:  msg,
 		Database:   db,
@@ -107,7 +134,7 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 
 	// clear locally
 	activeLogEntry.StateLock.Lock()
-	activeLogEntry.logHistory = make([]string, 0)
+	activeLogEntry.logHistory = make([]*LogEntry, 0)
 	activeLogEntry.StateLock.Unlock()
 
 	stage, appKey, appName, err := common.ParseContainerName(containerName)
@@ -124,7 +151,7 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 }
 
 // TODO: handle errors from this goroutine
-func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
+func (lm *LogManager) emitStream(logEntry *LogSubscription) error {
 	if logEntry.Stream == nil {
 		return nil
 	}
@@ -162,7 +189,7 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			logHistory := logEntry.logHistory
 			logEntry.StateLock.Unlock()
 
-			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logHistory)
+			err = lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), logEntriesToString(logHistory))
 			if err != nil {
 				return
 			}
@@ -184,7 +211,7 @@ func (lm *LogManager) emitStream(logEntry *ActiveLog) error {
 			logEntry.logHistory = logEntry.logHistory[1:]
 		}
 
-		logEntry.logHistory = append(logEntry.logHistory, chunk)
+		logEntry.appendLog(LogEntry{entry: chunk, logType: CONTAINER})
 
 		shouldPublish := logEntry.Publish
 
@@ -250,9 +277,9 @@ func (lm *LogManager) ReviveDeadLogs() error {
 				}
 			}
 
-			subscriptionEntry := ActiveLog{
+			subscriptionEntry := LogSubscription{
 				ContainerName: containerName,
-				logHistory:    make([]string, 0),
+				logHistory:    make([]*LogEntry, 0),
 				Stream:        reader,
 				Active:        false,
 				Publish:       true,
@@ -287,7 +314,7 @@ func readLines(reader io.Reader) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, error) {
+func (lm *LogManager) getPersistedLogHistory(containerName string) ([]*LogEntry, error) {
 	lm.mapMutex.Lock()
 	activeLogs := lm.activeLogs
 	lm.mapMutex.Unlock()
@@ -309,11 +336,11 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, er
 	app, err := lm.AppStore.GetApp(appKey, stage)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get app")
-		return []string{}, nil
+		return []*LogEntry{}, nil
 	}
 
 	if app == nil {
-		return []string{}, nil
+		return []*LogEntry{}, nil
 	}
 
 	// not found in memory, lets check database
@@ -321,27 +348,53 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]string, er
 	if err != nil {
 		log.Error().Err(err)
 		if strings.Contains(err.Error(), "No logs found") {
-			return []string{}, nil
+			return []*LogEntry{}, nil
 		}
 	}
 
-	return logs, nil
+	var logEntries []*LogEntry
+	for _, log := range logs {
+		logEntries = append(logEntries, &LogEntry{entry: log, logType: CONTAINER})
+	}
+
+	return logEntries, nil
 }
 
 func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
-	var history []string
-	var err error
-
-	history, err = lm.getPersistedLogHistory(containerName)
+	history, err := lm.getPersistedLogHistory(containerName)
 	if err != nil {
 		return nil, err
 	}
 
-	if err != nil {
-		return nil, err
+	containsOnlyAgentLogs := true
+	for _, entry := range history {
+		if entry.logType == CONTAINER {
+			containsOnlyAgentLogs = false
+			break
+		}
 	}
 
-	return history, nil
+	stringLogEntries := logEntriesToString(history)
+
+	if containsOnlyAgentLogs || len(history) == 0 {
+		ctx := context.Background()
+		options := common.Dict{"follow": true, "stdout": true, "stderr": true, "tail": "50"}
+		reader, err := lm.Container.Logs(ctx, containerName, options)
+		if err != nil {
+			log.Error().Err(err).Msg("Error occurred while trying to get log history when none were found")
+			return []string{}, err
+		}
+
+		var containerHistory []string
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			containerHistory = append(containerHistory, scanner.Text())
+		}
+
+		return append(stringLogEntries, containerHistory...), nil
+	}
+
+	return stringLogEntries, nil
 }
 
 func (lm *LogManager) SetupEndpoints() error {
@@ -442,10 +495,10 @@ func (lm *LogManager) SetupEndpoints() error {
 			} else {
 				// we don't have an active stream yet, and also don't know the logtype
 				// but we want to add an entry so we can populate the stream later on
-				newActiveLog := ActiveLog{
+				newActiveLog := LogSubscription{
 					SubscriptionID: id,
 					Publish:        true,
-					logHistory:     make([]string, 0),
+					logHistory:     make([]*LogEntry, 0),
 					Active:         false,
 					ContainerName:  containerName,
 				}
@@ -486,7 +539,7 @@ func (lm *LogManager) SetupEndpoints() error {
 	}, nil)
 }
 
-func (lm *LogManager) GetLogTaskBySubscriptionID(id string) *ActiveLog {
+func (lm *LogManager) GetLogTaskBySubscriptionID(id string) *LogSubscription {
 	lm.mapMutex.Lock()
 	activeLogs := lm.activeLogs
 	lm.mapMutex.Unlock()
@@ -516,9 +569,9 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 		return err
 	}
 
-	activeLog := ActiveLog{
+	activeLog := LogSubscription{
 		ContainerName: containerName,
-		logHistory:    make([]string, 0),
+		logHistory:    make([]*LogEntry, 0),
 		Stream:        stream,
 		Active:        false,
 		Publish:       false,
@@ -632,9 +685,7 @@ func (lm *LogManager) Publish(containerName string, text string) error {
 // Write adds an entry to the log history and publishes a message to a specific subscribable container.
 func (lm *LogManager) Write(containerName string, text string) error {
 	topic := fmt.Sprintf("reswarm.logs.%s.%s", lm.Messenger.GetConfig().ReswarmConfig.SerialNumber, containerName)
-	entry := common.Dict{"type": "build", "chunk": text}
-	args := make([]interface{}, 0)
-	args = append(args, entry)
+	logPayload := common.Dict{"type": "build", "chunk": text}
 
 	lm.mapMutex.Lock()
 	activeLog := lm.activeLogs[containerName]
@@ -642,11 +693,16 @@ func (lm *LogManager) Write(containerName string, text string) error {
 
 	if activeLog != nil {
 		activeLog.StateLock.Lock()
-		activeLog.logHistory = append(activeLog.logHistory, text)
+
+		activeLog.appendLog(LogEntry{
+			entry:   text,
+			logType: AGENT,
+		})
+
 		activeLog.StateLock.Unlock()
 	}
 
-	err := lm.Messenger.Publish(topics.Topic(topic), args, nil, nil)
+	err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{logPayload}, nil, nil)
 	if err != nil {
 		return err
 	}
