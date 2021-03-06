@@ -452,6 +452,7 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 
 		environmentsJSONBytes, err := json.Marshal(payload.EnvironmentVariables)
 		if err != nil {
+			tx.Rollback()
 			return err
 		}
 

@@ -181,12 +181,11 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			correctedAppState = appStateDeterminedByContainer
 		}
 
-		if correctedAppState == currentAppState {
+		if correctedAppState == currentAppState && rState.CurrentState == correctedAppState {
 			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
 			continue
 		}
 
-		log.Debug().Msgf("State Correcter: app state for %s will be updated from %s to %s", containerName, app.CurrentState, correctedAppState)
 		err = so.Notify(app, correctedAppState)
 		if err != nil {
 			return err
