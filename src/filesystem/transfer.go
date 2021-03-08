@@ -85,7 +85,8 @@ func (fs *Filesystem) Write(chunk FileChunk) error {
 		}
 		fs.activeTransfersLock.Unlock()
 
-		return os.Remove(chunk.FilePath + "/" + chunk.FileName)
+		os.Remove(chunk.FilePath + "/" + chunk.FileName)
+		return nil
 	}
 
 	if activeTransfer.Canceled {
