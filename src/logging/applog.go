@@ -264,7 +264,7 @@ func (lm *LogManager) ReviveDeadLogs() error {
 			}
 
 			ctx := context.Background()
-			result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{topic, common.Dict{"match": "wildcard"}}, nil, nil, nil)
+			result, err := lm.Messenger.Call(ctx, topics.MetaProcMatchSubscription, []interface{}{topic}, nil, nil, nil)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to lookup subscription")
 			}
@@ -282,11 +282,12 @@ func (lm *LogManager) ReviveDeadLogs() error {
 				logHistory:    make([]*LogEntry, 0),
 				Stream:        reader,
 				Active:        false,
-				Publish:       true,
+				Publish:       false,
 			}
 
 			if id != nil {
 				subscriptionEntry.SubscriptionID = fmt.Sprint(id)
+				subscriptionEntry.Publish = true
 			}
 
 			lm.mapMutex.Lock()
