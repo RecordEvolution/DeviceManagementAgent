@@ -342,8 +342,8 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	return nil
 }
 
-// EvaluateRequestedStates iterates over all requested states found in the local database, and transitions were neccessary.
-func (am *AppManager) EvaluateRequestedStates() error {
+// EnsureRemoteRequestedStates iterates over all requested states found in the local database, and transitions were neccessary.
+func (am *AppManager) EnsureRemoteRequestedStates() error {
 	payloads, err := am.AppStore.GetRequestedStates()
 	if err != nil {
 		return err
@@ -351,6 +351,12 @@ func (am *AppManager) EvaluateRequestedStates() error {
 
 	for i := range payloads {
 		payload := payloads[i]
+
+		// do not redo failed publishes on reconnect
+		if payload.RequestedState == common.PUBLISHED {
+			continue
+		}
+
 		safe.Go(func() {
 			am.RequestAppState(payload)
 		})

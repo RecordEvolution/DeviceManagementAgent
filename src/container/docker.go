@@ -370,6 +370,11 @@ type PullOptions struct {
 	PullID     string
 }
 
+type PushOptions struct {
+	AuthConfig AuthConfig
+	PushID     string
+}
+
 // Pull pulls a container image from a registry
 func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOptions) (io.ReadCloser, error) {
 	dockerAuthConfig := types.AuthConfig{
@@ -404,17 +409,36 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 }
 
 // Push pushes a container image to a registry
-func (docker *Docker) Push(ctx context.Context, imageName string, authConfig AuthConfig) (io.ReadCloser, error) {
+func (docker *Docker) Push(ctx context.Context, imageName string, options PushOptions) (io.ReadCloser, error) {
 	dockerAuthConfig := types.AuthConfig{
-		Username: authConfig.Username,
-		Password: authConfig.Password,
+		Username: options.AuthConfig.Username,
+		Password: options.AuthConfig.Password,
 	}
+
 	encodedJSON, err := json.Marshal(dockerAuthConfig)
 	if err != nil {
 		return nil, err
 	}
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
-	return docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
+
+	ioReader, err := docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
+	if err != nil {
+		return nil, err
+	}
+
+	pushID := options.PushID
+	pushStream := DockerStream{
+		Stream:   ioReader,
+		StreamID: pushID,
+	}
+
+	if pushID != "" {
+		docker.streamMapMutex.Lock()
+		docker.activeStreams[pushID] = &pushStream
+		docker.streamMapMutex.Unlock()
+	}
+
+	return ioReader, nil
 }
 
 // Stats gets the stats of a specific container

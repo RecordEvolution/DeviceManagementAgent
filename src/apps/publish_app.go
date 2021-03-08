@@ -35,12 +35,15 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	authConfig := container.AuthConfig{
-		Username: payload.RegisteryToken,
-		Password: sm.Container.GetConfig().ReswarmConfig.Secret,
+	pushOptions := container.PushOptions{
+		AuthConfig: container.AuthConfig{
+			Username: payload.RegisteryToken,
+			Password: sm.Container.GetConfig().ReswarmConfig.Secret,
+		},
+		PushID: common.BuildDockerPushID(payload.AppKey, payload.AppName),
 	}
 
-	reader, err := sm.Container.Push(ctx, prodImage, authConfig)
+	reader, err := sm.Container.Push(ctx, prodImage, pushOptions)
 	if err != nil {
 		return err
 	}

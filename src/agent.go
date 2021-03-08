@@ -61,7 +61,7 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
 
-	err = agent.AppManager.EvaluateRequestedStates()
+	err = agent.AppManager.EnsureRemoteRequestedStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
