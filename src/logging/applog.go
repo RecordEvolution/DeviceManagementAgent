@@ -379,7 +379,7 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 
 	if containsOnlyAgentLogs || len(history) == 0 {
 		ctx := context.Background()
-		options := common.Dict{"follow": true, "stdout": true, "stderr": true, "tail": "50"}
+		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
 		reader, err := lm.Container.Logs(ctx, containerName, options)
 		if err != nil {
 			log.Error().Err(err).Msg("Error occurred while trying to get log history when none were found")
