@@ -51,6 +51,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.BUILT:     sm.buildApp,
 			common.PUBLISHED: sm.publishApp,
 		},
+		common.PUBLISHING: {
+			common.REMOVED: sm.cancelPush,
+		},
 		common.BUILDING: {
 			common.REMOVED: sm.cancelBuild,
 		},

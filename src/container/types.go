@@ -106,7 +106,7 @@ type Container interface {
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	WaitForDaemon(retryTimeout time.Duration) error
 	Ping(ctx context.Context) (Ping, error)
-	CancelStream(buildID string) error
+	CancelStream(cancelID string) error
 	CancelAllStreams() error
 	GetConfig() *config.Config
 }

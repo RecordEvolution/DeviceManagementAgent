@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/container"
+	"reagent/errdefs"
 )
 
 func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common.App) error {
@@ -48,7 +49,24 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.StreamBlocking(payload.PublishContainerName, common.PUSH, reader)
+	pushMessage := "The image was pushed successfully"
+	streamErr := sm.LogManager.StreamBlocking(payload.PublishContainerName, common.PUSH, reader)
+	if streamErr != nil {
+		if errdefs.IsDockerStreamCanceled(streamErr) {
+			pushMessage = "The push stream was canceled"
+			writeErr := sm.LogManager.Write(payload.PublishContainerName, pushMessage)
+			if writeErr != nil {
+				return writeErr
+			}
+			// this error will not cause a failed state and is handled upstream
+			return streamErr
+		}
+
+		return streamErr
+	}
+
+	pushMessage = "Image built successfully"
+	err = sm.LogManager.Write(payload.PublishContainerName, pushMessage)
 	if err != nil {
 		return err
 	}

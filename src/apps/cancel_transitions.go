@@ -30,10 +30,6 @@ func (sm *StateMachine) cancelPull(payload common.TransitionPayload, app *common
 }
 
 func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common.App) error {
-	if payload.Stage != common.PROD {
-		return errors.New("cannot push dev apps")
-	}
-
 	pushID := common.BuildDockerPushID(payload.AppKey, payload.AppName)
 
 	sm.Container.CancelStream(pushID)
