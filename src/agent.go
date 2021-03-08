@@ -79,11 +79,6 @@ func (agent *Agent) OnConnect() error {
 	})
 
 	safe.Go(func() {
-		err = agent.StateObserver.ObserveAppStates()
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
-		}
-
 		err = agent.External.RegisterAll()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
@@ -128,6 +123,11 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to correct local states")
+	}
+
+	err = stateObserver.ObserveAppStates()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
 	// setup the containers on start
