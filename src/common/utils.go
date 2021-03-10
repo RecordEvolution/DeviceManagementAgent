@@ -153,7 +153,7 @@ func PrettyPrintDebug(data interface{}) {
 	log.Debug().Msg(pretty)
 }
 
-func Min(a int, b int) int {
+func Min(a int64, b int64) int64 {
 	if a < b {
 		return a
 	}
