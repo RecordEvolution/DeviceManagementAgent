@@ -15,8 +15,9 @@ import (
 
 func SetupLogger(cliArgs *config.CommandLineArguments) {
 	rollingLogFile := &lumberjack.Logger{
-		Filename: cliArgs.LogFileLocation,
-		MaxSize:  100,
+		Filename:   cliArgs.LogFileLocation,
+		MaxSize:    100,
+		MaxBackups: 2,
 	}
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -24,7 +25,7 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 
 	var writer io.Writer
 	if cliArgs.PrettyLogging {
-		consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr}
+		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
 		writer = io.MultiWriter(consoleWriter, rollingLogFile)
 	} else {
 		writer = rollingLogFile
