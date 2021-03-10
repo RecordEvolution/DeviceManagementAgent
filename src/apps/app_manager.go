@@ -52,7 +52,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	builtState := app.CurrentState == common.BUILT && app.RequestedState == common.BUILT
 	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
-		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, payload.RequestedState)
+		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
 		return nil
 	}
 
