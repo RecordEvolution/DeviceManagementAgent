@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"reagent/common"
 	"reagent/config"
@@ -9,16 +10,27 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func SetupLogger(cliArgs *config.CommandLineArguments) {
-	file, err := os.OpenFile(cliArgs.LogFileLocation, os.O_APPEND|os.O_WRONLY|os.O_CREATE, os.ModePerm)
-	if err != nil {
-		log.Error().Err(err).Msg("error occured while trying to open log file")
+	rollingLogFile := &lumberjack.Logger{
+		Filename: cliArgs.LogFileLocation,
+		MaxSize:  100,
 	}
 
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
-	logger := zerolog.New(file).With().Caller().Timestamp().Stack().Logger()
+
+	var writer io.Writer
+	if cliArgs.PrettyLogging {
+		consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr}
+		writer = io.MultiWriter(consoleWriter, rollingLogFile)
+	} else {
+		writer = rollingLogFile
+	}
+
+	logger := zerolog.New(writer).With().Caller().Timestamp().Stack().Logger()
 	log.Logger = logger
 
 	if cliArgs.Debug {

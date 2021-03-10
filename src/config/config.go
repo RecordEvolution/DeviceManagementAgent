@@ -49,6 +49,7 @@ type CommandLineArguments struct {
 	Offline                  bool
 	EnsureNameserver         bool
 	ShouldUpdate             bool
+	PrettyLogging            bool
 	LogFileLocation          string
 	ConfigFileLocation       string
 	DatabaseFileName         string
@@ -92,6 +93,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on connection")
 	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. primarily meant for testing")
 	version := flag.Bool("version", false, "displays the current version of the agent")
+	prettyLogging := flag.Bool("prettyLogging", false, "enables the pretty console writing, intended for debugging (slow)")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
@@ -118,6 +120,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		Debug:                    *debug,
 		Version:                  *version,
 		Offline:                  *offline,
+		PrettyLogging:            *prettyLogging,
 		DebugMessaging:           *debugMessaging,
 		LogFileLocation:          *logFile,
 		ConfigFileLocation:       *cfgFile,
