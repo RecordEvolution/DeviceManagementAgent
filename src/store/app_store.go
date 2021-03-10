@@ -8,7 +8,6 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
-	"reagent/safe"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
@@ -92,7 +91,7 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 
 	am.apps = append(am.apps, app)
 
-	safe.Go(func() {
+	am.database.QueueTask(func() {
 		// Insert the newly created app state data into the database
 		app.StateLock.Lock()
 		curAppState := app.CurrentState
@@ -107,8 +106,10 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 	return app, nil
 }
 
-func (am *AppStore) UpdateLocalRequestedState(payload common.TransitionPayload) error {
-	return am.database.UpsertRequestedStateChange(payload)
+func (am *AppStore) UpdateLocalRequestedState(payload common.TransitionPayload) {
+	am.database.QueueTask(func() {
+		am.database.UpsertRequestedStateChange(payload)
+	})
 }
 
 func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
@@ -134,8 +135,17 @@ func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 }
 
 // UpdateLocalAppState updates the local app database
-func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppState) (common.Timestamp, error) {
-	return am.database.UpsertAppState(app, stateToSet)
+func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppState) {
+	am.database.QueueTask(func() {
+		timestamp, err := am.database.UpsertAppState(app, stateToSet)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to upsert app state")
+		}
+
+		app.StateLock.Lock()
+		app.LastUpdated = timestamp
+		app.StateLock.Unlock()
+	})
 }
 
 // UpdateRemoteAppState update sthe remote app database

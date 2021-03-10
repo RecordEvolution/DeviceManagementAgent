@@ -20,5 +20,6 @@ type Database interface {
 	GetAppStates() ([]*common.App, error)
 	GetRequestedState(aKey uint64, aStage common.Stage) (common.TransitionPayload, error)
 	GetRequestedStates() ([]common.TransitionPayload, error)
+	QueueTask(task func())
 	Close() error
 }

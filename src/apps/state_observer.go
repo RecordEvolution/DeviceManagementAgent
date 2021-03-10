@@ -52,14 +52,7 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 		// ignore
 	}
 
-	safe.Go(func() {
-		// update locally
-		_, err = so.AppStore.UpdateLocalAppState(app, achievedState)
-		if err != nil {
-			log.Error().Stack().Err(err)
-			return
-		}
-	})
+	so.AppStore.UpdateLocalAppState(app, achievedState)
 
 	return nil
 }

@@ -50,7 +50,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
 	}
 
-	builtState := app.CurrentState == common.BUILT && app.RequestedState == common.BUILT
+	builtState := curAppState == common.BUILT && requestedAppState == common.BUILT
 	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
 		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
 		return nil
@@ -206,6 +206,7 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
+	requestedState := app.RequestedState
 	app.StateLock.Unlock()
 
 	if curAppState == common.FAILED {
@@ -215,8 +216,8 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 	// use in memory requested state, since it's possible the database is not up to date yet if it's waiting for a database lock from other tasks
 	// this requested state is updated properly on every new state request
-	if app.RequestedState != curAppState {
-		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedStatePayload.RequestedState)
+	if curAppState != requestedState {
+		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
 
 		// transition again
 		safe.Go(func() {
@@ -261,20 +262,7 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 
 	app.StateLock.Unlock()
 
-	safe.Go(func() {
-		app.StateLock.Lock()
-		curAppState := app.CurrentState
-		app.StateLock.Unlock()
-
-		timestamp, err := am.AppStore.UpdateLocalAppState(app, curAppState)
-		if err != nil {
-			log.Error().Err(err)
-		}
-
-		app.StateLock.Lock()
-		app.LastUpdated = timestamp
-		app.StateLock.Unlock()
-	})
+	am.AppStore.UpdateLocalAppState(app, curAppState)
 
 	return nil
 }
@@ -309,12 +297,7 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	app.RequestedState = payload.RequestedState
 	app.StateLock.Unlock()
 
-	safe.Go(func() {
-		err = am.AppStore.UpdateLocalRequestedState(payload)
-		if err != nil {
-			log.Error().Stack().Err(err)
-		}
-	})
+	am.AppStore.UpdateLocalRequestedState(payload)
 
 	return nil
 }

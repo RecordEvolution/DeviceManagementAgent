@@ -9,6 +9,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"reagent/safe"
 	"reagent/system"
 	"strings"
 	"time"
@@ -18,8 +19,9 @@ import (
 )
 
 type AppStateDatabase struct {
-	db     *sql.DB
-	config *config.Config
+	db          *sql.DB
+	config      *config.Config
+	updateQueue chan func()
 }
 
 const (
@@ -40,11 +42,11 @@ func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 		return nil, err
 	}
 
-	// SQLite cannot handle concurrent writes, so we limit sqlite to one connection. https://github.com/mattn/go-sqlite3/issues/274
+	// SQLite cannot handle concurrent reads/writes, so we limit sqlite to one connection. https://github.com/mattn/go-sqlite3/issues/274
 	// will not effect performance noticably, even for large amounts of operations: https://stackoverflow.com/questions/35804884/sqlite-concurrent-writing-performance/35805826
 	db.SetMaxOpenConns(maxOpenConn)
 
-	return &AppStateDatabase{db: db, config: config}, nil
+	return &AppStateDatabase{db: db, config: config, updateQueue: make(chan func())}, nil
 }
 
 func (sqlite *AppStateDatabase) Close() error {
@@ -55,6 +57,12 @@ func (sqlite *AppStateDatabase) Close() error {
 var scriptFiles embed.FS
 
 const scriptsDir = "update-scripts"
+
+func (sqlite *AppStateDatabase) QueueTask(task func()) {
+	safe.Go(func() {
+		sqlite.updateQueue <- task
+	})
+}
 
 func (sqlite *AppStateDatabase) Init() error {
 	scriptFiles, err := fs.ReadDir(scriptFiles, scriptsDir)
@@ -70,6 +78,12 @@ func (sqlite *AppStateDatabase) Init() error {
 			return err
 		}
 	}
+
+	safe.Go(func() {
+		for task := range sqlite.updateQueue {
+			task()
+		}
+	})
 
 	return nil
 }

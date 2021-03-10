@@ -32,5 +32,7 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	payload.Version = app.Version
 
 	// The state validation will ensure it will reach it's requestedState again
-	return sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
+	sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
+
+	return nil
 }
