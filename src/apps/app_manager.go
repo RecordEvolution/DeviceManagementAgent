@@ -6,6 +6,7 @@ import (
 	"reagent/errdefs"
 	"reagent/safe"
 	"reagent/store"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 )
@@ -14,14 +15,20 @@ type AppManager struct {
 	AppStore      *store.AppStore
 	StateMachine  *StateMachine
 	StateObserver *StateObserver
+	crashLoops    map[*CrashLoop]struct{}
+	crashLoopLock sync.Mutex
 }
 
-func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver) AppManager {
-	return AppManager{
+func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver) *AppManager {
+	am := AppManager{
 		StateMachine:  sm,
 		StateObserver: so,
 		AppStore:      as,
+		crashLoops:    make(map[*CrashLoop]struct{}),
 	}
+
+	am.StateObserver.AppManager = &am
+	return &am
 }
 
 func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
@@ -76,7 +83,13 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		app.UnlockTransition()
 		return err
 	}
+
 	payload.RegisteryToken = token
+
+	// if there's an active crashloopbackoff and we are no longer transitioning to running state, clear the loop
+	if payload.Stage == common.PROD && payload.RequestedState != common.RUNNING {
+		am.clearCrashLoop(payload.AppKey, payload.Stage)
+	}
 
 	errC := am.StateMachine.PerformTransition(app, payload)
 	if errC == nil {
@@ -127,6 +140,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 		log.Error().Msgf("App Manager: An error occured during transition from %s to %s for %s (%s)", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		log.Error().Err(err).Msg("App Manager: The current app state will has been set to FAILED")
+
+		// enter the crashloop when we encounter a FAILED state
+		if payload.Stage == common.PROD {
+			am.incrementCrashLoop(payload)
+		}
 	}
 
 	return nil
@@ -214,47 +232,6 @@ func (am *AppManager) VerifyState(app *common.App) error {
 			_ = am.RequestAppState(requestedStatePayload)
 		})
 	}
-
-	return nil
-}
-
-func TempUpdateCurrentAppState(appStore *store.AppStore, payload common.TransitionPayload) error {
-	app, err := appStore.GetApp(payload.AppKey, payload.Stage)
-	if err != nil {
-		return err
-	}
-
-	app.StateLock.Lock()
-
-	curAppState := app.CurrentState
-
-	// Building and Publishing actions will set the state to 'REMOVED' temporarily to perform a build
-	if curAppState == common.BUILT || curAppState == common.PUBLISHED {
-		if payload.CurrentState != "" {
-			app.CurrentState = payload.CurrentState
-		}
-	}
-
-	if payload.PresentVersion != "" {
-		app.Version = payload.PresentVersion
-	}
-
-	app.StateLock.Unlock()
-
-	safe.Go(func() {
-		app.StateLock.Lock()
-		curAppState := app.CurrentState
-		app.StateLock.Unlock()
-
-		timestamp, err := appStore.UpdateLocalAppState(app, curAppState)
-		if err != nil {
-			log.Error().Err(err)
-		}
-
-		app.StateLock.Lock()
-		app.LastUpdated = timestamp
-		app.StateLock.Unlock()
-	})
 
 	return nil
 }

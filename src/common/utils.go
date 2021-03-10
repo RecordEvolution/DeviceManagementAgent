@@ -153,6 +153,13 @@ func PrettyPrintDebug(data interface{}) {
 	log.Debug().Msg(pretty)
 }
 
+func Min(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func PrettyFormat(data interface{}) (string, error) {
 	var p []byte
 	//    var err := error

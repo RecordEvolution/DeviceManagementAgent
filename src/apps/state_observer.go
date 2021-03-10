@@ -23,6 +23,7 @@ type AppStateObserver struct {
 
 type StateObserver struct {
 	AppStore        *store.AppStore
+	AppManager      *AppManager
 	Container       container.Container
 	activeObservers map[string]*AppStateObserver
 	mapMutex        sync.Mutex
@@ -252,12 +253,26 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				log.Debug().Msgf("State Observer: app (%s, %s) state is not up to date", appName, stage)
 				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
 
-				// update the app state
+				// update the current local and remote app state
 				err := so.Notify(app, latestAppState)
 				if err != nil {
 					errorC <- err
 					log.Error().Err(err).Msg("failed to notify state")
 					return
+				}
+
+				if stage == common.PROD {
+					// try to transition to the state it's supposed to be at
+					payload, err := so.AppStore.GetRequestedState(app.AppKey, app.Stage)
+					if err != nil {
+						return
+					}
+
+					if latestAppState == common.FAILED {
+						so.AppManager.incrementCrashLoop(payload)
+					} else {
+						so.AppManager.RequestAppState(payload)
+					}
 				}
 			}
 
@@ -325,7 +340,7 @@ func (so *StateObserver) ObserveAppStates() error {
 		so.addObserver(app.Stage, app.AppKey, app.AppName)
 	}
 
-	_ = so.initObserverSpawner()
+	so.initObserverSpawner()
 
 	return err
 }
