@@ -6,9 +6,9 @@ const QuerySelectAllDeviceState = `SELECT interface_type, device_status FROM Dev
 const QuerySelectAllAppStates = `SELECT app_name, app_key, version, release_key, stage, state, timestamp FROM AppStates`
 
 const QuerySelectAllRequestedStates = `SELECT app_name, app_key, stage, version, present_version, newest_version, current_state,
-manually_requested_state, requestor_account_key, release_key, new_release_key, environment_variables FROM RequestedAppStates`
+manually_requested_state, requestor_account_key, release_key, new_release_key, request_update, environment_variables FROM RequestedAppStates`
 const QuerySelectRequestedStateByAppKeyAndStage = `SELECT app_name, app_key, stage, version, present_version, newest_version, current_state,
-manually_requested_state, requestor_account_key, release_key, new_release_key, environment_variables FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
+manually_requested_state, requestor_account_key, release_key, new_release_key, request_update, environment_variables FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
 const QuerySelectAppStateByAppKeyAndStage = `SELECT app_name, app_key, version, release_key, stage, state, timestamp FROM AppStates WHERE app_key = ? AND stage = ?`
 const QuerySelectLogHistoryByAppKeyStageAndType = `SELECT log FROM LogHistory WHERE app_key = ? AND stage = ?`
 

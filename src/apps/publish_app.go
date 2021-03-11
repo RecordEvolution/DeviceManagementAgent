@@ -49,11 +49,10 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	pushMessage := "The image was pushed successfully"
 	streamErr := sm.LogManager.StreamBlocking(payload.PublishContainerName, common.PUSH, reader)
 	if streamErr != nil {
 		if errdefs.IsDockerStreamCanceled(streamErr) {
-			pushMessage = "The push stream was canceled"
+			pushMessage := "The push stream was canceled"
 			writeErr := sm.LogManager.Write(payload.PublishContainerName, pushMessage)
 			if writeErr != nil {
 				return writeErr
@@ -63,12 +62,6 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		}
 
 		return streamErr
-	}
-
-	pushMessage = "Image built successfully"
-	err = sm.LogManager.Write(payload.PublishContainerName, pushMessage)
-	if err != nil {
-		return err
 	}
 
 	err = sm.setState(app, common.PUBLISHED)

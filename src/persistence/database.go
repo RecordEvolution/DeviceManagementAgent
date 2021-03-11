@@ -347,6 +347,7 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		// var deviceToAppKey uint64
 		var requestorAccountKey uint64
 		var releaseKey uint64
+		var requestUpdate bool
 		var newReleaseKey uint64
 		var stage common.Stage
 		var version string
@@ -355,10 +356,8 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var environmentVariablesString string
 		var currentState common.AppState
 		var requestedState common.AppState
-		// var callerAuthID string
 
-		// app_name, app_key, stage, current_state, manually_requested_state, requestor_account_key, device_to_app_key, caller_authid
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString)
 		if err != nil {
 			return nil, err
 		}
@@ -367,6 +366,7 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		payload.Version = version
 		payload.NewestVersion = newestVersion
 		payload.PresentVersion = presentVersion
+		payload.RequestUpdate = requestUpdate
 
 		environmentVariables := make(map[string]interface{})
 		if environmentVariablesString != "" {
@@ -409,6 +409,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var appName string
 	var appKey uint64
 	var requestorAccountKey uint64
+	var requestUpdate bool
 	var stage common.Stage
 	var version string
 	var presentVersion string
@@ -419,7 +420,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var requestedState common.AppState
 	var environmentVariablesString string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &environmentVariablesString)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -433,6 +434,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	payload.Version = version
 	payload.NewestVersion = newestVersion
 	payload.PresentVersion = presentVersion
+	payload.RequestUpdate = requestUpdate
 
 	environmentVariables := make(map[string]interface{})
 	if environmentVariablesString != "" {

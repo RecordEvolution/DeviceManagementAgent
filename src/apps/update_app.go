@@ -1,8 +1,12 @@
 package apps
 
 import (
-	"errors"
+	"context"
 	"reagent/common"
+	"reagent/errdefs"
+	"time"
+
+	"github.com/pkg/errors"
 )
 
 func (sm *StateMachine) getUpdateTransition(payload common.TransitionPayload, app *common.App) TransitionFunc {
@@ -14,14 +18,31 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return errors.New("cannot update dev app")
 	}
 
-	// Stop running containers of the app + remove all old images
-	err := sm.removeProdApp(payload, app)
-	if err != nil {
-		return err
+	ctx := context.Background()
+	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+	if err == nil {
+		err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+		if err != nil {
+			return err
+		}
+
+		// should return 'container not found' error, this way we know it's removed successfully
+		_, errC := sm.Container.PollContainerState(ctx, cont.ID, time.Second)
+		select {
+		case err := <-errC:
+			if !errdefs.IsContainerNotFound(err) {
+				return err
+			}
+		}
 	}
 
 	// Pull newest image of app
 	err = sm.pullApp(payload, app)
+	if err != nil {
+		return err
+	}
+
+	err = sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
 	if err != nil {
 		return err
 	}
