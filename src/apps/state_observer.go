@@ -165,17 +165,17 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 		switch currentAppState {
 		case common.DOWNLOADING,
 			common.TRANSFERING,
-			common.BUILDING:
+			common.BUILDING,
+			common.PUBLISHING:
 			correctedAppState = common.REMOVED
-		case common.PUBLISHING,
-			common.STOPPING,
+		case common.STOPPING,
 			common.STARTING:
 			correctedAppState = appStateDeterminedByContainer
 		default:
 			correctedAppState = appStateDeterminedByContainer
 		}
 
-		if correctedAppState == currentAppState && rState.CurrentState == correctedAppState {
+		if currentAppState == correctedAppState && rState.CurrentState == correctedAppState {
 			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
 			continue
 		}

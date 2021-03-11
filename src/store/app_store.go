@@ -181,7 +181,7 @@ func (am *AppStore) UpdateRemoteAppState(app *common.App, stateToSet common.AppS
 }
 
 func (am *AppStore) UpdateRequestedStatesWithRemote() error {
-	appStateChanges, err := am.fetchRequestedAppStates()
+	appStateChanges, err := am.FetchRequestedAppStates()
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (am *AppStore) UpdateRequestedStatesWithRemote() error {
 	return nil
 }
 
-func (am *AppStore) fetchRequestedAppStates() ([]common.TransitionPayload, error) {
+func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
 	config := am.messenger.GetConfig()
 	args := []interface{}{common.Dict{"device_key": config.ReswarmConfig.DeviceKey}}

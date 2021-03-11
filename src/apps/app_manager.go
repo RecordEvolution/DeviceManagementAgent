@@ -181,11 +181,15 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 			return err
 		}
 
+		app.StateLock.Lock()
+		currentAppState := app.CurrentState
+		app.StateLock.Unlock()
+
 		safe.Go(func() {
-			if !IsInvalidOfflineTransition(app, payload) && payload.RequestedState != app.CurrentState {
+			if !IsInvalidOfflineTransition(app, payload) && currentAppState != payload.RequestedState {
 				err := am.RequestAppState(payload)
 				if err != nil {
-					log.Error().Err(err)
+					log.Error().Err(err).Msg("Failed to ensure local requested state")
 				}
 			}
 		})
@@ -312,7 +316,7 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 	for i := range payloads {
 		payload := payloads[i]
 
-		// do not redo failed publishes on reconnect
+		// do not execute publishes on reconnect
 		if payload.RequestedState == common.PUBLISHED {
 			continue
 		}
@@ -328,33 +332,19 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 // UpdateLocalRequestedAppStatesWithRemote is responsible for fetching any requested app states from the remote database.
 // The local database will be updated with the fetched requested states. In case an app state does exist yet locally, one will be created.
 func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
-	// first update the requestedStates that we have in the database
-	err := am.AppStore.UpdateRequestedStatesWithRemote()
+	newestPayloads, err := am.AppStore.FetchRequestedAppStates()
 	if err != nil {
 		return err
 	}
 
-	payloads, err := am.AppStore.GetRequestedStates()
-	if err != nil {
-		return err
-	}
+	log.Info().Msgf("App Manager: Found %d app states, updating local database with new requested states..", len(newestPayloads))
 
-	log.Info().Msgf("App Manager: Found %d app states, updating local database with new requested states..", len(payloads))
+	for i := range newestPayloads {
+		payload := newestPayloads[i]
 
-	for i := range payloads {
-		payload := payloads[i]
-
-		app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+		err := am.CreateOrUpdateApp(payload)
 		if err != nil {
 			return err
-		}
-
-		// if the app doesn't exist yet, make sure it gets added to the local db / memory
-		if app == nil {
-			_, err = am.AppStore.AddApp(payload)
-			if err != nil {
-				return err
-			}
 		}
 	}
 

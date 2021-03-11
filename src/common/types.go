@@ -41,37 +41,6 @@ func (app *App) UnlockTransition() {
 	app.TransitionLock.Release(1)
 }
 
-// func (app *App) IsTransitioning() bool {
-// 	app.TransitionLock.Lock()
-// 	isTransitioning := app.Transitioning
-// 	app.TransitionLock.Unlock()
-
-// 	return isTransitioning
-// }
-
-// // SecureTransition acquires a transition lock and returns whether or not it is currently transitioning
-// func (app *App) SecureTransition() bool {
-// 	app.TransitionLock.Lock()
-// 	isTransitioning := app.Transitioning
-// 	app.TransitionLock.Unlock()
-
-// 	if isTransitioning {
-// 		return true
-// 	}
-
-// 	app.TransitionLock.Lock()
-// 	app.Transitioning = true
-// 	app.TransitionLock.Unlock()
-
-// 	return false
-// }
-
-// func (app *App) UnlockTransition() {
-// 	app.TransitionLock.Lock()
-// 	app.Transitioning = false
-// 	app.TransitionLock.Unlock()
-// }
-
 func (app *App) IsCancelable() bool {
 	app.StateLock.Lock()
 	currAppState := app.CurrentState
