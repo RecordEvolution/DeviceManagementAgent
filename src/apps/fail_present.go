@@ -7,10 +7,20 @@ import (
 
 func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
+
+	var containerToRemove string
 	if payload.Stage == common.DEV {
-		sm.Container.RemoveContainerByID(ctx, payload.ContainerName.Dev, map[string]interface{}{"force": true})
+		containerToRemove = payload.ContainerName.Dev
+	} else {
+		containerToRemove = payload.ContainerName.Prod
+	}
+
+	// make sure to remove any existing container to ensure environment variables are set
+	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
+
+	if payload.Stage == common.DEV {
 		return sm.buildApp(payload, app)
 	}
-	sm.Container.RemoveContainerByID(ctx, payload.ContainerName.Prod, map[string]interface{}{"force": true})
+
 	return sm.pullApp(payload, app)
 }

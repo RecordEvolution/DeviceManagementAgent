@@ -6,13 +6,17 @@ import (
 )
 
 func (sm *StateMachine) recoverFailToRunningHandler(payload common.TransitionPayload, app *common.App) error {
-	// make sure to remove any existing container to ensure environment variables are set
-	ctx := context.Background()
+
+	var containerToRemove string
 	if payload.Stage == common.DEV {
-		sm.Container.RemoveContainerByID(ctx, payload.ContainerName.Dev, map[string]interface{}{"force": true})
+		containerToRemove = payload.ContainerName.Dev
 	} else {
-		sm.Container.RemoveContainerByID(ctx, payload.ContainerName.Prod, map[string]interface{}{"force": true})
+		containerToRemove = payload.ContainerName.Prod
 	}
+
+	ctx := context.Background()
+	// make sure to remove any existing container to ensure environment variables are set
+	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
 
 	return sm.runApp(payload, app)
 }
