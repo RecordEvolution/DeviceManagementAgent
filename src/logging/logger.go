@@ -31,7 +31,7 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 		writer = rollingLogFile
 	}
 
-	logger := zerolog.New(writer).With().Caller().Timestamp().Stack().Logger()
+	logger := zerolog.New(writer).With().CallerWithSkipFrameCount(2).Timestamp().Logger()
 	log.Logger = logger
 
 	if cliArgs.Debug {
