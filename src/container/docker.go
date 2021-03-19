@@ -831,9 +831,13 @@ type Ping struct {
 	BuilderVersion string
 }
 
-func (docker *Docker) WaitForDaemon(retryTimeout time.Duration) error {
-	if retryTimeout == 0 {
+func (docker *Docker) WaitForDaemon(retryTimeoutParam ...time.Duration) error {
+	var retryTimeout time.Duration
+
+	if len(retryTimeoutParam) == 0 {
 		retryTimeout = time.Second * 5
+	} else {
+		retryTimeout = retryTimeoutParam[0]
 	}
 
 	timeoutTimer := time.Now()
@@ -846,7 +850,7 @@ func (docker *Docker) WaitForDaemon(retryTimeout time.Duration) error {
 			break
 		}
 
-		if retryTimeout > time.Since(timeoutTimer) {
+		if time.Since(timeoutTimer) > retryTimeout {
 			return errors.New("maxium retry timeout for docker daemon ping was exceeded")
 		}
 	}
