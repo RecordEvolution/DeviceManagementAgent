@@ -72,7 +72,7 @@ func main() {
 	fmt.Println("Waiting for Docker Daemon to be available...")
 	log.Info().Msg("Waiting for Docker Daemon to be available...")
 
-	err = agent.Container.WaitForDaemon(0)
+	err = agent.Container.WaitForDaemon()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("error occured while waiting for daemon")
 	}
