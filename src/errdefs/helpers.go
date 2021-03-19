@@ -3,6 +3,7 @@ package errdefs
 import "errors"
 
 var ErrNotYetImplemented = errors.New("not yet implemented")
+var ErrNotFound = errors.New("not found")
 
 /*------------*/
 

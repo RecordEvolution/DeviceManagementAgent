@@ -1,426 +1,587 @@
 package system
 
 import (
-	// "context"
+	"context"
 	"errors"
 	"fmt"
-	"reagent/common"
-
-	// "io"
-	// "bytes"
-	"os"
-	"os/exec"
-	"regexp"
-	"strconv"
+	"reagent/errdefs"
+	"reagent/networkmanager"
 	"strings"
-
-	// "path/filepath"
-	"crypto/sha1"
-	"encoding/hex"
-	"io/ioutil"
-	// "reagent/common"
-	// "reagent/messenger"
-	// "reagent/messenger/topics"
-	// "github.com/theojulienne/go-wireless"
-	// "github.com/mdlayher/wifi"
-	// "github.com/bettercap/bettercap"
+	"time"
 )
 
-// ------------------------------------------------------------------------- //
-
-// path to store WiFi configurations (TODO move to more general configuration)
-const wpaConfigPath string = "/etc/wpa_supplicant/"
-
-// ------------------------------------------------------------------------- //
-
-type NetworkIface struct {
-	Name      string // name of interface, e.g. wlan0
-	Mac       string // MAC
-	State     string // current operational state
-	Wifi      bool   // is it a wifi interface ?
-	Connected bool   // interface is active/connected
-}
-
-func (ifc *NetworkIface) Info() string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "name:      %s\n", ifc.Name)
-	fmt.Fprintf(&sb, "mac:       %s\n", ifc.Mac)
-	fmt.Fprintf(&sb, "state:     %s\n", ifc.State)
-	fmt.Fprintf(&sb, "wifi:      %t\n", ifc.Wifi)
-	fmt.Fprintf(&sb, "connected: %t\n", ifc.Connected)
-	return sb.String()
-}
-
-func (ifc *NetworkIface) Dict() common.Dict {
-	ifcdict := make(common.Dict)
-	ifcdict["name"] = ifc.Name
-	ifcdict["mac"] = ifc.Mac
-	ifcdict["state"] = ifc.State
-	ifcdict["wiFi"] = ifc.Wifi
-	ifcdict["connected"] = ifc.Connected
-	return ifcdict
-}
-
 type WiFi struct {
-	Ssid      string  // network name
-	Mac       string  // MAC
-	Signal    float64 // signal strength (dBm)
-	Security  string  // security/encryption
-	Channel   int64   // channel index
-	Frequency int64   // frequency [MHz]
-	Current   bool
-	Known     bool
-}
-
-func (wf *WiFi) Info() string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "MAC:       %s\n", wf.Mac)
-	fmt.Fprintf(&sb, "SSID:      %s\n", wf.Ssid)
-	fmt.Fprintf(&sb, "Signal:    %4.2f dBm\n", wf.Signal)
-	fmt.Fprintf(&sb, "Security:  %s\n", wf.Security)
-	fmt.Fprintf(&sb, "Channel:   %d\n", wf.Channel)
-	fmt.Fprintf(&sb, "Frequency: %d MHz\n", wf.Frequency)
-	return sb.String()
-}
-
-func (wf *WiFi) Dict() common.Dict {
-	wifidict := make(common.Dict)
-	wifidict["mac"] = wf.Mac
-	wifidict["ssid"] = wf.Ssid
-	wifidict["signal"] = wf.Signal
-	wifidict["security"] = wf.Security
-	wifidict["channel"] = wf.Channel
-	wifidict["frequency"] = wf.Frequency
-	wifidict["known"] = wf.Known
-	wifidict["current"] = wf.Current
-	return wifidict
+	SSID         string // network name
+	MAC          string // MAC
+	SecurityType string
+	Signal       uint8 // signal strength (dBm)
+	WPAFlags     uint32
+	RSNFlags     uint32
+	Flags        uint32
+	Frequency    uint32 // frequency [MHz]
+	Channel      uint32 // channel index
+	Current      bool
+	Known        bool
 }
 
 type WiFiCredentials struct {
-	Ssid        string // SSID of network
-	Passwd      string // password for SSID
-	CountryCode string
-	Priority    string
+	Ssid         string
+	Passwd       string // password for SSID
+	SecurityType string
+	Priority     uint32
 }
 
-func (crd *WiFiCredentials) Info() string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "ssid:     %s\n", crd.Ssid)
-	reg := regexp.MustCompile(`[\S]`)
-	fmt.Fprintf(&sb, "password: %s\n", reg.ReplaceAllString(crd.Passwd, "*"))
-	return sb.String()
+type Network struct {
+	nm       networkmanager.NetworkManager
+	settings networkmanager.Settings
 }
 
-// ------------------------------------------------------------------------- //
+var ErrDeviceNotFound = errors.New("device not found")
+var ErrInvalidWiFiPassword = errors.New("the wifi password is invalid")
+var ErrNotConnected = errors.New("not connected")
 
-func ListNetworkInterfaces() ([]NetworkIface, error) {
-
-	// declare directory the kernel links network interfaces to
-	pth := "/sys/class/net/"
-
-	// list names of interfaces, i.e. subdirectory names
-	dirs, err := ioutil.ReadDir(pth)
+func NewNetwork() (Network, error) {
+	nm, err := networkmanager.NewNetworkManager()
 	if err != nil {
-		return []NetworkIface{}, err
+		return Network{}, err
 	}
 
-	// declare list of interfaces
-	var ifaces = make([]NetworkIface, len(dirs))
-
-	for idx, dir := range dirs {
-		// name of interface corresponds to directory name
-		ifaces[idx].Name = dir.Name()
-
-		// read MAC address from file
-		pthadd := pth + ifaces[idx].Name + "/address"
-		macfin, err := ioutil.ReadFile(pthadd)
-		if err != nil {
-			return []NetworkIface{}, err
-		}
-		ifaces[idx].Mac = strings.Replace(string(macfin), "\n", "", -1)
-
-		// read current state from file
-		pthsta := pth + ifaces[idx].Name + "/operstate"
-		stafin, err := ioutil.ReadFile(pthsta)
-		if err != nil {
-			return []NetworkIface{}, err
-		}
-
-		ifaces[idx].State = strings.Replace(string(stafin), "\n", "", -1)
-
-		// read device type from file
-		pthdev := pth + ifaces[idx].Name + "/uevent"
-		devfin, err := ioutil.ReadFile(pthdev)
-		if err != nil {
-			return []NetworkIface{}, err
-		}
-		reg := regexp.MustCompile(`DEVTYPE=wlan`)
-		ifaces[idx].Wifi = reg.MatchString(string(devfin))
-
-		// connection of interface
-		if ifaces[idx].State == "up" {
-			ifaces[idx].Connected = true
-		} else {
-			ifaces[idx].Connected = false
-		}
-	}
-
-	return ifaces, nil
-}
-
-func GetActiveWiFiInterface() (NetworkIface, error) {
-
-	// list all active network interface
-	ifaces, err := ListNetworkInterfaces()
+	settings, err := networkmanager.NewSettings()
 	if err != nil {
-		return NetworkIface{}, nil
+		return Network{}, err
 	}
 
-	// select the first active WiFi interface
-	var ifaceactive NetworkIface
-	for _, n := range ifaces {
-		if n.State == "up" && n.Connected && n.Wifi {
-			ifaceactive = n
+	return Network{nm, settings}, nil
+}
+
+func (n *Network) GetActiveWirelessDevice() (networkmanager.DeviceWireless, error) {
+	connections, err := n.nm.GetPropertyActiveConnections()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, connection := range connections {
+		devices, err := connection.GetPropertyDevices()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, device := range devices {
+			devType, err := device.GetPropertyDeviceType()
+			if err != nil {
+				return nil, err
+			}
+
+			if devType == networkmanager.NmDeviceTypeWifi {
+				return networkmanager.NewDeviceWireless(device.GetPath())
+			}
+		}
+
+	}
+
+	return nil, ErrDeviceNotFound
+}
+
+func (n *Network) getAccessPointBySSID(ssid string) (networkmanager.AccessPoint, error) {
+	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+	if err != nil {
+		return nil, err
+	}
+
+	accessPoints, err := activeWirelessDevice.GetAllAccessPoints()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ap := range accessPoints {
+		foundSSID, err := ap.GetPropertySSID()
+		if err != nil {
+			return nil, err
+		}
+
+		if foundSSID == ssid {
+			return ap, nil
 		}
 	}
-	if ifaceactive.Name == "" {
-		return NetworkIface{}, errors.New("no active WiFi interface available")
-	}
 
-	return ifaceactive, nil
+	return nil, errdefs.ErrNotFound
 }
 
-// ------------------------------------------------------------------------- //
-
-func getCurrentWifiNetworkSSID() (string, error) {
-	out, err := exec.Command("iw", "dev").Output()
+func (n *Network) getAccessPointByMAC(mac string) (networkmanager.AccessPoint, error) {
+	activeWirelessDevice, err := n.GetActiveWirelessDevice()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	outstr := string(out)
-	reB := regexp.MustCompile("ssid .*")
-	ssidmatch := reB.FindAllString(outstr, -1)
-	if len(ssidmatch) > 0 {
-		return strings.Split(ssidmatch[0], "ssid ")[1], nil
+	accessPoints, err := activeWirelessDevice.GetAllAccessPoints()
+	if err != nil {
+		return nil, err
 	}
 
-	return "", errors.New("no ssid was found for current network")
+	for _, ap := range accessPoints {
+		apMAC, err := ap.GetPropertyHWAddress()
+		if err != nil {
+			return nil, err
+		}
+
+		if apMAC == mac {
+			return ap, nil
+		}
+	}
+
+	return nil, errdefs.ErrNotFound
 }
 
-func RestartWifi() error {
-	_, err := exec.Command("wlan0", "down").Output()
+func (n *Network) Reload() error {
+	return n.nm.Reload(0)
+}
+
+func (n *Network) getConnectionBySSID(ssid string) (networkmanager.Connection, error) {
+	savedConnections, err := n.settings.ListConnections()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, connection := range savedConnections {
+		settingsMap, err := connection.GetSettings()
+		if err != nil {
+			return nil, err
+		}
+
+		settings := settingsMap["802-11-wireless"]
+		ssidByteArr, ok := settings["ssid"].([]byte)
+		if !ok {
+			return nil, errors.New("failed to parse ssid")
+		}
+
+		foundSSID := string(ssidByteArr)
+
+		if ssid == foundSSID {
+			return connection, nil
+		}
+	}
+
+	return nil, errdefs.ErrNotFound
+}
+
+func (n *Network) RemoveWifi(ssid string) error {
+	connection, err := n.getConnectionBySSID(ssid)
 	if err != nil {
 		return err
 	}
 
-	_, err = exec.Command("wlan0", "up").Output()
+	return connection.Delete()
+}
+
+func (n *Network) ActivateWiFi(mac string, ssid string) (networkmanager.ActiveConnection, error) {
+	device, err := n.GetActiveWirelessDevice()
 	if err != nil {
-		// just quick and dirty for now, and retry once
-		_, err = exec.Command("wlan0", "up").Output()
+		return nil, err
+	}
+
+	accessPoint, err := n.getAccessPointByMAC(mac)
+	if err != nil {
+		return nil, err
+	}
+
+	connection, err := n.getConnectionBySSID(ssid)
+	if err != nil {
+		return nil, err
+	}
+
+	return n.nm.ActivateWirelessConnection(connection, device, accessPoint)
+}
+
+func (n *Network) AddWiFi(mac string, credentials WiFiCredentials) (networkmanager.Connection, error) {
+	var ap networkmanager.AccessPoint
+	var ssid string
+	var secType networkmanager.AccessPointSecurityType
+	var err error
+
+	if mac == "" {
+		ssid = credentials.Ssid
+		secType = networkmanager.AccessPointSecurityType(credentials.SecurityType)
+	} else {
+		ap, err = n.getAccessPointByMAC(mac)
+		if err != nil {
+			return nil, err
+		}
+
+		ssid, err = ap.GetPropertySSID()
+		if err != nil {
+			return nil, err
+		}
+
+		secType, err = ap.GetSecurityType()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// see https://developer.gnome.org/NetworkManager/stable/settings-802-11-wireless-security.html
+	newConnection := make(networkmanager.ConnectionSettings)
+	newConnection["connection"] = make(map[string]interface{})
+	newConnection["connection"]["id"] = ssid
+	newConnection["connection"]["autoconnect-priority"] = credentials.Priority
+
+	newConnection["802-11-wireless"] = make(map[string]interface{})
+	newConnection["802-11-wireless"]["ssid"] = []byte(ssid)
+
+	newConnection["802-11-wireless"]["security"] = "802-11-wireless-security"
+	newConnection["802-11-wireless-security"] = make(map[string]interface{})
+	newConnection["802-11-wireless-security"]["key-mgmt"] = secType
+
+	if secType == networkmanager.AccessPointSecurityWPA || secType == networkmanager.AccessPointSecurityWPAEnterprise {
+		newConnection["802-11-wireless-security"]["psk-flags"] = 0 // Default
+		newConnection["802-11-wireless-security"]["psk"] = credentials.Passwd
+	} else if secType == networkmanager.AccessPointSecurityWEP {
+		newConnection["802-11-wireless-security"]["wep-key-type"] = 1 // NM_WEP_KEY_TYPE_KEY
+		newConnection["802-11-wireless-security"]["wep-key0"] = credentials.Passwd
+	}
+
+	connection, err := n.settings.AddConnection(newConnection)
+	if err != nil {
+		if strings.Contains(err.Error(), "802-11-wireless-security.psk: property is invalid") {
+			return nil, ErrInvalidWiFiPassword
+		}
+		if strings.Contains(err.Error(), "802-11-wireless-security.wep-key0: property is invalid") {
+			return nil, ErrInvalidWiFiPassword
+		}
+		return nil, err
+	}
+
+	return connection, nil
+}
+
+// Scan calls the NetworkManager to see if there's a WiFi device available. If available it will scan, and block until the scan has finished.
+// Whenever a scan request gets rate limited, we wait one second and retry until it succeeds. The default scan timeout is 10 seconds.
+func (n *Network) Scan(timeoutParam ...time.Duration) error {
+	var timeout time.Duration
+
+	if len(timeoutParam) == 0 {
+		timeout = time.Second * 10
+	} else {
+		timeout = timeoutParam[0]
+	}
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
+	defer cancelFunc()
+
+	wirelessDevice, err := n.GetActiveWirelessDevice()
+	if err != nil {
 		return err
+	}
+
+	lastScanBeforeScan, err := wirelessDevice.GetPropertyLastScan()
+	if err != nil {
+		return err
+	}
+
+	err = wirelessDevice.RequestScan()
+	if err != nil {
+		// we got rate limited, lets retry in one second
+		if errors.Is(err, networkmanager.ErrorFollowingPreviousScan) {
+			// wait 1 second and then retry the scan
+			time.Sleep(time.Second)
+
+			return n.Scan(timeout)
+		}
+	}
+
+outerLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			lastScan, err := wirelessDevice.GetPropertyLastScan()
+			if err != nil {
+				return err
+			}
+
+			// scan has completed
+			if lastScanBeforeScan != lastScan {
+				break outerLoop
+			}
+
+			devState, err := wirelessDevice.GetPropertyState()
+			if err != nil {
+				return err
+			}
+
+			// the scan won't complete if the device is not activated / managed
+			if devState <= networkmanager.NmDeviceStateDisconnected {
+				return ErrNotConnected
+			}
+
+			time.Sleep(time.Millisecond * 100)
+		}
 	}
 
 	return nil
 }
 
-// obtain list of all available WiFi networks in range
-func ListWiFiNetworks(iface string) ([]WiFi, error) {
-
-	// generate full info output
-	out, err := exec.Command("iw", iface, "scan").Output()
+func (n *Network) isKnown(ssid string, bssid string) (bool, error) {
+	savedConnections, err := n.settings.ListConnections()
 	if err != nil {
-		return []WiFi{}, nil
+		return false, err
 	}
 
-	outstr := string(out)
-
-	// split into separate networks
-	outnets := regexp.MustCompile(`(?m)^BSS `).Split(outstr, -1)
-	outnetscl := outnets[1:]
-
-	// parse every single network
-	var wifis = make([]WiFi, len(outnetscl))
-
-	for i, entry := range outnetscl {
-		if strings.Contains(entry, "associated") {
-			wifis[i].Known = true
+	var allBSSIDs []string
+	var allSSIDs []string
+	for _, connection := range savedConnections {
+		settingsMap, err := connection.GetSettings()
+		if err != nil {
+			return false, err
 		}
 
-		// MAC
-		reA := regexp.MustCompile(`([a-z0-9]{2}:){5}[a-z0-9]{2}`)
-		macmatch := reA.FindAllString(entry, -1)
-		if len(macmatch) > 0 {
-			wifis[i].Mac = macmatch[0]
+		settings := settingsMap["802-11-wireless"]
+		ssidArg := settings["ssid"]
+		seenBSSIDs := settings["seen-bssids"]
+
+		if ssidArg != nil {
+			ssid, ok := ssidArg.([]byte)
+			if !ok {
+				return false, errors.New("failed to parse ssid")
+			}
+
+			allSSIDs = append(allSSIDs, string(ssid))
 		}
 
-		// SSID network name
-		reB := regexp.MustCompile(`SSID: .*`)
-		ssidmatch := reB.FindAllString(entry, -1)
-		if len(ssidmatch) > 0 {
-			wifis[i].Ssid = strings.Replace(ssidmatch[0], "SSID: ", "", -1)
+		// hasn't been actually connected to an AP yet
+		if seenBSSIDs == nil {
+			continue
 		}
 
-		currentSSID, err := getCurrentWifiNetworkSSID()
-		if err == nil {
-			wifis[i].Current = wifis[i].Ssid == currentSSID
+		bssids, ok := seenBSSIDs.([]string)
+		if !ok {
+			return false, errors.New("failed to parse bssids")
 		}
 
-		// signal strength
-		reC := regexp.MustCompile(`signal: .*`)
-		signalmatch := reC.FindAllString(entry, -1)
-		replC := strings.NewReplacer("signal: ", "", "dBm", "", " ", "")
-		if len(signalmatch) > 0 {
-			signstr := replC.Replace(signalmatch[0])
-			resC, _ := strconv.ParseFloat(signstr, 64)
-			wifis[i].Signal = resC
+		allBSSIDs = append(allBSSIDs, bssids...)
+	}
+
+	for _, knownBSSID := range allBSSIDs {
+		if knownBSSID == bssid {
+			return true, nil
+		}
+	}
+
+	for _, knownSSID := range allSSIDs {
+		if knownSSID == ssid {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (n *Network) isCurrent(bssid string) (bool, error) {
+	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+	if err != nil {
+		return false, err
+	}
+
+	ac, err := activeWirelessDevice.GetPropertyActiveConnection()
+	if err != nil {
+		return false, err
+	}
+
+	connection, err := ac.GetPropertyConnection()
+	if err != nil {
+		return false, err
+	}
+
+	settingsMap, err := connection.GetSettings()
+	if err != nil {
+		return false, err
+	}
+
+	settings := settingsMap["802-11-wireless"]
+	bssids, ok := settings["seen-bssids"].([]string)
+	if !ok {
+		return false, errors.New("failed to parse bssids")
+	}
+
+	for _, currentBssid := range bssids {
+		if currentBssid == bssid {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (n *Network) getAllConnectionSettings() ([]networkmanager.ConnectionSettings, error) {
+	var connectionSettings []networkmanager.ConnectionSettings
+
+	allConnections, err := n.settings.ListConnections()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, connection := range allConnections {
+		setting, err := connection.GetSettings()
+		if err != nil {
+			continue
 		}
 
-		// security
-		reF := regexp.MustCompile(`WPS: *`)
-		reG := regexp.MustCompile(`WPA: *`)
-		if reG.FindAllString(entry, -1) != nil {
-			wifis[i].Security = "WPA"
-		} else if reF.FindAllString(entry, -1) != nil {
-			wifis[i].Security = "WPS"
-		} else {
-			wifis[i].Security = "None"
+		connectionSettings = append(connectionSettings, setting)
+	}
+
+	return connectionSettings, nil
+}
+
+func (n *Network) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) ([]WiFi, error) {
+	var wifis []WiFi
+	for _, ap := range accessPoints {
+		wifi := WiFi{}
+
+		ssid, err := ap.GetPropertySSID()
+		if err != nil {
+			ssid = ""
 		}
 
-		//
-		// 'Use primary channel' instead of 'DS Parameter set' since the entry seems to be missing for some networks
-		reD := regexp.MustCompile(`\* primary channel: .*`)
-		channelmatch := reD.FindAllString(entry, -1)
-		replD := strings.NewReplacer("* primary channel:", "")
-		if len(channelmatch) > 0 {
-			chnstr := replD.Replace(channelmatch[0])
-			resD, _ := strconv.ParseInt(strings.Trim(chnstr, " "), 10, 32)
+		wifi.SSID = ssid
 
-			wifis[i].Channel = resD
+		mac, err := ap.GetPropertyHWAddress()
+		if err != nil {
+			return nil, err
 		}
 
-		// frequency
-		reE := regexp.MustCompile(`freq: .*`)
-		freqmatch := reE.FindAllString(entry, -1)
-		replE := strings.NewReplacer("freq:", "", " ", "")
-		if len(freqmatch) > 0 {
-			freqstr := replE.Replace(freqmatch[0])
-			resE, _ := strconv.ParseInt(freqstr, 10, 32)
+		wifi.MAC = mac
 
-			wifis[i].Frequency = resE
+		known, err := n.isKnown(ssid, mac)
+		if err != nil {
+			return nil, err
 		}
 
+		wifi.Known = known
+
+		current, err := n.isCurrent(mac)
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.Current = current
+
+		wpaFlags, err := ap.GetPropertyWPAFlags()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.WPAFlags = wpaFlags
+
+		signalStrength, err := ap.GetPropertyStrength()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.Signal = signalStrength
+
+		flags, err := ap.GetPropertyFlags()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.Flags = flags
+
+		freq, err := ap.GetPropertyFrequency()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.Frequency = freq
+
+		channel, err := ap.GetChannel()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.Channel = channel
+
+		rsnFlags, err := ap.GetPropertyRSNFlags()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.RSNFlags = rsnFlags
+
+		securityType, err := ap.GetSecurityType()
+		if err != nil {
+			return nil, err
+		}
+
+		wifi.SecurityType = string(securityType)
+
+		wifis = append(wifis, wifi)
 	}
 
 	return wifis, nil
 }
 
-// ------------------------------------------------------------------------- //
+func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
+	var wifi WiFi
 
-func filehash(somestring string) string {
+	wirelessSettings := connectionSettingsMap["802-11-wireless"]
+	wirelessSecurity := connectionSettingsMap["802-11-wireless-security"]
+	securityType := fmt.Sprint(wirelessSecurity["key-mgmt"])
 
-	// create new sha1 hash object
-	hsh := sha1.New()
-
-	// write string as byte slice to hash object
-	hsh.Write([]byte(somestring))
-
-	// return result encoded as string
-	return hex.EncodeToString(hsh.Sum(nil))
-}
-
-// ------------------------------------------------------------------------- //
-
-func AddWifiConfig(wificred WiFiCredentials, overwrite bool) error {
-
-	// check names of existing configurations
-	files, err := ioutil.ReadDir(wpaConfigPath)
-	if err != nil {
-		return err
+	ssidByteArr, ok := wirelessSettings["ssid"].([]byte)
+	if !ok {
+		ssidByteArr = []byte{}
 	}
 
-	// use hashed SSID as file name
-	ssidhsh := wificred.Ssid
-	flname := ssidhsh + ".conf"
+	ssid := string(ssidByteArr)
 
-	// check if config already exists
-	for _, fl := range files {
-		if fl.Name() == flname && !overwrite {
-			return nil
+	wifi.SSID = ssid
+	wifi.Known = true
+	wifi.SecurityType = securityType
+
+	return wifi
+}
+
+func (n *Network) ListWifiNetworks() ([]WiFi, error) {
+	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+	if err != nil {
+		return nil, err
+	}
+
+	accessPoints, err := activeWirelessDevice.GetAllAccessPoints()
+	if err != nil {
+		return nil, err
+	}
+
+	wifis, err := n.accessPointsToWiFi(accessPoints)
+	if err != nil {
+		return nil, err
+	}
+
+	allConnectionSettings, err := n.getAllConnectionSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, connectionSettingsMap := range allConnectionSettings {
+		settings := connectionSettingsMap["802-11-wireless"]
+		ssidByteArr, ok := settings["ssid"].([]byte)
+		if !ok {
+			continue
+		}
+
+		ssid := string(ssidByteArr)
+
+		found := false
+		for _, wifi := range wifis {
+			if wifi.SSID == ssid {
+				found = true
+			}
+		}
+
+		if !found {
+			wifis = append(wifis, n.connectionSettingsToWifi(connectionSettingsMap))
 		}
 	}
 
-	// open new file and add WiFi configuration
-	cfgfile := wpaConfigPath + ssidhsh + ".conf"
-	cfgstr := "ctrl_interface=/var/run/wpa_supplicant\n" +
-		"ap_scan=1\n\n" +
-		"network={\n" +
-		"  ssid=\"" + wificred.Ssid + "\"\n" +
-		"  psk=\"" + wificred.Passwd + "\"\n" +
-		"  country=\"" + wificred.CountryCode + "\"\n" +
-		"  priority=\"" + wificred.Priority + "\"\n" +
-		"}\n"
-
-	fou, err := os.Create(cfgfile)
-	if err != nil {
-		return err
-	}
-
-	_, err = fou.WriteString(cfgstr)
-	if err != nil {
-		return err
-	}
-
-	return fou.Sync()
+	return wifis, nil
 }
-
-func RemoveWifiConfig(ssid string) error {
-	filePath := wpaConfigPath + ssid + ".conf"
-	_, err := os.Stat(filePath)
-	if os.IsNotExist(err) {
-		return err
-	}
-
-	return os.Remove(filePath)
-}
-
-// ------------------------------------------------------------------------- //
-
-func ActivateWifi(wifi WiFi, iface NetworkIface) error {
-
-	// list WiFi configuration files
-	files, err := ioutil.ReadDir(wpaConfigPath)
-	if err != nil {
-		return err
-	}
-
-	// required configuration file must already exist
-	ishere := false
-	cfgfile := ""
-	for _, fl := range files {
-		if strings.Replace(fl.Name(), ".conf", "", -1) == filehash(wifi.Ssid) {
-			ishere = true
-			cfgfile = fl.Name()
-		}
-	}
-
-	if !ishere {
-		return errors.New("required configuration file does not exist: " + cfgfile)
-	}
-
-	// stop the running "wpa_supplicant" process and start a new one
-	_, err = exec.Command("killall", "wpa_supplicant").Output()
-	if err != nil {
-		return err
-	}
-
-	_, err = exec.Command("wpa_supplicant", "-B", "-D", "nl80211",
-		"-i", iface.Name, "-c", wpaConfigPath+cfgfile).Output()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ------------------------------------------------------------------------- //

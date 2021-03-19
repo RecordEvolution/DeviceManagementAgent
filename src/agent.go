@@ -25,6 +25,7 @@ type Agent struct {
 	Messenger       messenger.Messenger
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
+	Network         *system.Network
 	System          *system.System
 	Config          *config.Config
 	External        *api.External
@@ -124,6 +125,10 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
+	network, err := system.NewNetwork()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to setup network")
+	}
 
 	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
 	if err != nil {
@@ -182,6 +187,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Messenger:       mainSession,
 		LogMessenger:    mainSession,
 		Database:        database,
+		Network:         &network,
 		Filesystem:      &filesystem,
 		System:          &systemAPI,
 		AppManager:      appManager,
@@ -195,6 +201,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		System:          &systemAPI,
 		External:        &external,
 		LogManager:      &logManager,
+		Network:         &network,
 		TerminalManager: &terminalManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
