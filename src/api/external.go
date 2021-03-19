@@ -26,6 +26,7 @@ type External struct {
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
 	Filesystem      *filesystem.Filesystem
+	Network         *system.Network
 	System          *system.System
 	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager
@@ -49,11 +50,12 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 
 		topics.ListWiFiNetworks:        ex.listWiFiNetworksHandler,
 		topics.AddWiFiConfiguration:    ex.addWiFiConfigurationHandler,
+		topics.ScanWifiNetworks:        ex.wifiScanHandler,
+		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
 		topics.SelectWiFiNetwork:       ex.selectWiFiNetworkHandler,
 		topics.SystemReboot:            ex.systemRebootHandler,
 		topics.SystemShutdown:          ex.systemShutdownHandler,
 		topics.RestartWifi:             ex.wifiRebootHandler,
-		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
 		topics.UpdateAgent:             ex.updateReagent,
 		topics.PruneImages:             ex.pruneImageHandler,
 		topics.GetAgentMetaData:        ex.getAgentMetadataHandler,

@@ -3,38 +3,30 @@ package api
 import (
 	"context"
 	"errors"
+	"reagent/common"
 	"reagent/messenger"
 	"reagent/system"
 )
 
 func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
-	// find active network interface
-	ifaces, err := system.ListNetworkInterfaces()
-	if err != nil {
-		return &messenger.InvokeResult{Arguments: []interface{}{}}, nil
-	}
-
-	var ifaceActive system.NetworkIface
-	for _, n := range ifaces {
-		if n.State == "up" && n.Connected && n.Wifi {
-			ifaceActive = n
-		}
-	}
-	if ifaceActive.Name == "" {
-		return nil, errors.New("no active WiFi interface available")
-	}
-
-	// use active WiFi interface to list networks in range
-	wifis, err := system.ListWiFiNetworks(ifaceActive.Name)
+	wifis, err := ex.Network.ListWifiNetworks()
 	if err != nil {
 		return nil, err
 	}
 
 	// convert to slice to be passed on
 	wifislst := make([]interface{}, len(wifis))
-	for idx, netw := range wifis {
-		wifislst[idx] = netw.Dict()
+	for idx, wifi := range wifis {
+		wifislst[idx] = common.Dict{
+			"mac":       wifi.MAC,
+			"ssid":      wifi.SSID,
+			"channel":   wifi.Channel,
+			"signal":    wifi.Signal,
+			"security":  wifi.SecurityType,
+			"frequency": wifi.Frequency,
+			"known":     wifi.Known,
+			"current":   wifi.Current,
+		}
 	}
 
 	return &messenger.InvokeResult{Arguments: wifislst}, nil
@@ -56,16 +48,15 @@ func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Re
 		return nil, errors.New("failed to parse ssid, invalid type")
 	}
 
-	return &messenger.InvokeResult{}, system.RemoveWifiConfig(ssidToRemove)
+	return &messenger.InvokeResult{}, ex.Network.RemoveWifi(ssidToRemove)
+}
+
+func (ex *External) wifiScanHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	return &messenger.InvokeResult{}, ex.Network.Scan()
 }
 
 func (ex *External) wifiRebootHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	err := system.RestartWifi()
-	if err != nil {
-		return nil, err
-	}
-
-	return &messenger.InvokeResult{}, nil
+	return &messenger.InvokeResult{}, ex.Network.Reload()
 }
 
 func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -79,10 +70,28 @@ func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response me
 		return nil, errors.New("argument 1 of args is not a dictionary type")
 	}
 
+	var mac string
+	var securityType string
+
 	ssidArg := wifiDict["ssid"]
+	macArg := wifiDict["mac"]
+	securityTypeArg := wifiDict["security"]
 	passwordArg := wifiDict["password"]
-	countryArg := wifiDict["country"]
 	priorityArg := wifiDict["priority"]
+
+	if macArg != nil {
+		mac, ok = macArg.(string)
+		if !ok {
+			return nil, errors.New("failed to parse mac, invalid type")
+		}
+	}
+
+	if securityTypeArg != nil {
+		securityType, ok = securityTypeArg.(string)
+		if !ok {
+			return nil, errors.New("failed to parse securityType, invalid type")
+		}
+	}
 
 	ssid, ok := ssidArg.(string)
 	if !ok {
@@ -94,63 +103,53 @@ func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response me
 		return nil, errors.New("failed to parse password, invalid type")
 	}
 
-	country, ok := countryArg.(string)
-	if !ok {
-		return nil, errors.New("failed to parse country, invalid type")
-	}
-
-	priority, ok := priorityArg.(string)
+	priority, ok := priorityArg.(uint64)
 	if !ok {
 		return nil, errors.New("failed to parse priority, invalid type")
 	}
 
 	wifiEntryPayload := system.WiFiCredentials{
-		Ssid:        ssid,
-		Passwd:      password,
-		CountryCode: country,
-		Priority:    priority,
+		Ssid:         ssid,
+		Passwd:       password,
+		Priority:     uint32(priority),
+		SecurityType: securityType,
 	}
 
-	err := system.AddWifiConfig(wifiEntryPayload, true)
+	_, err := ex.Network.AddWiFi(mac, wifiEntryPayload)
 	if err != nil {
-		return nil, errors.New("failed to add WiFi configuration")
+		return nil, err
 	}
 
 	return &messenger.InvokeResult{}, nil
 }
 
 func (ex *External) selectWiFiNetworkHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	payload := response.Arguments
+	if len(payload) == 0 {
+		return nil, errors.New("args for add wifi config is empty")
+	}
 
-	args := response.Arguments
-	// TODO no idea how the payload format actually looks like!!
-	ssid := args[0]
+	wifiDict, ok := payload[0].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("argument 1 of args is not a dictionary type")
+	}
 
-	// retrieve active WiFi interface
-	ifaceactive, err := system.GetActiveWiFiInterface()
+	ssidArg := wifiDict["ssid"]
+	macArg := wifiDict["mac"]
+
+	ssid, ok := ssidArg.(string)
+	if !ok {
+		return nil, errors.New("failed to parse ssid, invalid type")
+	}
+
+	mac, ok := macArg.(string)
+	if !ok {
+		return nil, errors.New("failed to parse mac, invalid type")
+	}
+
+	_, err := ex.Network.ActivateWiFi(mac, ssid)
 	if err != nil {
 		return nil, err
-	}
-
-	// use active WiFi interface to list networks in range and retrieve required one
-	wifis, err := system.ListWiFiNetworks(ifaceactive.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	var mywifi system.WiFi
-	for _, n := range wifis {
-		if n.Ssid == ssid {
-			mywifi = n
-		}
-	}
-
-	if mywifi.Ssid == "" {
-		return nil, errors.New("required WiFi SSID not available")
-	}
-
-	err = system.ActivateWifi(mywifi, ifaceactive)
-	if err != nil {
-		return nil, errors.New("failed to select required WiFi")
 	}
 
 	return &messenger.InvokeResult{}, nil
