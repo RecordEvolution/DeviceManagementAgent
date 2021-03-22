@@ -53,6 +53,8 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.ScanWifiNetworks:        ex.wifiScanHandler,
 		topics.RemoveWiFiConfiguration: ex.removeWifiHandler,
 		topics.SelectWiFiNetwork:       ex.selectWiFiNetworkHandler,
+		topics.ListEthernetDevices:     ex.listEthernetDevices,
+		topics.UpdateIPv4Configuration: ex.updateIPConfigHandler,
 		topics.SystemReboot:            ex.systemRebootHandler,
 		topics.SystemShutdown:          ex.systemShutdownHandler,
 		topics.RestartWifi:             ex.wifiRebootHandler,

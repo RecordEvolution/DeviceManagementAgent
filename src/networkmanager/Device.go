@@ -151,6 +151,9 @@ type Device interface {
 	// True if the device exists, or False for placeholder devices that do not yet exist but could be automatically created by NetworkManager if one of their AvailableConnections was activated.
 	GetPropertyReal() (bool, error)
 
+	// The active hardware address of the device.
+	GetPropertyHwAddress() (string, error)
+
 	MarshalJSON() ([]byte, error)
 }
 
@@ -181,6 +184,10 @@ func (d *device) Delete() error {
 
 func (d *device) GetPropertyUdi() (string, error) {
 	return d.getStringProperty(DevicePropertyUdi)
+}
+
+func (d *device) GetPropertyHwAddress() (string, error) {
+	return d.getStringProperty(DevicePropertyHwAddress)
 }
 
 func (d *deviceWireless) GetPropertyHwAddress() (string, error) {

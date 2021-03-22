@@ -14,10 +14,15 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 		return nil, err
 	}
 
+	ipv4, ipv6, err := ex.Network.GetActiveWirelessDeviceConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	// convert to slice to be passed on
-	wifislst := make([]interface{}, len(wifis))
-	for idx, wifi := range wifis {
-		wifislst[idx] = common.Dict{
+	wifiList := make([]interface{}, len(wifis))
+	for i, wifi := range wifis {
+		wifiList[i] = common.Dict{
 			"mac":       wifi.MAC,
 			"ssid":      wifi.SSID,
 			"channel":   wifi.Channel,
@@ -29,7 +34,13 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 		}
 	}
 
-	return &messenger.InvokeResult{Arguments: wifislst}, nil
+	return &messenger.InvokeResult{
+		Arguments: wifiList,
+		ArgumentsKw: common.Dict{
+			"ipv4": ipv4,
+			"ipv6": ipv6,
+		},
+	}, nil
 }
 
 func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {

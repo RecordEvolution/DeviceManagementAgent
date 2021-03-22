@@ -11,17 +11,37 @@ import (
 )
 
 type WiFi struct {
-	SSID         string // network name
-	MAC          string // MAC
-	SecurityType string
-	Signal       uint8 // signal strength (dBm)
-	WPAFlags     uint32
-	RSNFlags     uint32
-	Flags        uint32
-	Frequency    uint32 // frequency [MHz]
-	Channel      uint32 // channel index
-	Current      bool
-	Known        bool
+	SSID            string // network name
+	MAC             string // MAC
+	SecurityType    string
+	Signal          uint8 // signal strength (dBm)
+	WPAFlags        uint32
+	RSNFlags        uint32
+	Flags           uint32
+	Frequency       uint32 // frequency [MHz]
+	Channel         uint32 // channel index
+	Current         bool
+	Known           bool
+	IPv4AddressData []IPv4AddressData
+	IPv6AddressData []IPv6AddressData
+}
+
+type EthernetDevice struct {
+	InterfaceName   string
+	MAC             string
+	IPv4AddressData []IPv4AddressData
+	IPv6AddressData []IPv6AddressData
+	Method          string
+}
+
+type IPv4AddressData struct {
+	Address string
+	Prefix  uint8
+}
+
+type IPv6AddressData struct {
+	Address string
+	Prefix  uint8
 }
 
 type WiFiCredentials struct {
@@ -432,6 +452,32 @@ func (n *Network) getAllConnectionSettings() ([]networkmanager.ConnectionSetting
 	return connectionSettings, nil
 }
 
+func (n *Network) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
+	devices, err := n.nm.GetAllDevices()
+	if err != nil {
+		return nil, err
+	}
+
+	var wiredDevices []networkmanager.DeviceWired
+	for _, device := range devices {
+		devType, err := device.GetPropertyDeviceType()
+		if err != nil {
+			return nil, err
+		}
+
+		if devType == networkmanager.NmDeviceTypeEthernet {
+			wiredDevice, err := networkmanager.NewDeviceWired(device.GetPath())
+			if err != nil {
+				return nil, err
+			}
+
+			wiredDevices = append(wiredDevices, wiredDevice)
+		}
+	}
+
+	return wiredDevices, nil
+}
+
 func (n *Network) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) ([]WiFi, error) {
 	var wifis []WiFi
 	for _, ap := range accessPoints {
@@ -520,6 +566,167 @@ func (n *Network) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) 
 	return wifis, nil
 }
 
+func (n *Network) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error) {
+	device, err := n.GetActiveWirelessDevice()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ip4Config, err := device.GetPropertyIP4Config()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ip6Config, err := device.GetPropertyIP6Config()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ipv4AddressDatas, err := ip4Config.GetPropertyAddressData()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var parsedIPv4Datas []IPv4AddressData
+	for _, addressData := range ipv4AddressDatas {
+		parsedIPv4Datas = append(parsedIPv4Datas, IPv4AddressData(addressData))
+	}
+
+	ipv6AddressDatas, err := ip6Config.GetPropertyAddressData()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var parsedIPv6Datas []IPv6AddressData
+	for _, addressData := range ipv6AddressDatas {
+		parsedIPv6Datas = append(parsedIPv6Datas, IPv6AddressData(addressData))
+	}
+
+	return parsedIPv4Datas, parsedIPv6Datas, nil
+}
+
+func (n *Network) updateIPv4Address(connection networkmanager.Connection, ipAddress string, prefix uint32) error {
+	settings, err := connection.GetSettings()
+	if err != nil {
+		return err
+	}
+
+	delete(settings["ipv6"], "addresses")
+	delete(settings["ipv6"], "routes")
+
+	if settings["ipv4"] == nil {
+		settings["ipv4"] = make(map[string]interface{})
+	}
+
+	if settings["ipv4"]["addresses"] != nil {
+		delete(settings["ipv4"], "addresses")
+	}
+
+	if settings["ipv4"]["address-data"] != nil {
+		delete(settings["ipv4"], "address-data")
+	}
+
+	if settings["ipv4"]["gateway"] != nil {
+		delete(settings["ipv4"], "gateway")
+	}
+
+	settings["ipv4"]["method"] = "manual"
+
+	addressData := make([]map[string]interface{}, 1)
+	addressData[0] = make(map[string]interface{})
+	addressData[0]["address"] = ipAddress
+	addressData[0]["prefix"] = prefix
+
+	settings["ipv4"]["address-data"] = addressData
+
+	return connection.Update(settings)
+}
+
+func (n *Network) enableDHCP(connection networkmanager.Connection, mac string) error {
+	settings, err := connection.GetSettings()
+	if err != nil {
+		return err
+	}
+
+	delete(settings["ipv6"], "addresses")
+	delete(settings["ipv6"], "routes")
+
+	settings["ipv4"] = make(map[string]interface{})
+	settings["ipv4"]["method"] = "auto"
+
+	return connection.Update(settings)
+}
+
+func (n *Network) EnableDHCP(mac string) error {
+	devices, err := n.nm.GetAllDevices()
+	if err != nil {
+		return err
+	}
+
+	var ac networkmanager.ActiveConnection
+	for _, device := range devices {
+		foundMac, err := device.GetPropertyHwAddress()
+		if err != nil {
+			return err
+		}
+
+		if foundMac == mac {
+			ac, err = device.GetPropertyActiveConnection()
+			if err != nil {
+				return err
+			}
+			break
+		}
+
+	}
+
+	if ac == nil {
+		return ErrDeviceNotFound
+	}
+
+	connection, err := ac.GetPropertyConnection()
+	if err != nil {
+		return err
+	}
+
+	return n.enableDHCP(connection, mac)
+}
+
+func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
+	devices, err := n.nm.GetAllDevices()
+	if err != nil {
+		return err
+	}
+
+	var ac networkmanager.ActiveConnection
+	for _, device := range devices {
+		foundMac, err := device.GetPropertyHwAddress()
+		if err != nil {
+			return err
+		}
+
+		if foundMac == mac {
+			ac, err = device.GetPropertyActiveConnection()
+			if err != nil {
+				return err
+			}
+			break
+		}
+
+	}
+
+	if ac == nil {
+		return ErrDeviceNotFound
+	}
+
+	connection, err := ac.GetPropertyConnection()
+	if err != nil {
+		return err
+	}
+
+	return n.updateIPv4Address(connection, ip, prefix)
+}
+
 func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
 	var wifi WiFi
 
@@ -539,6 +746,90 @@ func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.
 	wifi.SecurityType = securityType
 
 	return wifi
+}
+
+func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
+	devices, err := n.getEthernetDevices()
+	if err != nil {
+		return nil, err
+	}
+
+	var ethernetDevices []EthernetDevice
+	for _, device := range devices {
+		var ethernetDevice EthernetDevice
+		name, err := device.GetPropertyIpInterface()
+		if err != nil {
+			return nil, err
+		}
+		ethernetDevice.InterfaceName = name
+
+		ipv4Config, err := device.GetPropertyIP4Config()
+		if err != nil {
+			return nil, err
+		}
+
+		ipv4AddressDatas, err := ipv4Config.GetPropertyAddressData()
+		if err != nil {
+			return nil, err
+		}
+
+		var parsedIPv4AddressDatas []IPv4AddressData
+		for _, ipv4AddressData := range ipv4AddressDatas {
+			parsedIPv4AddressDatas = append(parsedIPv4AddressDatas, IPv4AddressData(ipv4AddressData))
+		}
+
+		ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
+
+		ipv6Config, err := device.GetPropertyIP6Config()
+		if err != nil {
+			return nil, err
+		}
+
+		ipv6AddressDatas, err := ipv6Config.GetPropertyAddressData()
+		if err != nil {
+			return nil, err
+		}
+
+		var parsedIPv6AddressDatas []IPv6AddressData
+		for _, ipv6AddressData := range ipv6AddressDatas {
+			parsedIPv6AddressDatas = append(parsedIPv6AddressDatas, IPv6AddressData(ipv6AddressData))
+		}
+
+		ethernetDevice.IPv6AddressData = parsedIPv6AddressDatas
+
+		mac, err := device.GetPropertyPermHwAddress()
+		if err != nil {
+			return nil, err
+		}
+
+		ethernetDevice.MAC = mac
+
+		ac, err := device.GetPropertyActiveConnection()
+		if err != nil {
+			return nil, err
+		}
+
+		conn, err := ac.GetPropertyConnection()
+		if err != nil {
+			return nil, err
+		}
+
+		settings, err := conn.GetSettings()
+		if err != nil {
+			return nil, err
+		}
+
+		if settings["ipv4"] != nil {
+			method := settings["ipv4"]["method"]
+			if method != nil {
+				ethernetDevice.Method = fmt.Sprint(method)
+			}
+		}
+
+		ethernetDevices = append(ethernetDevices, ethernetDevice)
+	}
+
+	return ethernetDevices, nil
 }
 
 func (n *Network) ListWifiNetworks() ([]WiFi, error) {
