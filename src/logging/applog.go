@@ -194,17 +194,6 @@ func (lm *LogManager) emitStream(logEntry *LogSubscription) error {
 				return
 			}
 
-			safe.Go(func() {
-				logs, err := lm.getNonAgentLogs(logEntry.ContainerName)
-				if err != nil {
-					return
-				}
-
-				for _, log := range logs {
-					lm.Messenger.Publish(topics.Topic(topic), []interface{}{log}, nil, nil)
-				}
-			})
-
 			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
 		})
 	}()
