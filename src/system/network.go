@@ -169,7 +169,13 @@ func (n *Network) getConnectionBySSID(ssid string) (networkmanager.Connection, e
 		}
 
 		settings := settingsMap["802-11-wireless"]
-		ssidByteArr, ok := settings["ssid"].([]byte)
+		ssidArg := settings["ssid"]
+
+		if ssidArg == nil {
+			continue
+		}
+
+		ssidByteArr, ok := ssidArg.([]byte)
 		if !ok {
 			return nil, errors.New("failed to parse ssid")
 		}
@@ -605,7 +611,7 @@ func (n *Network) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6Addr
 	return parsedIPv4Datas, parsedIPv6Datas, nil
 }
 
-func (n *Network) updateIPv4Address(connection networkmanager.Connection, ipAddress string, prefix uint32) error {
+func (n *Network) updateIPv4Address(device networkmanager.Device, connection networkmanager.Connection, ipAddress string, prefix uint32) error {
 	settings, err := connection.GetSettings()
 	if err != nil {
 		return err
@@ -699,6 +705,7 @@ func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
 	}
 
 	var ac networkmanager.ActiveConnection
+	var foundDevice networkmanager.Device
 	for _, device := range devices {
 		foundMac, err := device.GetPropertyHwAddress()
 		if err != nil {
@@ -710,6 +717,8 @@ func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
 			if err != nil {
 				return err
 			}
+
+			foundDevice = device
 			break
 		}
 
@@ -724,7 +733,7 @@ func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
 		return err
 	}
 
-	return n.updateIPv4Address(connection, ip, prefix)
+	return n.updateIPv4Address(foundDevice, connection, ip, prefix)
 }
 
 func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
@@ -761,6 +770,14 @@ func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if name == "" {
+			name, err = device.GetPropertyInterface()
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		ethernetDevice.InterfaceName = name
 
 		ipv4Config, err := device.GetPropertyIP4Config()
@@ -768,34 +785,38 @@ func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
 			return nil, err
 		}
 
-		ipv4AddressDatas, err := ipv4Config.GetPropertyAddressData()
-		if err != nil {
-			return nil, err
-		}
+		if ipv4Config != nil {
+			ipv4AddressDatas, err := ipv4Config.GetPropertyAddressData()
+			if err != nil {
+				return nil, err
+			}
 
-		var parsedIPv4AddressDatas []IPv4AddressData
-		for _, ipv4AddressData := range ipv4AddressDatas {
-			parsedIPv4AddressDatas = append(parsedIPv4AddressDatas, IPv4AddressData(ipv4AddressData))
-		}
+			var parsedIPv4AddressDatas []IPv4AddressData
+			for _, ipv4AddressData := range ipv4AddressDatas {
+				parsedIPv4AddressDatas = append(parsedIPv4AddressDatas, IPv4AddressData(ipv4AddressData))
+			}
 
-		ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
+			ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
+		}
 
 		ipv6Config, err := device.GetPropertyIP6Config()
 		if err != nil {
 			return nil, err
 		}
 
-		ipv6AddressDatas, err := ipv6Config.GetPropertyAddressData()
-		if err != nil {
-			return nil, err
-		}
+		if ipv6Config != nil {
+			ipv6AddressDatas, err := ipv6Config.GetPropertyAddressData()
+			if err != nil {
+				return nil, err
+			}
 
-		var parsedIPv6AddressDatas []IPv6AddressData
-		for _, ipv6AddressData := range ipv6AddressDatas {
-			parsedIPv6AddressDatas = append(parsedIPv6AddressDatas, IPv6AddressData(ipv6AddressData))
-		}
+			var parsedIPv6AddressDatas []IPv6AddressData
+			for _, ipv6AddressData := range ipv6AddressDatas {
+				parsedIPv6AddressDatas = append(parsedIPv6AddressDatas, IPv6AddressData(ipv6AddressData))
+			}
 
-		ethernetDevice.IPv6AddressData = parsedIPv6AddressDatas
+			ethernetDevice.IPv6AddressData = parsedIPv6AddressDatas
+		}
 
 		mac, err := device.GetPropertyPermHwAddress()
 		if err != nil {
@@ -809,20 +830,24 @@ func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
 			return nil, err
 		}
 
-		conn, err := ac.GetPropertyConnection()
-		if err != nil {
-			return nil, err
-		}
+		if ac != nil {
+			conn, err := ac.GetPropertyConnection()
+			if err != nil {
+				return nil, err
+			}
 
-		settings, err := conn.GetSettings()
-		if err != nil {
-			return nil, err
-		}
+			if conn != nil {
+				settings, err := conn.GetSettings()
+				if err != nil {
+					return nil, err
+				}
 
-		if settings["ipv4"] != nil {
-			method := settings["ipv4"]["method"]
-			if method != nil {
-				ethernetDevice.Method = fmt.Sprint(method)
+				if settings["ipv4"] != nil {
+					method := settings["ipv4"]["method"]
+					if method != nil {
+						ethernetDevice.Method = fmt.Sprint(method)
+					}
+				}
 			}
 		}
 
