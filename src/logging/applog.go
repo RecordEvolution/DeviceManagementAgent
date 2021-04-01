@@ -194,6 +194,17 @@ func (lm *LogManager) emitStream(logEntry *LogSubscription) error {
 				return
 			}
 
+			safe.Go(func() {
+				logs, err := lm.getNonAgentLogs(logEntry.ContainerName)
+				if err != nil {
+					return
+				}
+
+				for _, log := range logs {
+					lm.Messenger.Publish(topics.Topic(topic), []interface{}{log}, nil, nil)
+				}
+			})
+
 			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
 		})
 	}()
@@ -333,6 +344,9 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]*LogEntry,
 	}
 
 	stage, appKey, appName, err := common.ParseContainerName(containerName)
+	if err != nil {
+		return nil, err
+	}
 
 	app, err := lm.AppStore.GetApp(appKey, stage)
 	if err != nil {
@@ -359,6 +373,41 @@ func (lm *LogManager) getPersistedLogHistory(containerName string) ([]*LogEntry,
 	}
 
 	return logEntries, nil
+}
+
+func (lm *LogManager) getNonAgentLogs(containerName string) ([]string, error) {
+	history, err := lm.getPersistedLogHistory(containerName)
+	if err != nil {
+		return nil, err
+	}
+
+	containsOnlyAgentLogs := true
+	for _, entry := range history {
+		if entry.logType == CONTAINER {
+			containsOnlyAgentLogs = false
+			break
+		}
+	}
+
+	if containsOnlyAgentLogs || len(history) == 0 {
+		ctx := context.Background()
+		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
+		reader, err := lm.Container.Logs(ctx, containerName, options)
+		if err != nil {
+			log.Error().Err(err).Msg("Error occurred while trying to get log history when none were found")
+			return []string{}, nil
+		}
+
+		var containerHistory []string
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			containerHistory = append(containerHistory, scanner.Text())
+		}
+
+		return containerHistory, nil
+	}
+
+	return []string{}, nil
 }
 
 func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
@@ -627,7 +676,7 @@ func (lm *LogManager) buildTopic(containerName string) string {
 	return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 }
 
-//  king publishes an stream of string data to a specific subscribable container synchronisly.
+//  StreamBlocking publishes a stream of string data to a specific subscribable container synchronisly.
 func (lm *LogManager) StreamBlocking(containerName string, logType common.LogType, reader io.ReadCloser) error {
 	if reader != nil {
 		return lm.initLogStream(containerName, logType, reader)

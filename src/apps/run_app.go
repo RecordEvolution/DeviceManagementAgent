@@ -231,18 +231,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		if errdefs.IsImageNotFound(err) {
 			imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
 			sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
-
-			// buildAppErr := sm.buildApp(payload, app)
-			// // this can fail if the build files are for example not available on the device
-			// if buildAppErr != nil {
-			// 	return buildAppErr
-			// }
 		}
-
-		// newContainerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
-		// if err != nil {
-		// 	return err
-		// }
 		return err
 	}
 
