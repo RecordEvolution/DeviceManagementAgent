@@ -12,9 +12,13 @@ const GetLogHistory Topic = "get_log_history"
 const StreamLogHistory Topic = "stream_log_history"
 const ListContainers Topic = "list_containers"
 
+const ListEthernetDevices Topic = "list_ethernet_devices"
+const UpdateIPv4Configuration Topic = "update_ipv4_config"
+
 const ListWiFiNetworks Topic = "list_wifi_networks"
 const AddWiFiConfiguration Topic = "add_wifi_configuration"
 const RemoveWiFiConfiguration Topic = "remove_wifi_configuration"
+const ScanWifiNetworks Topic = "scan_wifi_networks"
 const SelectWiFiNetwork Topic = "select_wifi_network"
 const RestartWifi Topic = "restart_wifi"
 
