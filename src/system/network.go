@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reagent/errdefs"
 	"reagent/networkmanager"
+	"reagent/safe"
 	"strings"
 	"time"
 )
@@ -645,7 +646,16 @@ func (n *Network) updateIPv4Address(device networkmanager.Device, connection net
 
 	settings["ipv4"]["address-data"] = addressData
 
-	return connection.Update(settings)
+	err = connection.Update(settings)
+	if err != nil {
+		return err
+	}
+
+	safe.Go(func() {
+		device.Reapply(settings, 0, 0)
+	})
+
+	return err
 }
 
 func (n *Network) enableDHCP(connection networkmanager.Connection, mac string) error {
