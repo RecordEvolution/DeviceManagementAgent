@@ -79,7 +79,7 @@ type Device interface {
 	// connection: The optional connection settings that will be reapplied on the device. If empty, the currently active settings-connection will be used. The connection cannot arbitrarly differ from the current applied-connection otherwise the call will fail. Only certain changes are supported, like adding or removing IP addresses.
 	// versionId: If non-zero, the current version id of the applied-connection must match. The current version id can be retrieved via GetAppliedConnection. This optional argument allows to catch concurrent modifications between the GetAppliedConnection call and Reapply.
 	// flags: Flags which would modify the behavior of the Reapply call. There are no flags defined currently and the users should use the value of 0.
-	Reapply(connection Connection, versionId uint64, flags uint32) error
+	Reapply(connection ConnectionSettings, versionId uint64, flags uint32) error
 
 	// Disconnects a device and prevents the device from automatically activating further connections without user intervention.
 	Disconnect() error
@@ -170,8 +170,8 @@ func (d *device) GetPath() dbus.ObjectPath {
 	return d.obj.Path()
 }
 
-func (d *device) Reapply(connection Connection, versionId uint64, flags uint32) error {
-	return d.call(DeviceReapply, connection, versionId, flags)
+func (d *device) Reapply(connectionSettings ConnectionSettings, versionId uint64, flags uint32) error {
+	return d.call(DeviceReapply, connectionSettings, versionId, flags)
 }
 
 func (d *device) Disconnect() error {
