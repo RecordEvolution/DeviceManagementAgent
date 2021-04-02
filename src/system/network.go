@@ -658,7 +658,7 @@ func (n *Network) updateIPv4Address(device networkmanager.Device, connection net
 	return err
 }
 
-func (n *Network) enableDHCP(connection networkmanager.Connection, mac string) error {
+func (n *Network) enableDHCP(device networkmanager.Device, connection networkmanager.Connection) error {
 	settings, err := connection.GetSettings()
 	if err != nil {
 		return err
@@ -667,10 +667,34 @@ func (n *Network) enableDHCP(connection networkmanager.Connection, mac string) e
 	delete(settings["ipv6"], "addresses")
 	delete(settings["ipv6"], "routes")
 
-	settings["ipv4"] = make(map[string]interface{})
+	if settings["ipv4"] == nil {
+		settings["ipv4"] = make(map[string]interface{})
+	}
+
+	if settings["ipv4"]["addresses"] != nil {
+		delete(settings["ipv4"], "addresses")
+	}
+
+	if settings["ipv4"]["address-data"] != nil {
+		delete(settings["ipv4"], "address-data")
+	}
+
+	if settings["ipv4"]["gateway"] != nil {
+		delete(settings["ipv4"], "gateway")
+	}
+
 	settings["ipv4"]["method"] = "auto"
 
-	return connection.Update(settings)
+	err = connection.Update(settings)
+	if err != nil {
+		return err
+	}
+
+	safe.Go(func() {
+		device.Reapply(settings, 0, 0)
+	})
+
+	return err
 }
 
 func (n *Network) EnableDHCP(mac string) error {
@@ -680,6 +704,7 @@ func (n *Network) EnableDHCP(mac string) error {
 	}
 
 	var ac networkmanager.ActiveConnection
+	var foundDevice networkmanager.Device
 	for _, device := range devices {
 		foundMac, err := device.GetPropertyHwAddress()
 		if err != nil {
@@ -691,6 +716,8 @@ func (n *Network) EnableDHCP(mac string) error {
 			if err != nil {
 				return err
 			}
+
+			foundDevice = device
 			break
 		}
 
@@ -705,7 +732,7 @@ func (n *Network) EnableDHCP(mac string) error {
 		return err
 	}
 
-	return n.enableDHCP(connection, mac)
+	return n.enableDHCP(foundDevice, connection)
 }
 
 func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {

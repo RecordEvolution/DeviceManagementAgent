@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reagent/common"
 	"reagent/messenger"
 )
@@ -43,7 +42,7 @@ func (ex *External) updateIPConfigHandler(ctx context.Context, response messenge
 	methodKw := payload["method"]
 	method, ok := methodKw.(string)
 	if !ok {
-		return nil, errors.New("failed to parse ipv4 parameter")
+		return nil, errors.New("failed to parse method parameter")
 	}
 
 	macKw := payload["mac"]
@@ -52,8 +51,13 @@ func (ex *External) updateIPConfigHandler(ctx context.Context, response messenge
 		return nil, errors.New("failed to parse mac parameter")
 	}
 
-	if methodKw != nil && fmt.Sprint(method) == "auto" {
-		return nil, ex.Network.EnableDHCP(mac)
+	if methodKw != nil && method == "auto" {
+		err := ex.Network.EnableDHCP(mac)
+		if err != nil {
+			return nil, err
+		}
+
+		return &messenger.InvokeResult{}, nil
 	}
 
 	ipv4Kw := payload["ipv4"]
