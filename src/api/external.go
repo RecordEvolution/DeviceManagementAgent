@@ -10,6 +10,7 @@ import (
 	"reagent/logging"
 	"reagent/messenger"
 	"reagent/messenger/topics"
+	"reagent/network"
 	"reagent/persistence"
 	"reagent/system"
 	"reagent/terminal"
@@ -25,8 +26,8 @@ type External struct {
 	Messenger       messenger.Messenger
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
+	Network         network.Network
 	Filesystem      *filesystem.Filesystem
-	Network         *system.Network
 	System          *system.System
 	AppManager      *apps.AppManager
 	TerminalManager *terminal.TerminalManager

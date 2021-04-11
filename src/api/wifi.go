@@ -5,7 +5,7 @@ import (
 	"errors"
 	"reagent/common"
 	"reagent/messenger"
-	"reagent/system"
+	"reagent/network"
 )
 
 func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -119,14 +119,14 @@ func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response me
 		return nil, errors.New("failed to parse priority, invalid type")
 	}
 
-	wifiEntryPayload := system.WiFiCredentials{
+	wifiEntryPayload := network.WiFiCredentials{
 		Ssid:         ssid,
 		Passwd:       password,
 		Priority:     uint32(priority),
 		SecurityType: securityType,
 	}
 
-	_, err := ex.Network.AddWiFi(mac, wifiEntryPayload)
+	err := ex.Network.AddWiFi(mac, wifiEntryPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (ex *External) selectWiFiNetworkHandler(ctx context.Context, response messe
 		return nil, errors.New("failed to parse mac, invalid type")
 	}
 
-	_, err := ex.Network.ActivateWiFi(mac, ssid)
+	err := ex.Network.ActivateWiFi(mac, ssid)
 	if err != nil {
 		return nil, err
 	}

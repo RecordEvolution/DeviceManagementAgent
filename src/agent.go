@@ -10,11 +10,13 @@ import (
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
+	"reagent/network"
 	"reagent/persistence"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"runtime"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -25,7 +27,7 @@ type Agent struct {
 	Messenger       messenger.Messenger
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
-	Network         *system.Network
+	Network         network.Network
 	System          *system.System
 	Config          *config.Config
 	External        *api.External
@@ -125,9 +127,16 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
-	network, err := system.NewNetwork()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to setup network")
+
+	var networkInstance network.Network
+	if runtime.GOOS == "linux" {
+		networkInstance, err = network.NewNMWNetwork()
+		if err != nil {
+			log.Fatal().Stack().Err(err).Msg("failed to setup network")
+		}
+	} else {
+		// TODO: write implementations for other environments. (issue: https://github.com/RecordEvolution/DeviceManagementAgent/issues/41)
+		networkInstance = network.NewDummyNetwork()
 	}
 
 	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
@@ -187,7 +196,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Messenger:       mainSession,
 		LogMessenger:    mainSession,
 		Database:        database,
-		Network:         &network,
+		Network:         networkInstance,
 		Filesystem:      &filesystem,
 		System:          &systemAPI,
 		AppManager:      appManager,
@@ -201,7 +210,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		System:          &systemAPI,
 		External:        &external,
 		LogManager:      &logManager,
-		Network:         &network,
+		Network:         networkInstance,
 		TerminalManager: &terminalManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,

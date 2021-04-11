@@ -1,4 +1,4 @@
-package system
+package network
 
 import (
 	"context"
@@ -11,71 +11,26 @@ import (
 	"time"
 )
 
-type WiFi struct {
-	SSID            string // network name
-	MAC             string // MAC
-	SecurityType    string
-	Signal          uint8 // signal strength (dBm)
-	WPAFlags        uint32
-	RSNFlags        uint32
-	Flags           uint32
-	Frequency       uint32 // frequency [MHz]
-	Channel         uint32 // channel index
-	Current         bool
-	Known           bool
-	IPv4AddressData []IPv4AddressData
-	IPv6AddressData []IPv6AddressData
-}
-
-type EthernetDevice struct {
-	InterfaceName   string
-	MAC             string
-	IPv4AddressData []IPv4AddressData
-	IPv6AddressData []IPv6AddressData
-	Method          string
-}
-
-type IPv4AddressData struct {
-	Address string
-	Prefix  uint8
-}
-
-type IPv6AddressData struct {
-	Address string
-	Prefix  uint8
-}
-
-type WiFiCredentials struct {
-	Ssid         string
-	Passwd       string // password for SSID
-	SecurityType string
-	Priority     uint32
-}
-
-type Network struct {
+type NWMNetwork struct {
 	nm       networkmanager.NetworkManager
 	settings networkmanager.Settings
 }
 
-var ErrDeviceNotFound = errors.New("device not found")
-var ErrInvalidWiFiPassword = errors.New("the wifi password is invalid")
-var ErrNotConnected = errors.New("not connected")
-
-func NewNetwork() (Network, error) {
+func NewNMWNetwork() (NWMNetwork, error) {
 	nm, err := networkmanager.NewNetworkManager()
 	if err != nil {
-		return Network{}, err
+		return NWMNetwork{}, err
 	}
 
 	settings, err := networkmanager.NewSettings()
 	if err != nil {
-		return Network{}, err
+		return NWMNetwork{}, err
 	}
 
-	return Network{nm, settings}, nil
+	return NWMNetwork{nm, settings}, nil
 }
 
-func (n *Network) GetActiveWirelessDevice() (networkmanager.DeviceWireless, error) {
+func (n NWMNetwork) getActiveWirelessDevice() (networkmanager.DeviceWireless, error) {
 	connections, err := n.nm.GetPropertyActiveConnections()
 	if err != nil {
 		return nil, err
@@ -103,8 +58,8 @@ func (n *Network) GetActiveWirelessDevice() (networkmanager.DeviceWireless, erro
 	return nil, ErrDeviceNotFound
 }
 
-func (n *Network) getAccessPointBySSID(ssid string) (networkmanager.AccessPoint, error) {
-	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) getAccessPointBySSID(ssid string) (networkmanager.AccessPoint, error) {
+	activeWirelessDevice, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +83,8 @@ func (n *Network) getAccessPointBySSID(ssid string) (networkmanager.AccessPoint,
 	return nil, errdefs.ErrNotFound
 }
 
-func (n *Network) getAccessPointByMAC(mac string) (networkmanager.AccessPoint, error) {
-	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) getAccessPointByMAC(mac string) (networkmanager.AccessPoint, error) {
+	activeWirelessDevice, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +108,11 @@ func (n *Network) getAccessPointByMAC(mac string) (networkmanager.AccessPoint, e
 	return nil, errdefs.ErrNotFound
 }
 
-func (n *Network) Reload() error {
+func (n NWMNetwork) Reload() error {
 	return n.nm.Reload(0)
 }
 
-func (n *Network) getConnectionBySSID(ssid string) (networkmanager.Connection, error) {
+func (n NWMNetwork) getConnectionBySSID(ssid string) (networkmanager.Connection, error) {
 	savedConnections, err := n.settings.ListConnections()
 	if err != nil {
 		return nil, err
@@ -191,7 +146,7 @@ func (n *Network) getConnectionBySSID(ssid string) (networkmanager.Connection, e
 	return nil, errdefs.ErrNotFound
 }
 
-func (n *Network) RemoveWifi(ssid string) error {
+func (n NWMNetwork) RemoveWifi(ssid string) error {
 	connection, err := n.getConnectionBySSID(ssid)
 	if err != nil {
 		return err
@@ -200,26 +155,31 @@ func (n *Network) RemoveWifi(ssid string) error {
 	return connection.Delete()
 }
 
-func (n *Network) ActivateWiFi(mac string, ssid string) (networkmanager.ActiveConnection, error) {
-	device, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) ActivateWiFi(mac string, ssid string) error {
+	device, err := n.getActiveWirelessDevice()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	accessPoint, err := n.getAccessPointByMAC(mac)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	connection, err := n.getConnectionBySSID(ssid)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return n.nm.ActivateWirelessConnection(connection, device, accessPoint)
+	_, err = n.nm.ActivateWirelessConnection(connection, device, accessPoint)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (n *Network) AddWiFi(mac string, credentials WiFiCredentials) (networkmanager.Connection, error) {
+func (n NWMNetwork) AddWiFi(mac string, credentials WiFiCredentials) error {
 	var ap networkmanager.AccessPoint
 	var ssid string
 	var secType networkmanager.AccessPointSecurityType
@@ -231,17 +191,17 @@ func (n *Network) AddWiFi(mac string, credentials WiFiCredentials) (networkmanag
 	} else {
 		ap, err = n.getAccessPointByMAC(mac)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		ssid, err = ap.GetPropertySSID()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		secType, err = ap.GetSecurityType()
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -266,23 +226,23 @@ func (n *Network) AddWiFi(mac string, credentials WiFiCredentials) (networkmanag
 		newConnection["802-11-wireless-security"]["wep-key0"] = credentials.Passwd
 	}
 
-	connection, err := n.settings.AddConnection(newConnection)
+	_, err = n.settings.AddConnection(newConnection)
 	if err != nil {
 		if strings.Contains(err.Error(), "802-11-wireless-security.psk: property is invalid") {
-			return nil, ErrInvalidWiFiPassword
+			return ErrInvalidWiFiPassword
 		}
 		if strings.Contains(err.Error(), "802-11-wireless-security.wep-key0: property is invalid") {
-			return nil, ErrInvalidWiFiPassword
+			return ErrInvalidWiFiPassword
 		}
-		return nil, err
+		return err
 	}
 
-	return connection, nil
+	return nil
 }
 
 // Scan calls the NetworkManager to see if there's a WiFi device available. If available it will scan, and block until the scan has finished.
 // Whenever a scan request gets rate limited, we wait one second and retry until it succeeds. The default scan timeout is 10 seconds.
-func (n *Network) Scan(timeoutParam ...time.Duration) error {
+func (n NWMNetwork) Scan(timeoutParam ...time.Duration) error {
 	var timeout time.Duration
 
 	if len(timeoutParam) == 0 {
@@ -294,7 +254,7 @@ func (n *Network) Scan(timeoutParam ...time.Duration) error {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
 	defer cancelFunc()
 
-	wirelessDevice, err := n.GetActiveWirelessDevice()
+	wirelessDevice, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return err
 	}
@@ -348,7 +308,7 @@ outerLoop:
 	return nil
 }
 
-func (n *Network) isKnown(ssid string, bssid string) (bool, error) {
+func (n NWMNetwork) isKnown(ssid string, bssid string) (bool, error) {
 	savedConnections, err := n.settings.ListConnections()
 	if err != nil {
 		return false, err
@@ -403,8 +363,8 @@ func (n *Network) isKnown(ssid string, bssid string) (bool, error) {
 	return false, nil
 }
 
-func (n *Network) isCurrent(bssid string) (bool, error) {
-	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) isCurrent(bssid string) (bool, error) {
+	activeWirelessDevice, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return false, err
 	}
@@ -439,7 +399,7 @@ func (n *Network) isCurrent(bssid string) (bool, error) {
 	return false, nil
 }
 
-func (n *Network) getAllConnectionSettings() ([]networkmanager.ConnectionSettings, error) {
+func (n NWMNetwork) getAllConnectionSettings() ([]networkmanager.ConnectionSettings, error) {
 	var connectionSettings []networkmanager.ConnectionSettings
 
 	allConnections, err := n.settings.ListConnections()
@@ -459,7 +419,7 @@ func (n *Network) getAllConnectionSettings() ([]networkmanager.ConnectionSetting
 	return connectionSettings, nil
 }
 
-func (n *Network) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
+func (n NWMNetwork) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
 	devices, err := n.nm.GetAllDevices()
 	if err != nil {
 		return nil, err
@@ -485,7 +445,7 @@ func (n *Network) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
 	return wiredDevices, nil
 }
 
-func (n *Network) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) ([]WiFi, error) {
+func (n NWMNetwork) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) ([]WiFi, error) {
 	var wifis []WiFi
 	for _, ap := range accessPoints {
 		wifi := WiFi{}
@@ -573,8 +533,8 @@ func (n *Network) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint) 
 	return wifis, nil
 }
 
-func (n *Network) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error) {
-	device, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error) {
+	device, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -612,7 +572,7 @@ func (n *Network) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6Addr
 	return parsedIPv4Datas, parsedIPv6Datas, nil
 }
 
-func (n *Network) updateIPv4Address(device networkmanager.Device, connection networkmanager.Connection, ipAddress string, prefix uint32) error {
+func (n NWMNetwork) updateIPv4Address(device networkmanager.Device, connection networkmanager.Connection, ipAddress string, prefix uint32) error {
 	settings, err := connection.GetSettings()
 	if err != nil {
 		return err
@@ -658,7 +618,7 @@ func (n *Network) updateIPv4Address(device networkmanager.Device, connection net
 	return err
 }
 
-func (n *Network) enableDHCP(device networkmanager.Device, connection networkmanager.Connection) error {
+func (n NWMNetwork) enableDHCP(device networkmanager.Device, connection networkmanager.Connection) error {
 	settings, err := connection.GetSettings()
 	if err != nil {
 		return err
@@ -697,7 +657,7 @@ func (n *Network) enableDHCP(device networkmanager.Device, connection networkman
 	return err
 }
 
-func (n *Network) EnableDHCP(mac string) error {
+func (n NWMNetwork) EnableDHCP(mac string) error {
 	devices, err := n.nm.GetAllDevices()
 	if err != nil {
 		return err
@@ -735,7 +695,7 @@ func (n *Network) EnableDHCP(mac string) error {
 	return n.enableDHCP(foundDevice, connection)
 }
 
-func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
+func (n NWMNetwork) SetIPv4Address(mac string, ip string, prefix uint32) error {
 	devices, err := n.nm.GetAllDevices()
 	if err != nil {
 		return err
@@ -773,7 +733,7 @@ func (n *Network) SetIPv4Address(mac string, ip string, prefix uint32) error {
 	return n.updateIPv4Address(foundDevice, connection, ip, prefix)
 }
 
-func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
+func (n NWMNetwork) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
 	var wifi WiFi
 
 	wirelessSettings := connectionSettingsMap["802-11-wireless"]
@@ -794,7 +754,7 @@ func (n *Network) connectionSettingsToWifi(connectionSettingsMap networkmanager.
 	return wifi
 }
 
-func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
+func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 	devices, err := n.getEthernetDevices()
 	if err != nil {
 		return nil, err
@@ -894,8 +854,8 @@ func (n *Network) ListEthernetDevices() ([]EthernetDevice, error) {
 	return ethernetDevices, nil
 }
 
-func (n *Network) ListWifiNetworks() ([]WiFi, error) {
-	activeWirelessDevice, err := n.GetActiveWirelessDevice()
+func (n NWMNetwork) ListWifiNetworks() ([]WiFi, error) {
+	activeWirelessDevice, err := n.getActiveWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
