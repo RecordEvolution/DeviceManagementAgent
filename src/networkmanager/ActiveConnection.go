@@ -2,6 +2,7 @@ package networkmanager
 
 import (
 	"fmt"
+	"reagent/safe"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -240,7 +241,7 @@ func (a *activeConnection) SubscribeState(receiver chan StateChange, exit chan s
 		return err
 	}
 
-	go func() {
+	safe.Go(func() {
 		for {
 			select {
 			case signal, ok := <-channel:
@@ -267,7 +268,7 @@ func (a *activeConnection) SubscribeState(receiver chan StateChange, exit chan s
 				return
 			}
 		}
-	}()
+	})
 
 	return
 }
