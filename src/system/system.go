@@ -102,6 +102,14 @@ func GetVersion() string {
 	return version
 }
 
+func GetReswarmOSVersion() string {
+	versionFile, err := os.ReadFile("/etc/reswarmos")
+	if err != nil {
+		return ""
+	}
+	return string(versionFile)
+}
+
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
 
