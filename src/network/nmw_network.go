@@ -9,6 +9,8 @@ import (
 	"reagent/safe"
 	"strings"
 	"time"
+
+	"github.com/godbus/dbus/v5"
 )
 
 type NWMNetwork struct {
@@ -611,9 +613,11 @@ func (n NWMNetwork) updateIPv4Address(device networkmanager.Device, connection n
 		return err
 	}
 
-	safe.Go(func() {
-		device.Reapply(settings, 0, 0)
-	})
+	if device != nil {
+		safe.Go(func() {
+			device.Reapply(settings, 0, 0)
+		})
+	}
 
 	return err
 }
@@ -650,14 +654,16 @@ func (n NWMNetwork) enableDHCP(device networkmanager.Device, connection networkm
 		return err
 	}
 
-	safe.Go(func() {
-		device.Reapply(settings, 0, 0)
-	})
+	if device != nil {
+		safe.Go(func() {
+			device.Reapply(settings, 0, 0)
+		})
+	}
 
 	return err
 }
 
-func (n NWMNetwork) EnableDHCP(mac string) error {
+func (n NWMNetwork) EnableDHCP(mac string, interfaceName string) error {
 	devices, err := n.nm.GetAllDevices()
 	if err != nil {
 		return err
@@ -683,19 +689,42 @@ func (n NWMNetwork) EnableDHCP(mac string) error {
 
 	}
 
-	if ac == nil {
-		return ErrDeviceNotFound
+	var foundConnection networkmanager.Connection
+	if ac != nil {
+		foundConnection, err = ac.GetPropertyConnection()
+	} else {
+		foundConnection, err = n.getConnectionByInterfaceName(interfaceName)
 	}
 
-	connection, err := ac.GetPropertyConnection()
 	if err != nil {
 		return err
 	}
 
-	return n.enableDHCP(foundDevice, connection)
+	return n.enableDHCP(foundDevice, foundConnection)
 }
 
-func (n NWMNetwork) SetIPv4Address(mac string, ip string, prefix uint32) error {
+func (n NWMNetwork) getConnectionByInterfaceName(interfaceName string) (networkmanager.Connection, error) {
+	connections, err := n.settings.ListConnections()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, connection := range connections {
+		cSettings, err := connection.GetSettings()
+		if err != nil {
+			return nil, err
+		}
+
+		foundInterfaceName := fmt.Sprint(cSettings["connection"]["interface-name"])
+		if interfaceName == foundInterfaceName {
+			return connection, nil
+		}
+	}
+
+	return nil, errdefs.ErrNotFound
+}
+
+func (n NWMNetwork) SetIPv4Address(mac string, interfaceName string, ip string, prefix uint32) error {
 	devices, err := n.nm.GetAllDevices()
 	if err != nil {
 		return err
@@ -721,16 +750,18 @@ func (n NWMNetwork) SetIPv4Address(mac string, ip string, prefix uint32) error {
 
 	}
 
-	if ac == nil {
-		return ErrDeviceNotFound
+	var foundConnection networkmanager.Connection
+	if ac != nil {
+		foundConnection, err = ac.GetPropertyConnection()
+	} else {
+		foundConnection, err = n.getConnectionByInterfaceName(interfaceName)
 	}
 
-	connection, err := ac.GetPropertyConnection()
 	if err != nil {
 		return err
 	}
 
-	return n.updateIPv4Address(foundDevice, connection, ip, prefix)
+	return n.updateIPv4Address(foundDevice, foundConnection, ip, prefix)
 }
 
 func (n NWMNetwork) connectionSettingsToWifi(connectionSettingsMap networkmanager.ConnectionSettings) WiFi {
@@ -794,6 +825,30 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 			}
 
 			ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
+		} else {
+			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
+			if err != nil {
+				return nil, err
+			}
+
+			if connection != nil {
+				settings, err := connection.GetSettings()
+				if err != nil {
+					return nil, err
+				}
+
+				if settings["ipv4"] != nil && settings["ipv4"]["address-data"] != nil {
+					ipv4Addresses := settings["ipv4"]["address-data"].([]map[string]dbus.Variant)
+					var ipv4AddressDatas []IPv4AddressData
+					for _, addressData := range ipv4Addresses {
+						ipv4Address := fmt.Sprint(addressData["address"].Value())
+						prefix := addressData["prefix"].Value().(uint32)
+						ipv4AddressDatas = append(ipv4AddressDatas, IPv4AddressData{Prefix: uint8(prefix), Address: ipv4Address})
+					}
+
+					ethernetDevice.IPv4AddressData = ipv4AddressDatas
+				}
+			}
 		}
 
 		ipv6Config, err := device.GetPropertyIP6Config()
@@ -835,6 +890,29 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 
 			if conn != nil {
 				settings, err := conn.GetSettings()
+				if err != nil {
+					return nil, err
+				}
+
+				if settings["ipv4"] != nil {
+					method := settings["ipv4"]["method"]
+					if method != nil {
+						ethernetDevice.Method = fmt.Sprint(method)
+					}
+				}
+			}
+		} else {
+			if ethernetDevice.InterfaceName == "" {
+				continue
+			}
+
+			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
+			if err != nil {
+				return nil, err
+			}
+
+			if connection != nil {
+				settings, err := connection.GetSettings()
 				if err != nil {
 					return nil, err
 				}

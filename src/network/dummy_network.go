@@ -29,7 +29,7 @@ func (dw DummyNetwork) RemoveWifi(ssid string) error {
 	return nil
 }
 
-func (dw DummyNetwork) EnableDHCP(mac string) error {
+func (dw DummyNetwork) EnableDHCP(mac string, interfaceName string) error {
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (dw DummyNetwork) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv
 	return []IPv4AddressData{}, []IPv6AddressData{}, nil
 }
 
-func (dw DummyNetwork) SetIPv4Address(mac string, ip string, prefix uint32) error {
+func (dw DummyNetwork) SetIPv4Address(mac string, interfaceName string, ip string, prefix uint32) error {
 	return nil
 }
 

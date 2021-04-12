@@ -52,9 +52,9 @@ type Network interface {
 	ListEthernetDevices() ([]EthernetDevice, error)
 	ActivateWiFi(mac string, ssid string) error
 	RemoveWifi(ssid string) error
-	EnableDHCP(mac string) error
+	EnableDHCP(mac string, interfaceName string) error
 	GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error)
-	SetIPv4Address(mac string, ip string, prefix uint32) error
+	SetIPv4Address(mac string, interfaceName string, ip string, prefix uint32) error
 	AddWiFi(mac string, credentials WiFiCredentials) error
 	Reload() error
 }

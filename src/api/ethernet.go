@@ -51,8 +51,14 @@ func (ex *External) updateIPConfigHandler(ctx context.Context, response messenge
 		return nil, errors.New("failed to parse mac parameter")
 	}
 
+	interfaceKw := payload["interfaceName"]
+	interfaceName, ok := interfaceKw.(string)
+	if !ok {
+		return nil, errors.New("failed to parse interface parameter")
+	}
+
 	if methodKw != nil && method == "auto" {
-		err := ex.Network.EnableDHCP(mac)
+		err := ex.Network.EnableDHCP(mac, interfaceName)
 		if err != nil {
 			return nil, err
 		}
@@ -72,5 +78,5 @@ func (ex *External) updateIPConfigHandler(ctx context.Context, response messenge
 		return nil, errors.New("failed to parse prefix parameter")
 	}
 
-	return &messenger.InvokeResult{}, ex.Network.SetIPv4Address(mac, ipv4, uint32(prefix))
+	return &messenger.InvokeResult{}, ex.Network.SetIPv4Address(mac, interfaceName, ipv4, uint32(prefix))
 }
