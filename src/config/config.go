@@ -33,6 +33,7 @@ type ReswarmConfig struct {
 	DockerRegistryURL    string `json:"docker_registry_url"`
 	InsecureRegistries   string `json:"insecure-registries"`
 	DockerMainRepository string `json:"docker_main_repository"`
+	ReswarmBaseURL       string
 }
 
 type CommandLineArguments struct {

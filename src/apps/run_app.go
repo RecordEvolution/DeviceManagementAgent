@@ -337,7 +337,7 @@ func computeResources() container.Resources {
 }
 
 func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {
-	return []string{
+	environmentVariables := []string{
 		fmt.Sprintf("DEVICE_SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
 		fmt.Sprintf("ENV=%s", environment),
 		fmt.Sprintf("DEVICE_KEY=%d", config.ReswarmConfig.DeviceKey),
@@ -346,4 +346,12 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 		fmt.Sprintf("DEVICE_NAME=%s", config.ReswarmConfig.Name),
 		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", config.ReswarmConfig.DeviceEndpointURL),
 	}
+
+	if config.ReswarmConfig.ReswarmBaseURL != "" {
+		deviceURL := fmt.Sprintf("%s/%s/swarms/%s/devices/device/%s", config.ReswarmConfig.ReswarmBaseURL, config.ReswarmConfig.SwarmOwnerName, config.ReswarmConfig.SwarmName, config.ReswarmConfig.Name)
+		environmentVariables = append(environmentVariables, fmt.Sprintf("RESWARM_URL=%s", config.ReswarmConfig.ReswarmBaseURL))
+		environmentVariables = append(environmentVariables, fmt.Sprintf("DEVICE_URL=%s", deviceURL))
+	}
+
+	return environmentVariables
 }

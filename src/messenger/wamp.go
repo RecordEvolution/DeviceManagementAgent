@@ -411,10 +411,14 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 		"wamp_session_id": wampSession.GetSessionID(),
 	}
 
-	_, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+	res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
+
+	args := res.Arguments[0].(map[string]interface{})
+	reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"])
+	wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
 
 	return nil
 }
