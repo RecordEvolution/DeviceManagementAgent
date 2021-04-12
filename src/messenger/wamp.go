@@ -416,9 +416,19 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 		return err
 	}
 
-	args := res.Arguments[0].(map[string]interface{})
+	if res.Arguments == nil || res.Arguments[0] == nil {
+		return nil
+	}
+
+	args, ok := res.Arguments[0].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
 	reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"])
-	wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+	if reswarmBaseURL != "" {
+		wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+	}
 
 	return nil
 }
