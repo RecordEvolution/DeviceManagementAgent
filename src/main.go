@@ -66,7 +66,6 @@ func main() {
 	generalConfig := config.New(cliArgs, reswarmConfig)
 
 	agent := NewAgent(&generalConfig)
-	agent.InitConnectionStatusHeartbeat()
 	agent.ListenForDisconnect()
 
 	fmt.Println("Waiting for Docker Daemon to be available...")
@@ -88,6 +87,8 @@ func main() {
 	}
 	log.Info().Msg("OnConnect handler finished")
 	fmt.Println("OnConnect handler finished")
+
+	agent.InitConnectionStatusHeartbeat()
 
 	benchmark.TimeTillOnConnectAfterConnection = time.Since(benchmark.OnConnectInitAfterConnection)
 	benchmark.TimeTillOnConnect = time.Since(benchmark.OnConnectInit)
