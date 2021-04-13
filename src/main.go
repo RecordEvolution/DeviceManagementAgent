@@ -66,7 +66,7 @@ func main() {
 	generalConfig := config.New(cliArgs, reswarmConfig)
 
 	agent := NewAgent(&generalConfig)
-
+	agent.InitConnectionStatusHeartbeat()
 	agent.ListenForDisconnect()
 
 	fmt.Println("Waiting for Docker Daemon to be available...")

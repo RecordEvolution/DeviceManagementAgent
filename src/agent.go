@@ -103,6 +103,15 @@ func (agent *Agent) OnConnect() error {
 	return err
 }
 
+func (agent *Agent) InitConnectionStatusHeartbeat() {
+	safe.Go(func() {
+		for {
+			time.Sleep(time.Second * 30)
+			agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
+		}
+	})
+}
+
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	systemAPI := system.New(generalConfig)
