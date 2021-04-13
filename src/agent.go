@@ -98,9 +98,20 @@ func (agent *Agent) OnConnect() error {
 		}
 
 		benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
+
+		agent.initConnectionStatusHeartbeat()
 	})
 
 	return err
+}
+
+func (agent *Agent) initConnectionStatusHeartbeat() {
+	safe.Go(func() {
+		for {
+			time.Sleep(time.Second * 30)
+			agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
+		}
+	})
 }
 
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
