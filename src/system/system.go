@@ -103,11 +103,17 @@ func GetVersion() string {
 }
 
 func GetReswarmOSVersion() string {
-	versionFile, err := os.ReadFile("/etc/reswarmos")
+	versionBytes, err := os.ReadFile("/etc/reswarmos")
 	if err != nil {
 		return ""
 	}
-	return string(versionFile)
+	versionString := string(versionBytes)
+	versionSplit := strings.Split(versionString, "-")
+
+	if len(versionSplit) == 2 {
+		return versionSplit[1]
+	}
+	return versionString
 }
 
 func (system *System) GetLatestVersion() (string, error) {
