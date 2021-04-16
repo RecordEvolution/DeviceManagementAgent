@@ -32,6 +32,31 @@ func NewNMWNetwork() (NWMNetwork, error) {
 	return NWMNetwork{nm, settings}, nil
 }
 
+func (n NWMNetwork) getWirelessDevice() (networkmanager.DeviceWireless, error) {
+	activeWirelessDevice, err := n.getActiveWirelessDevice()
+	if err == nil {
+		return activeWirelessDevice, nil
+	}
+
+	devices, err := n.nm.GetAllDevices()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, device := range devices {
+		devType, err := device.GetPropertyDeviceType()
+		if err != nil {
+			return nil, err
+		}
+
+		if devType == networkmanager.NmDeviceTypeWifi {
+			return networkmanager.NewDeviceWireless(device.GetPath())
+		}
+	}
+
+	return nil, ErrDeviceNotFound
+}
+
 func (n NWMNetwork) getActiveWirelessDevice() (networkmanager.DeviceWireless, error) {
 	connections, err := n.nm.GetPropertyActiveConnections()
 	if err != nil {
@@ -61,7 +86,7 @@ func (n NWMNetwork) getActiveWirelessDevice() (networkmanager.DeviceWireless, er
 }
 
 func (n NWMNetwork) getAccessPointBySSID(ssid string) (networkmanager.AccessPoint, error) {
-	activeWirelessDevice, err := n.getActiveWirelessDevice()
+	activeWirelessDevice, err := n.getWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +111,7 @@ func (n NWMNetwork) getAccessPointBySSID(ssid string) (networkmanager.AccessPoin
 }
 
 func (n NWMNetwork) getAccessPointByMAC(mac string) (networkmanager.AccessPoint, error) {
-	activeWirelessDevice, err := n.getActiveWirelessDevice()
+	activeWirelessDevice, err := n.getWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +183,7 @@ func (n NWMNetwork) RemoveWifi(ssid string) error {
 }
 
 func (n NWMNetwork) ActivateWiFi(mac string, ssid string) error {
-	device, err := n.getActiveWirelessDevice()
+	device, err := n.getWirelessDevice()
 	if err != nil {
 		return err
 	}
@@ -256,7 +281,7 @@ func (n NWMNetwork) Scan(timeoutParam ...time.Duration) error {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
 	defer cancelFunc()
 
-	wirelessDevice, err := n.getActiveWirelessDevice()
+	wirelessDevice, err := n.getWirelessDevice()
 	if err != nil {
 		return err
 	}
@@ -344,7 +369,7 @@ func (n NWMNetwork) isKnown(ssid string, bssid string) (bool, error) {
 
 		bssids, ok := seenBSSIDs.([]string)
 		if !ok {
-			return false, errors.New("failed to parse bssids")
+			return false, nil
 		}
 
 		allBSSIDs = append(allBSSIDs, bssids...)
@@ -366,7 +391,7 @@ func (n NWMNetwork) isKnown(ssid string, bssid string) (bool, error) {
 }
 
 func (n NWMNetwork) isCurrent(bssid string) (bool, error) {
-	activeWirelessDevice, err := n.getActiveWirelessDevice()
+	activeWirelessDevice, err := n.getWirelessDevice()
 	if err != nil {
 		return false, err
 	}
@@ -374,6 +399,10 @@ func (n NWMNetwork) isCurrent(bssid string) (bool, error) {
 	ac, err := activeWirelessDevice.GetPropertyActiveConnection()
 	if err != nil {
 		return false, err
+	}
+
+	if ac == nil {
+		return false, nil
 	}
 
 	connection, err := ac.GetPropertyConnection()
@@ -389,7 +418,7 @@ func (n NWMNetwork) isCurrent(bssid string) (bool, error) {
 	settings := settingsMap["802-11-wireless"]
 	bssids, ok := settings["seen-bssids"].([]string)
 	if !ok {
-		return false, errors.New("failed to parse bssids")
+		return false, nil
 	}
 
 	for _, currentBssid := range bssids {
@@ -536,7 +565,7 @@ func (n NWMNetwork) accessPointsToWiFi(accessPoints []networkmanager.AccessPoint
 }
 
 func (n NWMNetwork) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error) {
-	device, err := n.getActiveWirelessDevice()
+	device, err := n.getWirelessDevice()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -551,24 +580,28 @@ func (n NWMNetwork) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6Ad
 		return nil, nil, err
 	}
 
-	ipv4AddressDatas, err := ip4Config.GetPropertyAddressData()
-	if err != nil {
-		return nil, nil, err
-	}
-
 	var parsedIPv4Datas []IPv4AddressData
-	for _, addressData := range ipv4AddressDatas {
-		parsedIPv4Datas = append(parsedIPv4Datas, IPv4AddressData(addressData))
-	}
+	if ip4Config != nil {
+		ipv4AddressDatas, err := ip4Config.GetPropertyAddressData()
+		if err != nil {
+			return nil, nil, err
+		}
 
-	ipv6AddressDatas, err := ip6Config.GetPropertyAddressData()
-	if err != nil {
-		return nil, nil, err
+		for _, addressData := range ipv4AddressDatas {
+			parsedIPv4Datas = append(parsedIPv4Datas, IPv4AddressData(addressData))
+		}
 	}
 
 	var parsedIPv6Datas []IPv6AddressData
-	for _, addressData := range ipv6AddressDatas {
-		parsedIPv6Datas = append(parsedIPv6Datas, IPv6AddressData(addressData))
+	if ip6Config != nil {
+		ipv6AddressDatas, err := ip6Config.GetPropertyAddressData()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		for _, addressData := range ipv6AddressDatas {
+			parsedIPv6Datas = append(parsedIPv6Datas, IPv6AddressData(addressData))
+		}
 	}
 
 	return parsedIPv4Datas, parsedIPv6Datas, nil
@@ -933,7 +966,7 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 }
 
 func (n NWMNetwork) ListWifiNetworks() ([]WiFi, error) {
-	activeWirelessDevice, err := n.getActiveWirelessDevice()
+	activeWirelessDevice, err := n.getWirelessDevice()
 	if err != nil {
 		return nil, err
 	}
