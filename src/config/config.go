@@ -100,7 +100,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
-	pingPongTimeout := flag.Uint("ppTimeout", 10000, "Sets the ping pong timeout of the client (0 means none, default=0)")
+	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client (0 means none, default=0)")
 	responseTimeout := flag.Uint("respTimeout", 0, "Sets the response timeout of the client in milliseconds (0 means default, default=5000)")
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the timeout for the socket connection in milliseconds (0 means none, default=1250)")
 	cfgFile := flag.String("config", "", "reswarm configuration file")
