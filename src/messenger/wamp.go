@@ -401,7 +401,7 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 
 func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 	config := wampSession.GetConfig()
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*3)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
 	defer cancelFunc()
 
 	payload := common.Dict{
