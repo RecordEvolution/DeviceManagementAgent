@@ -37,26 +37,26 @@ type ReswarmConfig struct {
 }
 
 type CommandLineArguments struct {
-	AppsDirectory            string
-	AppsBuildDir             string
-	AppsSharedDir            string
-	AgentDir                 string
-	AgentDownloadDir         string
-	CompressedBuildExtension string
-	RemoteUpdateURL          string
-	Debug                    bool
-	DebugMessaging           bool
-	Version                  bool
-	Offline                  bool
-	EnsureNameserver         bool
-	ShouldUpdate             bool
-	PrettyLogging            bool
-	LogFileLocation          string
-	ConfigFileLocation       string
-	DatabaseFileName         string
-	PingPongTimeout          uint
-	ResponseTimeout          uint
-	ConnectionTimeout        uint
+	AppsDirectory              string
+	AppsBuildDir               string
+	AppsSharedDir              string
+	AgentDir                   string
+	AgentDownloadDir           string
+	CompressedBuildExtension   string
+	RemoteUpdateURL            string
+	Debug                      bool
+	DebugMessaging             bool
+	Version                    bool
+	Offline                    bool
+	EnsureNameserver           bool
+	ShouldUpdate               bool
+	PrettyLogging              bool
+	LogFileLocation            string
+	ConfigFileLocation         string
+	DatabaseFileName           string
+	PingPongTimeout            uint
+	ResponseTimeout            uint
+	ConnectionEstablishTimeout uint
 }
 
 type Config struct {
@@ -101,8 +101,8 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenger (e.g. WAMP messages)")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
 	pingPongTimeout := flag.Uint("ppTimeout", 10000, "Sets the ping pong timeout of the client (0 means none, default=0)")
-	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds (0 means default, default=5000)")
-	socketConnectTimeout := flag.Uint("connTimeout", 1250, "Sets the timeout for the socket connection in milliseconds (0 means none, default=1250)")
+	responseTimeout := flag.Uint("respTimeout", 0, "Sets the response timeout of the client in milliseconds (0 means default, default=5000)")
+	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the timeout for the socket connection in milliseconds (0 means none, default=1250)")
 	cfgFile := flag.String("config", "", "reswarm configuration file")
 	flag.Parse()
 
@@ -111,26 +111,26 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	}
 
 	cliArgs := CommandLineArguments{
-		AppsDirectory:            appsDir,
-		AppsBuildDir:             (appsDir) + "/build",
-		AppsSharedDir:            (appsDir) + "/shared",
-		AgentDownloadDir:         (*agentDir) + "/downloads",
-		AgentDir:                 *agentDir,
-		RemoteUpdateURL:          *remoteUpdateURL,
-		CompressedBuildExtension: *compressedBuildExtension,
-		Debug:                    *debug,
-		Version:                  *version,
-		Offline:                  *offline,
-		PrettyLogging:            *prettyLogging,
-		DebugMessaging:           *debugMessaging,
-		LogFileLocation:          *logFile,
-		ConfigFileLocation:       *cfgFile,
-		EnsureNameserver:         *resolve,
-		ShouldUpdate:             *shouldUpdate,
-		DatabaseFileName:         *databaseFileName,
-		PingPongTimeout:          *pingPongTimeout,
-		ResponseTimeout:          *responseTimeout,
-		ConnectionTimeout:        *socketConnectTimeout,
+		AppsDirectory:              appsDir,
+		AppsBuildDir:               (appsDir) + "/build",
+		AppsSharedDir:              (appsDir) + "/shared",
+		AgentDownloadDir:           (*agentDir) + "/downloads",
+		AgentDir:                   *agentDir,
+		RemoteUpdateURL:            *remoteUpdateURL,
+		CompressedBuildExtension:   *compressedBuildExtension,
+		Debug:                      *debug,
+		Version:                    *version,
+		Offline:                    *offline,
+		PrettyLogging:              *prettyLogging,
+		DebugMessaging:             *debugMessaging,
+		LogFileLocation:            *logFile,
+		ConfigFileLocation:         *cfgFile,
+		EnsureNameserver:           *resolve,
+		ShouldUpdate:               *shouldUpdate,
+		DatabaseFileName:           *databaseFileName,
+		PingPongTimeout:            *pingPongTimeout,
+		ResponseTimeout:            *responseTimeout,
+		ConnectionEstablishTimeout: *socketConnectionEstablishTimeout,
 	}
 
 	return &cliArgs, nil

@@ -8,7 +8,7 @@ const PruneImages Topic = "prune_images"
 const RequestTerminalSession Topic = "request_terminal_session"
 const StartTerminalSession Topic = "start_terminal_session"
 const StopTerminalSession Topic = "stop_terminal_session"
-const GetLogHistory Topic = "get_log_history"
+const GetAppLogHistory Topic = "get_app_log_history"
 const StreamLogHistory Topic = "stream_log_history"
 const ListContainers Topic = "list_containers"
 

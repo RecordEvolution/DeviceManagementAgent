@@ -170,7 +170,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		SetupTestament:    true,
 		ResponseTimeout:   time.Millisecond * time.Duration(cliArgs.ResponseTimeout),
 		PingPongTimeout:   time.Millisecond * time.Duration(cliArgs.PingPongTimeout),
-		ConnectionTimeout: time.Millisecond * time.Duration(cliArgs.ConnectionTimeout),
+		ConnectionTimeout: time.Millisecond * time.Duration(cliArgs.ConnectionEstablishTimeout),
 	}
 
 	benchmark.TimeTillPreConnectInit = time.Since(benchmark.PreConnectInit)

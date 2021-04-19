@@ -79,7 +79,7 @@ type ErrorDetail struct {
 
 func NewLogManager(cont container.Container, msg messenger.Messenger, db persistence.Database, as store.AppStore) LogManager {
 	return LogManager{
-		activeLogs: make(map[string]*LogSubscription, 0),
+		activeLogs: make(map[string]*LogSubscription),
 		Container:  cont,
 		Messenger:  msg,
 		Database:   db,
@@ -88,7 +88,7 @@ func NewLogManager(cont container.Container, msg messenger.Messenger, db persist
 }
 
 // Amount of lines that will be stored for each app
-const historyStorageLimit = 200
+const historyStorageLimit = 100
 
 type JSONProgress struct {
 	terminalFd uintptr
@@ -448,62 +448,7 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 }
 
 func (lm *LogManager) SetupEndpoints() error {
-	err := lm.Messenger.Subscribe(topics.MetaEventSubOnSubscribe, func(r messenger.Result) error {
-		subscriptionID := r.Arguments[1] // the id of the subscription that was created
-		safe.Go(func() {
-			ctx := context.Background()
-
-			r, err := lm.Messenger.Call(ctx, topics.MetaProcGetSubscription, []interface{}{subscriptionID}, nil, nil, nil)
-			if err != nil {
-				return
-			}
-
-			subscriptionArg := r.Arguments[0] // the id of the subscription that was created
-			subscription, ok := subscriptionArg.(map[string]interface{})
-			if !ok {
-				return
-			}
-
-			uri := fmt.Sprint(subscription["uri"])
-
-			// ignore any non log subscriptions
-			if !strings.HasPrefix(uri, "reswarm.logs.") {
-				return
-			}
-
-			topicSplit := strings.Split(uri, ".")
-			serialNumber := topicSplit[2]
-			containerName := topicSplit[3]
-
-			// if the request is not for my device
-			if serialNumber != lm.Container.GetConfig().ReswarmConfig.SerialNumber {
-				return
-			}
-
-			lm.Publish(containerName, fmt.Sprintf("Fetching logs for %s, this can take a while... (%s)", containerName, time.Now().Format(time.RFC3339)))
-			history, err := lm.GetLogHistory(containerName)
-			if err != nil {
-				lm.Publish(containerName, fmt.Sprintf("Failed to fetch the logs for %s, reason: %s", containerName, err.Error()))
-				return
-			}
-
-			if len(history) > 0 {
-				safe.Go(func() {
-					for _, logEntry := range history {
-						lm.Publish(containerName, logEntry)
-					}
-				})
-
-				return
-			}
-
-			lm.Publish(containerName, fmt.Sprintf("No logs were found for %s", containerName))
-		})
-
-		return nil
-	}, nil)
-
-	err = lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
+	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		safe.Go(func() {
 			_ = r.Arguments[0]                // the id of the client session that used to be listening
 			subscriptionArg := r.Arguments[1] // the id of the subscription that was created
