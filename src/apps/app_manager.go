@@ -91,7 +91,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		am.clearCrashLoop(payload.AppKey, payload.Stage)
 	}
 
-	errC := am.StateMachine.PerformTransition(app, payload)
+	errC := am.StateMachine.InitTransition(app, payload)
 	if errC == nil {
 		// not yet implemented or nullified state transition
 		app.UnlockTransition()

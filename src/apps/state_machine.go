@@ -186,7 +186,7 @@ func (sm *StateMachine) CancelTransition(app *common.App, payload common.Transit
 	return sm.executeTransition(app, payload, transitionFunc)
 }
 
-func (sm *StateMachine) PerformTransition(app *common.App, payload common.TransitionPayload) chan error {
+func (sm *StateMachine) InitTransition(app *common.App, payload common.TransitionPayload) chan error {
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
 	app.StateLock.Unlock()
