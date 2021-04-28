@@ -31,11 +31,6 @@ func main() {
 		}
 	}()
 
-	benchmark.PreConnectInit = time.Now()
-	benchmark.OnConnectInit = time.Now()
-	benchmark.SocketConnectionInitFromLaunch = time.Now()
-	benchmark.GreenInit = time.Now()
-
 	cliArgs, err := config.GetCliArguments()
 	if err != nil {
 		if errors.Is(err, errdefs.ErrConfigNotProvided) {
@@ -63,13 +58,17 @@ func main() {
 
 	}
 
-	// print version string to stdout
 	if cliArgs.Version {
 		fmt.Println(system.GetVersion())
 		os.Exit(0)
 	}
 
 	logging.SetupLogger(cliArgs)
+
+	benchmark.PreConnectInit = time.Now()
+	benchmark.OnConnectInit = time.Now()
+	benchmark.SocketConnectionInitFromLaunch = time.Now()
+	benchmark.GreenInit = time.Now()
 
 	log.Info().Msgf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s)", runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s) \n\n", runtime.GOOS, runtime.GOARCH)
