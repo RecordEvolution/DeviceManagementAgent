@@ -33,7 +33,11 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 		return err
 	}
 
-	sm.setState(app, common.DELETING)
+	err = sm.setState(app, common.DELETING)
+	if err != nil {
+		return err
+	}
+
 	options := map[string]interface{}{"force": true}
 	// check if the image has a running container
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
@@ -66,6 +70,9 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 	}
 
 	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
 
 	sucessRemoveMessage := fmt.Sprintf("Successfully removed %s!", payload.AppName)
 	return sm.LogManager.Write(payload.ContainerName.Dev, sucessRemoveMessage)
@@ -85,7 +92,11 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 		return err
 	}
 
-	sm.setState(app, common.DELETING)
+	err = sm.setState(app, common.DELETING)
+	if err != nil {
+		return err
+	}
+
 	options := map[string]interface{}{"force": true}
 
 	// check if the image has a running container
@@ -119,6 +130,9 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 	}
 
 	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
 
 	sucessRemoveMessage := fmt.Sprintf("Successfully removed %s!", payload.AppName)
 	return sm.LogManager.Write(payload.ContainerName.Prod, sucessRemoveMessage)

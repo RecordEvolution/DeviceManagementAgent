@@ -23,7 +23,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	err = sm.setState(app, common.DOWNLOADING)
+	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	err = sm.setState(app, common.DOWNLOADING)
 	if err != nil {
 		return err
 	}

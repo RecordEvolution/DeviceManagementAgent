@@ -59,7 +59,7 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}
 
-	err = agent.StateObserver.CorrectLocalAndUpdateRemoteAppStates()
+	err = agent.StateObserver.CorrectAppStates(true)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
@@ -148,7 +148,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		networkInstance = network.NewDummyNetwork()
 	}
 
-	err = stateObserver.CorrectLocalAndUpdateRemoteAppStates()
+	err = stateObserver.CorrectAppStates(false)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to correct local states")
 	}

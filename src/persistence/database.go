@@ -29,13 +29,13 @@ const (
 	cacheShared = "cache=shared"
 	busyTimeout = "_busy_timeout=2500"
 	journalMode = "_journal_mode=WAL"
-	syncOff     = "_synchronous=OFF"
+	//syncOff     = "_synchronous=OFF"
 	maxOpenConn = 1
 )
 
 func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 	databaseFileName := config.CommandLineArguments.DatabaseFileName
-	connectionString := fmt.Sprintf("./%s?%s&%s&%s&%s", databaseFileName, cacheShared, busyTimeout, journalMode, syncOff)
+	connectionString := fmt.Sprintf("./%s?%s&%s&%s", databaseFileName, cacheShared, busyTimeout, journalMode)
 	log.Debug().Msgf("Db: Setup database with %s as connection string", connectionString)
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {

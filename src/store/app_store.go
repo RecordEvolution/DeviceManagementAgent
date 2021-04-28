@@ -149,8 +149,7 @@ func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppSt
 }
 
 // UpdateRemoteAppState update sthe remote app database
-func (am *AppStore) UpdateRemoteAppState(app *common.App, stateToSet common.AppState) error {
-	ctx := context.Background()
+func (am *AppStore) UpdateRemoteAppState(ctx context.Context, app *common.App, stateToSet common.AppState) error {
 	config := am.messenger.GetConfig()
 
 	payload := []interface{}{common.Dict{

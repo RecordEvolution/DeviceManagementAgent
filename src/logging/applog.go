@@ -128,21 +128,19 @@ func (lm *LogManager) ClearLogHistory(containerName string) error {
 	activeLogEntry := lm.activeLogs[containerName]
 	lm.mapMutex.Unlock()
 
-	if activeLogEntry == nil {
-		return nil
-	}
-
-	// clear locally
-	activeLogEntry.StateLock.Lock()
-	activeLogEntry.logHistory = make([]*LogEntry, 0)
-	activeLogEntry.StateLock.Unlock()
-
-	stage, appKey, appName, err := common.ParseContainerName(containerName)
-	if err != nil {
-		return err
+	if activeLogEntry != nil {
+		// clear locally
+		activeLogEntry.StateLock.Lock()
+		activeLogEntry.logHistory = make([]*LogEntry, 0)
+		activeLogEntry.StateLock.Unlock()
 	}
 
 	safe.Go(func() {
+		stage, appKey, appName, err := common.ParseContainerName(containerName)
+		if err != nil {
+			return
+		}
+
 		// clear in database
 		lm.Database.ClearAllLogHistory(appName, appKey, common.Stage(stage))
 	})

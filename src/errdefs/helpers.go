@@ -4,6 +4,8 @@ import "errors"
 
 var ErrNotYetImplemented = errors.New("not yet implemented")
 var ErrNotFound = errors.New("not found")
+var ErrFailedToParse = errors.New("failed to parse")
+var ErrMissingFromPayload = errors.New("missing from payload")
 
 /*------------*/
 

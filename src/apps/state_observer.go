@@ -22,11 +22,11 @@ type AppStateObserver struct {
 }
 
 type StateObserver struct {
-	AppStore        *store.AppStore
-	AppManager      *AppManager
-	Container       container.Container
-	activeObservers map[string]*AppStateObserver
-	mapMutex        sync.Mutex
+	AppStore         *store.AppStore
+	AppManager       *AppManager
+	Container        container.Container
+	activeObservers  map[string]*AppStateObserver
+	observerMapMutex sync.Mutex
 }
 
 func NewObserver(container container.Container, appStore *store.AppStore) StateObserver {
@@ -37,29 +37,29 @@ func NewObserver(container container.Container, appStore *store.AppStore) StateO
 	}
 }
 
-// Notify is used by the StateMachine to notify the observer that the app state has changed
-func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) error {
-
+func (so *StateObserver) NotifyLocal(app *common.App, achievedState common.AppState) {
 	// update in memory
 	app.StateLock.Lock()
 	app.CurrentState = achievedState
 	app.StateLock.Unlock()
 
-	// update remotely
-	err := so.AppStore.UpdateRemoteAppState(app, achievedState)
-	if err != nil {
-		log.Error().Stack().Err(err)
-		// ignore
-	}
-
 	so.AppStore.UpdateLocalAppState(app, achievedState)
+}
 
-	return nil
+func (so *StateObserver) NotifyRemote(app *common.App, achievedState common.AppState) error {
+	ctx := context.Background()
+	return so.AppStore.UpdateRemoteAppState(ctx, app, achievedState)
+}
+
+// Notify is used by the StateMachine to notify the observer that the app state has changed
+func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) error {
+	so.NotifyLocal(app, achievedState)
+	return so.NotifyRemote(app, achievedState)
 }
 
 func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
-	so.mapMutex.Lock()
+	so.observerMapMutex.Lock()
 	observer := so.activeObservers[containerName]
 
 	if observer != nil {
@@ -67,13 +67,13 @@ func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appNa
 		delete(so.activeObservers, containerName)
 		log.Debug().Msgf("State Observer: removed an observer for %s (%s)", appName, stage)
 	}
-	so.mapMutex.Unlock()
+	so.observerMapMutex.Unlock()
 }
 
 func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
 
-	so.mapMutex.Lock()
+	so.observerMapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
 		errC := so.observeAppState(stage, appKey, appName)
 		log.Debug().Msgf("State Observer: created an observer for %s (%s)", appName, stage)
@@ -84,12 +84,12 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 			errChan: errC,
 		}
 	}
-	so.mapMutex.Unlock()
+	so.observerMapMutex.Unlock()
 }
 
-// CorrectLocalAndUpdateRemoteAppStates ensures that the app state corresponds with the container status of the app.
-// Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely.
-func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
+// CorrectAppStates ensures that the app state corresponds with the container status of the app.
+// Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely if true is passed.
+func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 	rStates, err := so.AppStore.GetRequestedStates()
 	if err != nil {
@@ -158,10 +158,10 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 		}
 
 		app.StateLock.Lock()
-		correctedAppState := app.CurrentState
 		currentAppState := app.CurrentState
 		app.StateLock.Unlock()
 
+		var correctedAppState common.AppState
 		switch currentAppState {
 		case common.DOWNLOADING,
 			common.TRANSFERING,
@@ -180,9 +180,10 @@ func (so *StateObserver) CorrectLocalAndUpdateRemoteAppStates() error {
 			continue
 		}
 
-		err = so.Notify(app, correctedAppState)
-		if err != nil {
-			return err
+		if updateRemote {
+			so.Notify(app, correctedAppState)
+		} else {
+			so.NotifyLocal(app, correctedAppState)
 		}
 
 	}

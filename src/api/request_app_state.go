@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/config"
+	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/safe"
 	"strconv"
@@ -79,51 +80,51 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	if appKeyKw != nil {
 		appKey, ok = appKeyKw.(uint64)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse app_key")
+			return common.TransitionPayload{}, fmt.Errorf("%w app_key", errdefs.ErrFailedToParse)
 		}
 		if appKey == 0 {
-			return common.TransitionPayload{}, fmt.Errorf("app_key is missing from payload")
+			return common.TransitionPayload{}, fmt.Errorf("%w app_key", errdefs.ErrMissingFromPayload)
 		}
 	}
 
 	if appNameKw != nil {
 		appName, ok = appNameKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse appName")
+			return common.TransitionPayload{}, fmt.Errorf("%w appName", errdefs.ErrFailedToParse)
 		}
 		if appName == "" {
-			return common.TransitionPayload{}, fmt.Errorf("app_name is missing from payload")
+			return common.TransitionPayload{}, fmt.Errorf("%w appName", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if stageKw != nil {
 		stage, ok = stageKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse stage")
+			return common.TransitionPayload{}, fmt.Errorf("%w stage", errdefs.ErrFailedToParse)
 		}
 		if stage == "" {
-			return common.TransitionPayload{}, fmt.Errorf("stage is missing from payload")
+			return common.TransitionPayload{}, fmt.Errorf("%w stage", errdefs.ErrMissingFromPayload)
 		}
 	}
 
 	if requestedStateKw != nil {
 		requestedState, ok = requestedStateKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse requested_state")
+			return common.TransitionPayload{}, fmt.Errorf("%w requestedState", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if manuallyRequestedStateKw != nil {
 		manuallyRequestedState, ok = manuallyRequestedStateKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse manually requested state")
+			return common.TransitionPayload{}, fmt.Errorf("%w manuallyRequestedState", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if currentStateKw != nil {
 		currentState, ok = currentStateKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse currentState")
+			return common.TransitionPayload{}, fmt.Errorf("%w currentState", errdefs.ErrFailedToParse)
 		}
 	}
 
@@ -132,7 +133,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		if !ok {
 			requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
 			if !ok {
-				return common.TransitionPayload{}, fmt.Errorf("Failed to parse requestor_account_key")
+				return common.TransitionPayload{}, fmt.Errorf("%w requestorAccountKey", errdefs.ErrFailedToParse)
 			}
 
 			value, err := strconv.Atoi(requestorAccountKeyString)
@@ -148,7 +149,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		if !ok {
 			releaseKeyString, ok := releaseKeyKw.(string)
 			if !ok {
-				return common.TransitionPayload{}, fmt.Errorf("Failed to parse release_key")
+				return common.TransitionPayload{}, fmt.Errorf("%w releaseKeyString", errdefs.ErrFailedToParse)
 			}
 
 			// due to a bug the release key can be stored as string...
@@ -164,49 +165,49 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	if newReleaseKeyKw != nil {
 		newReleaseKey, ok = newReleaseKeyKw.(uint64)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse new_release_key")
+			return common.TransitionPayload{}, fmt.Errorf("%w newReleaseKey", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if versionKw != nil {
 		version, ok = versionKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse version")
+			return common.TransitionPayload{}, fmt.Errorf("%w version", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if newestVersionKw != nil {
 		newestVersion, ok = newestVersionKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse newest_version")
+			return common.TransitionPayload{}, fmt.Errorf("%w newestVersion", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if presentVersionKw != nil {
 		presentVersion, ok = presentVersionKw.(string)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse present_version")
+			return common.TransitionPayload{}, fmt.Errorf("%w presentVersion", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if requestUpdateKw != nil {
 		requestUpdate, ok = requestUpdateKw.(bool)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse request_update")
+			return common.TransitionPayload{}, fmt.Errorf("%w requestUpdate", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if cancelTransitionKw != nil {
 		cancelTransition, ok = cancelTransitionKw.(bool)
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse cancel_transition")
+			return common.TransitionPayload{}, fmt.Errorf("%w cancelTransition", errdefs.ErrFailedToParse)
 		}
 	}
 
 	if environmentKw != nil {
 		environment, ok = environmentKw.(map[string]interface{})
 		if !ok {
-			return common.TransitionPayload{}, fmt.Errorf("Failed to parse environment")
+			return common.TransitionPayload{}, fmt.Errorf("%w environment", errdefs.ErrFailedToParse)
 		}
 	}
 

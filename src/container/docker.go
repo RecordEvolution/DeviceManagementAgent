@@ -877,8 +877,6 @@ func (docker *Docker) CancelStream(streamID string) error {
 	activeStreamEntry := docker.activeStreams[streamID]
 	docker.streamMapMutex.Unlock()
 
-	log.Debug().Msgf("Active Stream: %+v", activeStreamEntry)
-
 	if activeStreamEntry == nil {
 		return errors.New("no active stream was found")
 	}

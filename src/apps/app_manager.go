@@ -134,7 +134,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			setStateErr := am.StateObserver.Notify(app, common.FAILED)
 			if setStateErr != nil {
 				// wrap errors into one
-				err = fmt.Errorf("App Manager: Failed to complete transition: %w; Failed to set state to 'FAILED';", err)
+				err = fmt.Errorf("failed to complete transition: %w", err)
 			}
 		}
 
