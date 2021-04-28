@@ -1,14 +1,18 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"reagent/benchmark"
 	"reagent/config"
+	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/logging"
+	"reagent/safe"
 
 	"reagent/system"
 	"runtime"
@@ -34,7 +38,28 @@ func main() {
 
 	cliArgs, err := config.GetCliArguments()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to parse cli arguments")
+		if errors.Is(err, errdefs.ErrConfigNotProvided) {
+			fmt.Println("'-config' argument is required. -help for usage")
+		} else {
+			log.Fatal().Stack().Err(err).Msg("Failed to GetCliArguments")
+		}
+	}
+
+	if cliArgs.Profiling {
+		port := cliArgs.ProfilingPort
+		if cliArgs.ProfilingPort == 0 {
+			port = 80
+		}
+
+		safe.Go(func() {
+			err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+			if err != nil {
+				log.Error().Stack().Err(err).Msgf("Failed to init web server")
+			} else {
+				log.Info().Msg("Initted pprof server")
+			}
+		})
+
 	}
 
 	// print version string to stdout
