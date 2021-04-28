@@ -156,9 +156,9 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 	}
 
 	currentVersion := GetVersion()
-	log.Info().Msgf("System: Latest version: %s, Current version: %s", latestVersion, currentVersion)
+	log.Info().Msgf("Latest version: %s, Current version: %s", latestVersion, currentVersion)
 	if latestVersion != currentVersion {
-		log.Info().Msgf("System: Agent not up to date, downloading: v%s", latestVersion)
+		log.Info().Msgf("Agent not up to date, downloading: v%s", latestVersion)
 		err = system.UpdateAgent("v"+latestVersion, progressCallback)
 		if err != nil {
 			if errdefs.IsInProgress(err) {

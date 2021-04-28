@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"reagent/benchmark"
 	"reagent/config"
 	"reagent/filesystem"
 	"reagent/logging"
+
 	"reagent/system"
 	"runtime"
 	"runtime/debug"
@@ -49,13 +51,6 @@ func main() {
 	err = filesystem.InitDirectories(cliArgs)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init reagent directories")
-	}
-
-	if cliArgs.EnsureNameserver {
-		err = filesystem.EnsureResolvConf()
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to ensure resolv.conf")
-		}
 	}
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)

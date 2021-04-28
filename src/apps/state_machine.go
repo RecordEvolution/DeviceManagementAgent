@@ -155,10 +155,10 @@ func (sm *StateMachine) setState(app *common.App, state common.AppState) error {
 }
 
 func (sm *StateMachine) executeTransition(app *common.App, payload common.TransitionPayload, transitionFunc TransitionFunc) chan error {
-	errChannel := make(chan error)
+	errChannel := make(chan error, 1)
 
 	safe.Go(func() {
-		log.Info().Msgf("State Machine: Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		log.Info().Msgf("Executing transition from %s to %s for %s (%s)...", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
 		err := transitionFunc(payload, app)
 
 		// send potential error to errChannel

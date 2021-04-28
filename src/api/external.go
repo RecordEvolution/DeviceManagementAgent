@@ -80,12 +80,12 @@ func (ex *External) RegisterAll() error {
 		if err != nil {
 			// on reconnect we will reregister, which could cause a already exists exception
 			if strings.Contains(err.Error(), "wamp.error.procedure_already_exists") {
-				log.Warn().Msgf("API: Tried to register already existing topic: %s", fullTopic)
+				log.Warn().Msgf("Tried to register already existing topic: %s", fullTopic)
 			} else {
 				return err
 			}
 		}
-		log.Info().Msgf("API: Registered topic %s on the device", fullTopic)
+		log.Info().Msgf("Registered topic %s on the device", fullTopic)
 	}
 	return nil
 }

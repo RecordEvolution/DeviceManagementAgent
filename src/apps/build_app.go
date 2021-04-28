@@ -73,7 +73,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 			errorMessage = "Build files for app not found: " + err.Error()
 		}
 
-		log.Debug().Msgf("build_app: building failed sending following message to user %s", errorMessage)
+		log.Debug().Msgf("building failed sending following message to user %s", errorMessage)
 
 		messageErr := sm.LogManager.Write(topicForLogStream, errorMessage)
 		if messageErr != nil {

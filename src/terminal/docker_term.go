@@ -171,7 +171,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 	// read incoming (WAMP) data from the channel and write it to the attached terminal
 	safe.Go(func() {
-		defer log.Debug().Msgf("Terminal Manager: term writer goroutine for %s has exited", termSess.ContainerName)
+		defer log.Debug().Msgf("term writer goroutine for %s has exited", termSess.ContainerName)
 		defer termSess.Session.Conn.Close() // will close both read and write if goroutine breaks
 
 	exit:
@@ -193,7 +193,7 @@ func (tm *TerminalManager) initTerminalMessagingChannels(termSess *TerminalSessi
 
 	// read outgoing data from the channel and 'publish' it (WAMP) to a given topic
 	safe.Go(func() {
-		defer log.Debug().Msgf("Terminal Manager: term reader goroutine for %s has exited", termSess.ContainerName)
+		defer log.Debug().Msgf("term reader goroutine for %s has exited", termSess.ContainerName)
 		buf := make([]byte, 32*1024)
 
 	exit:
@@ -289,7 +289,7 @@ func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
 		}
 	}
 
-	log.Debug().Msgf("Terminal Manager: cleaned up terminal session for %s", session.ContainerName)
+	log.Debug().Msgf("cleaned up terminal session for %s", session.ContainerName)
 
 	tm.mapMutex.Lock()
 	delete(tm.ActiveSessions, session.SessionID)

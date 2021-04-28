@@ -52,19 +52,19 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	builtState := curAppState == common.BUILT && requestedAppState == common.BUILT
 	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
-		log.Debug().Msgf("App Manager: app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
+		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
 		return nil
 	}
 
 	if payload.CancelTransition {
-		log.Debug().Msgf("App Manager: Cancel request was received for %s (%s) (currently: %s)", app.AppName, app.Stage, app.CurrentState)
+		log.Debug().Msgf("Cancel request was received for %s (%s) (currently: %s)", app.AppName, app.Stage, app.CurrentState)
 		am.StateMachine.CancelTransition(app, payload)
 		return nil
 	}
 
 	locked := app.SecureTransition() // if the app is not locked, it will lock the app
 	if locked {
-		log.Warn().Msgf("App Manager: App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
 		return nil
 	}
 
@@ -104,16 +104,16 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		app.UnlockTransition()
 
 		if errdefs.IsNoActionTransition(err) {
-			log.Debug().Msg("App Manager: A no action transition was executed, nothing to do. Will also not verify")
+			log.Debug().Msg("A no action transition was executed, nothing to do. Will also not verify")
 			return nil
 		}
 
 		isCanceled := errdefs.IsDockerStreamCanceled(err)
 		if err == nil || isCanceled {
 			if !isCanceled {
-				log.Info().Msgf("App Manager: Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
+				log.Info().Msgf("Successfully finished transaction for App (%s, %s)", app.AppName, app.Stage)
 			} else {
-				log.Info().Msgf("App Manager: Successfully canceled transition for App (%s, %s)", app.AppName, app.Stage)
+				log.Info().Msgf("Successfully canceled transition for App (%s, %s)", app.AppName, app.Stage)
 			}
 
 			// Verify if app has the latest requested state
@@ -138,8 +138,8 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			}
 		}
 
-		log.Error().Msgf("App Manager: An error occured during transition from %s to %s for %s (%s)", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
-		log.Error().Err(err).Msg("App Manager: The current app state will has been set to FAILED")
+		log.Error().Msgf("An error occured during transition from %s to %s for %s (%s)", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		log.Error().Err(err).Msgf("The app state for %s (%s) has been set to FAILED", app.AppName, app.Stage)
 
 		// enter the crashloop when we encounter a FAILED state
 		if payload.Stage == common.PROD {
@@ -199,14 +199,14 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 }
 
 func (am *AppManager) VerifyState(app *common.App) error {
-	log.Printf("App Manager: Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
+	log.Printf("Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
 
 	requestedStatePayload, err := am.AppStore.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
 		return err
 	}
 
-	log.Info().Msgf("App Manager: Latest requested state (verify): %s", requestedStatePayload.RequestedState)
+	log.Info().Msgf("Latest requested state (verify): %s", requestedStatePayload.RequestedState)
 
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
@@ -214,14 +214,14 @@ func (am *AppManager) VerifyState(app *common.App) error {
 	app.StateLock.Unlock()
 
 	if curAppState == common.FAILED {
-		log.Debug().Msg("App Manager: App transition finished in a failed state")
+		log.Debug().Msg("App transition finished in a failed state")
 		return nil
 	}
 
 	// use in memory requested state, since it's possible the database is not up to date yet if it's waiting for a database lock from other tasks
 	// this requested state is updated properly on every new state request
 	if curAppState != requestedState {
-		log.Printf("App Manager: App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
+		log.Printf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
 
 		// transition again
 		safe.Go(func() {
@@ -337,7 +337,7 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 		return err
 	}
 
-	log.Info().Msgf("App Manager: Found %d app states, updating local database with new requested states..", len(newestPayloads))
+	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(newestPayloads))
 
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
