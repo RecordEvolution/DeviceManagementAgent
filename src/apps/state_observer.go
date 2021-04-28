@@ -26,6 +26,7 @@ type StateObserver struct {
 	AppManager       *AppManager
 	Container        container.Container
 	activeObservers  map[string]*AppStateObserver
+	spawnerActive    bool
 	observerMapMutex sync.Mutex
 }
 
@@ -65,7 +66,7 @@ func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appNa
 	if observer != nil {
 		close(observer.errChan)
 		delete(so.activeObservers, containerName)
-		log.Debug().Msgf("State Observer: removed an observer for %s (%s)", appName, stage)
+		log.Debug().Msgf("removed an observer for %s (%s)", appName, stage)
 	}
 	so.observerMapMutex.Unlock()
 }
@@ -76,7 +77,7 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	so.observerMapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
 		errC := so.observeAppState(stage, appKey, appName)
-		log.Debug().Msgf("State Observer: created an observer for %s (%s)", appName, stage)
+		log.Debug().Msgf("created an observer for %s (%s)", appName, stage)
 		so.activeObservers[containerName] = &AppStateObserver{
 			AppKey:  appKey,
 			AppName: appName,
@@ -176,7 +177,7 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 		}
 
 		if currentAppState == correctedAppState && rState.CurrentState == correctedAppState {
-			log.Debug().Msgf("State Correcter: app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
+			log.Debug().Msgf("app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
 			continue
 		}
 
@@ -210,7 +211,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 					return
 				}
 
-				log.Debug().Msgf("State Observer: No container was found for %s, removing observer..", containerName)
+				log.Debug().Msgf("No container was found for %s, removing observer..", containerName)
 				return
 			}
 
@@ -248,8 +249,8 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			app.StateLock.Unlock()
 
 			if curAppState != latestAppState && !common.IsTransientState(curAppState) && !common.IsTransientState(latestAppState) {
-				log.Debug().Msgf("State Observer: app (%s, %s) state is not up to date", appName, stage)
-				log.Debug().Msgf("State Observer: app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
+				log.Debug().Msgf("app (%s, %s) state is not up to date", appName, stage)
+				log.Debug().Msgf("app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
 
 				// update the current local and remote app state
 				err := so.Notify(app, latestAppState)
@@ -319,11 +320,14 @@ func (so *StateObserver) initObserverSpawner() chan error {
 				errChan <- err
 				log.Error().Err(err).Msg("Error during observer spawner")
 				close(errChan)
+
+				so.spawnerActive = false
 				break loop
 			}
 		}
 	})
 
+	so.spawnerActive = true
 	return errChan
 }
 
@@ -338,7 +342,9 @@ func (so *StateObserver) ObserveAppStates() error {
 		so.addObserver(app.Stage, app.AppKey, app.AppName)
 	}
 
-	so.initObserverSpawner()
+	if !so.spawnerActive {
+		so.initObserverSpawner()
+	}
 
 	return err
 }
