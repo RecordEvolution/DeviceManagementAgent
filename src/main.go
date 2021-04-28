@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		if errors.Is(err, errdefs.ErrConfigNotProvided) {
 			fmt.Println("'-config' argument is required. -help for usage")
+			os.Exit(0)
 		} else {
 			log.Fatal().Stack().Err(err).Msg("Failed to GetCliArguments")
 		}
