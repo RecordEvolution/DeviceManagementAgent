@@ -126,6 +126,7 @@ func NewWamp(config *config.Config, socketConfig *SocketConfig) (*WampSession, e
 
 func (wampSession *WampSession) Reconnect() {
 	wampSession.Close()
+
 	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig)
 	select {
 	case client := <-clientChannel:
@@ -158,26 +159,30 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 	safe.Go(func() {
 		for {
 			connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
-			requestStart := time.Now() // time request
+			if err != nil {
+				log.Error().Err(err).Msg("failed to create connect config...")
+				continue
+			}
 
 			var ctx context.Context
 			var cancelFunc context.CancelFunc
+
 			if socketConfig.ConnectionTimeout == 0 {
 				ctx = context.Background()
 			} else {
 				ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
 			}
 
-			client, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
-
 			var duration time.Duration
-
+			requestStart := time.Now() // time request
+			client, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 			if err != nil {
 				if cancelFunc != nil {
 					cancelFunc()
 				}
 
 				duration = time.Since(requestStart)
+
 				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 100ms", duration.String())
 				time.Sleep(time.Millisecond * 100)
 				continue
@@ -199,8 +204,8 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 			if client != nil {
 				client.Close()
 			}
-			log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
 
+			log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
 		}
 	})
 
@@ -231,10 +236,6 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 			log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
 		}
 	}
-
-	// if !wampSession.Connected() {
-	// 	return ErrNotConnected
-	// }
 
 	return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))
 }
@@ -273,10 +274,6 @@ func (wampSession *WampSession) Call(
 			progCb(cbResultMap)
 		}
 	}
-
-	// if !wampSession.Connected() {
-	// 	return Result{}, ErrNotConnected
-	// }
 
 	result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
 	if err != nil {
@@ -339,23 +336,14 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 }
 
 func (wampSession *WampSession) Unregister(topic topics.Topic) error {
-	// if !wampSession.Connected() {
-	// 	return ErrNotConnected
-	// }
-
 	return wampSession.client.Unregister(string(topic))
 }
 
 func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
-	// if !wampSession.Connected() {
-	// 	return ErrNotConnected
-	// }
-
 	return wampSession.client.Unsubscribe(string(topic))
 }
 
-// SetupTestament will setup the device's testament
-// This function is meant to be called once on agent start
+// SetupTestament will setup the device's crossbar testament
 func (wampSession *WampSession) SetupTestament() error {
 	ctx := context.Background()
 
@@ -375,10 +363,6 @@ func (wampSession *WampSession) SetupTestament() error {
 		common.Dict{},
 	}
 
-	// if !wampSession.Connected() {
-	// 	return ErrNotConnected
-	// }
-
 	_, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
 	if err != nil {
 		return err
@@ -390,6 +374,7 @@ func (wampSession *WampSession) SetupTestament() error {
 func (wampSession *WampSession) Close() {
 	if wampSession.client != nil {
 		wampSession.client.Close() // only possible error is if it's already closed
+		wampSession.client = nil
 	}
 }
 
