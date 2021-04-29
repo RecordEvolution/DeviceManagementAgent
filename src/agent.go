@@ -116,8 +116,12 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	systemAPI := system.New(generalConfig)
 
-	database, _ := persistence.NewSQLiteDb(generalConfig)
-	err := database.Init()
+	database, err := persistence.NewSQLiteDb(generalConfig)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to create SQLite db instance")
+	}
+
+	err = database.Init()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to initalize SQLite database")
 	}
