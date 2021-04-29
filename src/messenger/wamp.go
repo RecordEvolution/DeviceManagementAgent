@@ -142,6 +142,10 @@ func (wampSession *WampSession) Reconnect() {
 }
 
 func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error {
+	if !wampSession.Connected() {
+		return ErrNotConnected
+	}
+
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
@@ -261,8 +265,11 @@ func (wampSession *WampSession) Call(
 	options common.Dict,
 	progCb func(Result)) (Result, error) {
 
-	var handler func(result *wamp.Result)
+	if !wampSession.Connected() {
+		return Result{}, ErrNotConnected
+	}
 
+	var handler func(result *wamp.Result)
 	if progCb != nil {
 		handler = func(result *wamp.Result) {
 			cbResultMap := Result{
