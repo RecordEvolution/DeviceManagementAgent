@@ -15,7 +15,7 @@ func (sm *StateMachine) recoverFailToRunningHandler(payload common.TransitionPay
 	}
 
 	ctx := context.Background()
-	// make sure to remove any existing container to ensure environment variables are set
+	// remove any existing container to ensure environment variables are set
 	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
 
 	return sm.runApp(payload, app)

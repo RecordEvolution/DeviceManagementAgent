@@ -15,7 +15,7 @@ func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPay
 		containerToRemove = payload.ContainerName.Prod
 	}
 
-	// make sure to remove any existing container to ensure environment variables are set
+	// remove any existing container to ensure environment variables are set
 	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
 
 	if payload.Stage == common.DEV {
