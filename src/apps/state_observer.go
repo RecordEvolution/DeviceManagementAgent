@@ -196,7 +196,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 	ctx := context.Background()
 	containerName := common.BuildContainerName(stage, appKey, appName)
 	errorC := make(chan error, 1)
-	pollingRate := time.Second * 1
+	pollingRate := time.Second * 5
 
 	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
