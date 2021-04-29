@@ -388,14 +388,18 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 	}
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 
-	ioReader, err := docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
+	reader, err := docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
 	if err != nil {
+		if reader != nil {
+			reader.Close()
+		}
+
 		return nil, err
 	}
 
 	pullID := options.PullID
 	pullStream := DockerStream{
-		Stream:   ioReader,
+		Stream:   reader,
 		StreamID: pullID,
 	}
 
@@ -405,7 +409,7 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 		docker.streamMapMutex.Unlock()
 	}
 
-	return ioReader, nil
+	return reader, nil
 }
 
 // Push pushes a container image to a registry
@@ -421,14 +425,18 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 	}
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 
-	ioReader, err := docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
+	reader, err := docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
 	if err != nil {
+		if reader != nil {
+			reader.Close()
+		}
+
 		return nil, err
 	}
 
 	pushID := options.PushID
 	pushStream := DockerStream{
-		Stream:   ioReader,
+		Stream:   reader,
 		StreamID: pushID,
 	}
 
@@ -438,16 +446,7 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 		docker.streamMapMutex.Unlock()
 	}
 
-	return ioReader, nil
-}
-
-// Stats gets the stats of a specific container
-func (docker *Docker) Stats(ctx context.Context, containerID string) (io.ReadCloser, error) {
-	stats, err := docker.client.ContainerStats(ctx, containerID, true)
-	if err != nil {
-		return nil, err
-	}
-	return stats.Body, nil
+	return reader, nil
 }
 
 func (docker *Docker) Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error) {
@@ -487,6 +486,10 @@ func (docker *Docker) Logs(ctx context.Context, containerName string, options co
 
 	reader, err := docker.client.ContainerLogs(ctx, containerName, containerOptions)
 	if err != nil {
+		if reader != nil {
+			reader.Close()
+		}
+
 		if strings.Contains(err.Error(), "No such container") {
 			return nil, errdefs.ContainerNotFound(err)
 		}
@@ -924,6 +927,10 @@ func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string
 
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)
 	if err != nil {
+		if buildResponse.Body != nil {
+			buildResponse.Body.Close()
+		}
+
 		if strings.Contains(err.Error(), "the Dockerfile (Dockerfile) cannot be empty") {
 			return nil, errdefs.DockerfileCannotBeEmpty(err)
 		}
@@ -934,7 +941,6 @@ func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string
 	}
 
 	reader := buildResponse.Body
-
 	if options.BuildID != "" {
 		docker.streamMapMutex.Lock()
 		docker.activeStreams[options.BuildID] = &DockerStream{

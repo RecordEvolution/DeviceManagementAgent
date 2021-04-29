@@ -87,7 +87,6 @@ type Container interface {
 	RemoveContainerByName(ctx context.Context, containerName string, options map[string]interface{}) error
 	RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error
 	Tag(ctx context.Context, source string, target string) error
-	Stats(ctx context.Context, containerID string) (io.ReadCloser, error)
 	Pull(ctx context.Context, imageName string, options PullOptions) (io.ReadCloser, error)
 	Push(ctx context.Context, imageName string, pushOptions PushOptions) (io.ReadCloser, error)
 	CreateContainer(ctx context.Context, cConfig container.Config, hConfig container.HostConfig, nConfig network.NetworkingConfig, containerName string) (string, error)
