@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"reagent/benchmark"
@@ -19,6 +18,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	profile "github.com/bygui86/multi-profile/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -51,11 +51,14 @@ func main() {
 			err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 			if err != nil {
 				log.Error().Stack().Err(err).Msgf("Failed to init web server")
-			} else {
-				log.Info().Msg("Initted pprof server")
 			}
 		})
 
+		defer profile.CPUProfile(&profile.Config{}).Start().Stop()
+		defer profile.BlockProfile(&profile.Config{}).Start().Stop()
+		defer profile.GoroutineProfile(&profile.Config{}).Start().Stop()
+		defer profile.MutexProfile(&profile.Config{}).Start().Stop()
+		defer profile.MemProfile(&profile.Config{}).Start().Stop()
 	}
 
 	if cliArgs.Version {
