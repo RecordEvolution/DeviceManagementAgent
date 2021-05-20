@@ -4,7 +4,7 @@ Use following bash one liners to install REagent for your device (e.g. fill in a
 
 - for Linux
 
-``` wget <url to  install script> -v -o install.sh && sudo chmod +x ./install.sh && ./install.sh linux <architecture>; rm -rf install.sh ```
+``` wget-v -O install.sh  <url to  install script>  && sudo chmod +x ./install.sh && ./install.sh linux <architecture>; rm -rf install.sh ```
 
 - for MacOS (darwin)
 
