@@ -3,7 +3,7 @@
 
 # User can select 
 # OS: ‘darwin’ and ‘linux’ ... Coming soon: 'windows'
-# ARCHITECTURE: ‘amd64’... Coming soon: ‘arm64’, ‘armv7’ and ‘x86’ 
+# ARCHITECTURE: ‘amd64’, ‘arm64’ and ‘armv7’ ... Coming soon: ‘x86’ 
 
 ####### get the download link and create binary folders
 
@@ -33,16 +33,10 @@ if [[ $1 = "darwin" ]]; then
     version=$(curl https://storage.googleapis.com/re-agent/version.txt)
 fi
 
-# Get the Download Link using versions, OS and ARCHITECTURE 
+# Get the Download Link using VERSION, OS and ARCHITECTURE 
 echo "=== Downloading the Reagent version = $version" 
 download_from="${link}/${os}/${architecture}/${version}/reagent" 
-echo "=== Download link : $download_from"
-
-# Older options to test.
-# darwin="https://storage.googleapis.com/re-agent/reagent-darwin-10.6-amd64"
-# linux="https://storage.googleapis.com/re-agent/reagent-linux-amd64"
-# windows="https://storage.googleapis.com/re-agent/reagent-windows-4.0-amd64.exe"
- 
+echo "=== Download link : $download_from" 
 
 # this script is written for Linux
 if [[ $1 = "linux" ]]; then
