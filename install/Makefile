@@ -1,3 +1,5 @@
+# This Makefile is created for the testers convenience. 
+
 install_reagent:
 	echo "get the install_reagent from a link"
 	sudo chmod 777 install_reagent.sh

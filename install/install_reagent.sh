@@ -17,7 +17,7 @@ echo "=== Welcome to Reagent Install Script.==="
 
 if [[ $1 = "linux" ]]; then
     binary_folder="/usr/bin/reagent"
-    if [ ! -d ${binary_folder}];then 
+    if [ ! -d ${binary_folder} ];then 
         echo "=== ${binary_folder} does not exist!"
         sudo mkdir -p ${binary_folder}
     fi
@@ -26,7 +26,7 @@ fi
 
 if [[ $1 = "darwin" ]]; then
     binary_folder="/usr/local/bin/reagent"
-    if [ ! -d ${binary_folder}];then 
+    if [ ! -d ${binary_folder} ];then 
         echo "=== ${binary_folder} does not exist! Creating it."
         sudo mkdir -p ${binary_folder}
     fi
@@ -52,7 +52,6 @@ if [[ $1 = "linux" ]]; then
         chmod +x ./reagent
         echo "=== moving executable to $binary_folder"
         sleep 1
-        #ls ${binary_folder}/
         new_path="\"${binary_folder}:\$PATH\""
         sudo mv ${PWD}/reagent ${binary_folder}/
         echo "export PATH=${new_path}" >> "/home/$USER/.bashrc"  
@@ -63,11 +62,10 @@ fi
 if [[ $1 = "darwin" && ! -f ./reagent ]]; then
     echo "----- Downloading binaries -----"
     if [ ! -f ./reagent ]; then
-        wget -O reagent "${download_from}"
+        curl -o ${PWD}/reagent "${download_from}"
         chmod +x ./reagent
         echo "=== moving executable to $binary_folder"
         sleep 1
-        #ls ${binary_folder}/
         sudo mv ${PWD}/reagent ${binary_folder}/
         new_path="\"${binary_folder}:\$PATH\""
         echo "export PATH=${new_path}" >> "/Users/${USER}/.bash_profile"  
