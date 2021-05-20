@@ -27,10 +27,10 @@ fi
 
 if [[ $1 = "darwin" ]]; then
     binary_folder="/usr/local/bin/reagent"
-    #if [! -d ${binary_folder}];then 
+    if [! -d ${binary_folder}];then 
         echo "=== ${binary_folder} does not exist! Creating it."
         sudo mkdir -p ${binary_folder}
-    #fi
+    fi
     version=$(curl https://storage.googleapis.com/re-agent/version.txt)
 fi
 
@@ -48,12 +48,14 @@ echo "=== Download link : $download_from"
 
 # this script is written for Linux
 if [[ $1 = "linux" ]]; then
+    echo "----- Downloading binaries -----"
     if [ ! -f ./reagent ]; then
         wget -O reagent "${download_from}"
         chmod +x ./reagent
         echo "=== moving executable to $binary_folder"
         sleep 1
         #ls ${binary_folder}/
+        new_path="\"${binary_folder}:\$PATH\""
         sudo mv ${PWD}/reagent ${binary_folder}/
         echo "export PATH=${new_path}" >> "/home/$USER/.bashrc"  
     fi
