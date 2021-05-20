@@ -7,10 +7,9 @@
 
 ####### get the download link and create binary folders
 
-link="https://storage.googleapis.com/re-agent/reagent"
+link="https://storage.googleapis.com/re-agent"
 os=$1
-os_version=$2
-architecture=$3
+architecture=$2
 
 echo "=== Welcome to Reagent Install Script.===" 
 
@@ -18,7 +17,7 @@ echo "=== Welcome to Reagent Install Script.==="
 
 if [[ $1 = "linux" ]]; then
     binary_folder="/usr/bin/reagent"
-    if [! -d ${binary_folder}];then 
+    if [ ! -d ${binary_folder}];then 
         echo "=== ${binary_folder} does not exist!"
         sudo mkdir -p ${binary_folder}
     fi
@@ -27,7 +26,7 @@ fi
 
 if [[ $1 = "darwin" ]]; then
     binary_folder="/usr/local/bin/reagent"
-    if [! -d ${binary_folder}];then 
+    if [ ! -d ${binary_folder}];then 
         echo "=== ${binary_folder} does not exist! Creating it."
         sudo mkdir -p ${binary_folder}
     fi
@@ -35,9 +34,8 @@ if [[ $1 = "darwin" ]]; then
 fi
 
 # Get the Download Link using versions, OS and ARCHITECTURE 
-echo "=== Downloading the Reagent version = $version"
-#download_from="${link}-${os}-${architecture}-v${version}" 
-download_from="${link}-${os}-${os_version}-${architecture}" 
+echo "=== Downloading the Reagent version = $version" 
+download_from="${link}/${os}/${architecture}/${version}/reagent" 
 echo "=== Download link : $download_from"
 
 # Older options to test.
