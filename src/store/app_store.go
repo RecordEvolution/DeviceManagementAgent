@@ -91,25 +91,25 @@ func (am *AppStore) AddApp(payload common.TransitionPayload) (*common.App, error
 
 	am.apps = append(am.apps, app)
 
-	am.database.QueueTask(func() {
-		// Insert the newly created app state data into the database
-		app.StateLock.Lock()
-		curAppState := app.CurrentState
-		app.StateLock.Unlock()
+	// Insert the newly created app state data into the database
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
 
-		_, err := am.database.UpsertAppState(app, curAppState)
-		if err != nil {
-			log.Error().Stack().Err(err)
-		}
-	})
+	_, err := am.database.UpsertAppState(app, curAppState)
+	if err != nil {
+		log.Error().Stack().Err(err)
+	}
+
+	if err != nil {
+		return nil, err
+	}
 
 	return app, nil
 }
 
-func (am *AppStore) UpdateLocalRequestedState(payload common.TransitionPayload) {
-	am.database.QueueTask(func() {
-		am.database.UpsertRequestedStateChange(payload)
-	})
+func (am *AppStore) UpdateLocalRequestedState(payload common.TransitionPayload) error {
+	return am.database.UpsertRequestedStateChange(payload)
 }
 
 func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
@@ -135,17 +135,21 @@ func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 }
 
 // UpdateLocalAppState updates the local app database
-func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppState) {
-	am.database.QueueTask(func() {
-		timestamp, err := am.database.UpsertAppState(app, stateToSet)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to upsert app state")
-		}
+func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
+	timestamp, err := am.database.UpsertAppState(app, stateToSet)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to upsert app state")
+	}
 
-		app.StateLock.Lock()
-		app.LastUpdated = timestamp
-		app.StateLock.Unlock()
-	})
+	app.StateLock.Lock()
+	app.LastUpdated = timestamp
+	app.StateLock.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // UpdateRemoteAppState update sthe remote app database

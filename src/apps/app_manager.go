@@ -181,11 +181,11 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 			return err
 		}
 
-		app.StateLock.Lock()
-		currentAppState := app.CurrentState
-		app.StateLock.Unlock()
-
 		safe.Go(func() {
+			app.StateLock.Lock()
+			currentAppState := app.CurrentState
+			app.StateLock.Unlock()
+
 			if !IsInvalidOfflineTransition(app, payload) && currentAppState != payload.RequestedState {
 				err := am.RequestAppState(payload)
 				if err != nil {
@@ -266,9 +266,7 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 
 	app.StateLock.Unlock()
 
-	am.AppStore.UpdateLocalAppState(app, curAppState)
-
-	return nil
+	return am.AppStore.UpdateLocalAppState(app, curAppState)
 }
 
 func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error {
@@ -286,19 +284,18 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 	}
 
 	app.StateLock.Lock()
-	curAppState := app.CurrentState
-	app.StateLock.Unlock()
 
 	// Whenever a release confirmation gets requested, we shouldn't override the requestedState if it's not 'BUILT'
 	// For example: whenever the app state goes from FAILED -> RUNNING, it will attempt building with requestedState as 'RUNNING'
 	// this makes sure we don't override this requestedState to 'PRESENT'
-	if curAppState == common.BUILT && app.RequestedState != common.BUILT {
+	if app.CurrentState == common.BUILT && app.RequestedState != common.BUILT {
+		app.StateLock.Unlock()
 		return nil
 	}
 
 	// normally should always update the app's requestedState using the transition payload
-	app.StateLock.Lock()
 	app.RequestedState = payload.RequestedState
+
 	app.StateLock.Unlock()
 
 	am.AppStore.UpdateLocalRequestedState(payload)
