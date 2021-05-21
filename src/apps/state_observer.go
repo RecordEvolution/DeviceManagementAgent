@@ -141,11 +141,15 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			}
 
 			app.StateLock.Lock()
-
+			currentAppState := app.CurrentState
 			var correctedAppState common.AppState
+			// no images were found (and no container) for this guy, so this guy is REMOVED
 			if len(images) == 0 {
-				// no images was found (and no container) for this guy, so this guy is REMOVED
-				correctedAppState = common.REMOVED
+				if currentAppState == common.UNINSTALLED {
+					correctedAppState = common.UNINSTALLED
+				} else {
+					correctedAppState = common.REMOVED
+				}
 			} else {
 				// images were found for this guy, but no container, this means --> PRESENT
 				correctedAppState = common.PRESENT
@@ -153,11 +157,13 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 			app.StateLock.Unlock()
 
-			if updateRemote {
-				// notify the remote database of any changed states due to correction
-				err = so.Notify(app, correctedAppState)
-			} else {
-				err = so.NotifyLocal(app, correctedAppState)
+			if currentAppState != correctedAppState {
+				if updateRemote {
+					// notify the remote database of any changed states due to correction
+					err = so.Notify(app, correctedAppState)
+				} else {
+					err = so.NotifyLocal(app, correctedAppState)
+				}
 			}
 
 			if err != nil {
