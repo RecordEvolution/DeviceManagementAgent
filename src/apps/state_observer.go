@@ -38,13 +38,13 @@ func NewObserver(container container.Container, appStore *store.AppStore) StateO
 	}
 }
 
-func (so *StateObserver) NotifyLocal(app *common.App, achievedState common.AppState) {
+func (so *StateObserver) NotifyLocal(app *common.App, achievedState common.AppState) error {
 	// update in memory
 	app.StateLock.Lock()
 	app.CurrentState = achievedState
 	app.StateLock.Unlock()
 
-	so.AppStore.UpdateLocalAppState(app, achievedState)
+	return so.AppStore.UpdateLocalAppState(app, achievedState)
 }
 
 func (so *StateObserver) NotifyRemote(app *common.App, achievedState common.AppState) error {
@@ -54,7 +54,11 @@ func (so *StateObserver) NotifyRemote(app *common.App, achievedState common.AppS
 
 // Notify is used by the StateMachine to notify the observer that the app state has changed
 func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) error {
-	so.NotifyLocal(app, achievedState)
+	err := so.NotifyLocal(app, achievedState)
+	if err != nil {
+		return err
+	}
+
 	return so.NotifyRemote(app, achievedState)
 }
 
@@ -73,6 +77,17 @@ func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appNa
 
 func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName string) {
 	containerName := common.BuildContainerName(stage, appKey, appName)
+
+	ctx := context.Background()
+	_, err := so.Container.GetContainerState(ctx, containerName)
+	if err != nil {
+		if !errdefs.IsContainerNotFound(err) {
+			return
+		}
+
+		log.Debug().Msgf("No container was found for %s, not creating an observer...", containerName)
+		return
+	}
 
 	so.observerMapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
@@ -108,49 +123,49 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 		ctx := context.Background()
 		container, err := so.Container.GetContainerState(ctx, containerName)
 		if err != nil {
-			if errdefs.IsContainerNotFound(err) {
-				// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
-
-				var fullImageName string
-				if rState.Stage == common.DEV {
-					fullImageName = rState.RegistryImageName.Dev
-				} else if rState.Stage == common.PROD {
-					fullImageName = rState.RegistryImageName.Prod
-				}
-
-				images, err := so.Container.GetImages(ctx, fullImageName)
-				if err != nil {
-					return err
-				}
-
-				app.StateLock.Lock()
-
-				correctedStage := app.CurrentState
-				if len(images) == 0 {
-					// no images was found (and no container) for this guy, so this guy is REMOVED
-					if app.CurrentState != common.REMOVED && app.CurrentState != common.UNINSTALLED {
-						correctedStage = common.REMOVED
-					}
-				} else {
-					// images were found for this guy, but no container, this means --> PRESENT
-					if app.CurrentState != common.PRESENT {
-						correctedStage = common.PRESENT
-					}
-				}
-				app.StateLock.Unlock()
-
-				// notify the remote database of any changed states due to correction
-				err = so.Notify(app, correctedStage)
-				if err != nil {
-					return err
-				}
-
-				// should be all good iterate over next app
-				continue
-
-			} else {
+			if !errdefs.IsContainerNotFound(err) {
 				return err
 			}
+
+			// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
+			var fullImageName string
+			if rState.Stage == common.DEV {
+				fullImageName = rState.RegistryImageName.Dev
+			} else if rState.Stage == common.PROD {
+				fullImageName = rState.RegistryImageName.Prod
+			}
+
+			images, err := so.Container.GetImages(ctx, fullImageName)
+			if err != nil {
+				return err
+			}
+
+			app.StateLock.Lock()
+
+			var correctedAppState common.AppState
+			if len(images) == 0 {
+				// no images was found (and no container) for this guy, so this guy is REMOVED
+				correctedAppState = common.REMOVED
+			} else {
+				// images were found for this guy, but no container, this means --> PRESENT
+				correctedAppState = common.PRESENT
+			}
+
+			app.StateLock.Unlock()
+
+			if updateRemote {
+				// notify the remote database of any changed states due to correction
+				err = so.Notify(app, correctedAppState)
+			} else {
+				err = so.NotifyLocal(app, correctedAppState)
+			}
+
+			if err != nil {
+				log.Error().Err(err).Msg("failed to notify app state")
+			}
+
+			// should be all good iterate over next app
+			continue
 		}
 
 		appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
@@ -176,15 +191,14 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			correctedAppState = appStateDeterminedByContainer
 		}
 
-		if currentAppState == correctedAppState && rState.CurrentState == correctedAppState {
-			log.Debug().Msgf("app state for %s is currently: %s and correct, nothing to do.", containerName, app.CurrentState)
-			continue
+		if updateRemote {
+			err = so.Notify(app, correctedAppState)
+		} else {
+			err = so.NotifyLocal(app, correctedAppState)
 		}
 
-		if updateRemote {
-			so.Notify(app, correctedAppState)
-		} else {
-			so.NotifyLocal(app, correctedAppState)
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("Failed to notifiy state change")
 		}
 
 	}
@@ -193,23 +207,54 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 }
 
 func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
-	ctx := context.Background()
-	containerName := common.BuildContainerName(stage, appKey, appName)
 	errorC := make(chan error, 1)
 	pollingRate := time.Second * 5
 
 	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
 
-		defer so.removeObserver(stage, appKey, appName)
+		defer func() {
+			so.removeObserver(stage, appKey, appName)
+
+			// try to transition to the state it's supposed to be at
+			payload, err := so.AppStore.GetRequestedState(appKey, stage)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to get requested state")
+				return
+			}
+
+			err = so.AppManager.RequestAppState(payload)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to request app state")
+			}
+
+		}()
 
 		for {
+			ctx := context.Background()
+			containerName := common.BuildContainerName(stage, appKey, appName)
+
 			state, err := so.Container.GetContainerState(ctx, containerName)
 			if err != nil {
 				if !errdefs.IsContainerNotFound(err) {
 					errorC <- err
 					return
 				}
+
+				// if the container doesn't exist anymore, need to make sure app is in the stopped state
+				app, err := so.AppStore.GetApp(appKey, stage)
+				if err != nil {
+					log.Error().Err(err).Msg("failed to get app")
+					return
+				}
+
+				if app == nil {
+					return
+				}
+
+				app.StateLock.Lock()
+				app.CurrentState = common.PRESENT
+				app.StateLock.Unlock()
 
 				log.Debug().Msgf("No container was found for %s, removing observer..", containerName)
 				return
@@ -296,11 +341,26 @@ func (so *StateObserver) initObserverSpawner() chan error {
 			select {
 			case event := <-messageC:
 				switch event.Action {
+				case "die", "kill", "destroy":
+					containerName := event.Actor.Attributes["name"]
+					reg := regexp.MustCompile(common.ContainerNameRegExp)
+					match := reg.FindStringSubmatch(containerName)
+
+					// invalid container name, probably an intermediare container
+					// or a container spawned by the user
+					if len(match) == 0 {
+						continue
+					}
+
+					stage, key, name, err := common.ParseContainerName(containerName)
+					if err != nil {
+						continue
+					}
+
+					so.removeObserver(stage, key, name)
 				case "create", "start":
 					containerName := event.Actor.Attributes["name"]
-
-					expr := `(.{3})_([0-9]*)_.*` // our containerName convention e.g.: dev_1_testapp
-					reg := regexp.MustCompile(expr)
+					reg := regexp.MustCompile(common.ContainerNameRegExp)
 					match := reg.FindStringSubmatch(containerName)
 
 					// invalid container name, probably an intermediare container

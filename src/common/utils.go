@@ -14,6 +14,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var ContainerNameRegExp = `(.{3,4})_([0-9]*)_.*`
+
 func BuildContainerName(stage Stage, appKey uint64, appName string) string {
 	return strings.ToLower(fmt.Sprintf("%s_%d_%s", stage, appKey, appName))
 }
