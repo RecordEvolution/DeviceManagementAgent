@@ -622,8 +622,7 @@ func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, err
 }
 
 func (lm *LogManager) getLogStream(containerName string) (io.ReadCloser, error) {
-	// start from last log, do not get any history
-	options := common.Dict{"follow": true, "stdout": true, "stderr": true, "tail": "0"}
+	options := common.Dict{"follow": true, "stdout": true, "stderr": true}
 
 	ctx := context.Background()
 
