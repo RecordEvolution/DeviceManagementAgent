@@ -51,6 +51,7 @@ type CommandLineArguments struct {
 	Profiling                  bool
 	ProfilingPort              uint
 	ShouldUpdate               bool
+	ForceUpdate                bool
 	PrettyLogging              bool
 	LogFileLocation            string
 	ConfigFileLocation         string
@@ -90,18 +91,19 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	appsDir := defaultAgentDir + "/apps"
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
-	debug := flag.Bool("debug", true, "sets the log level to debug")
-	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on connection")
-	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging")
+	debug := flag.Bool("debug", true, "sets the log level to debug (default=true)")
+	forceUpdate := flag.Bool("forceUpdate", false, "forces the agent to download the latest version (default=false)")
+	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on start (default=true)")
+	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging (default=false)")
 	version := flag.Bool("version", false, "displays the current version of the agent")
-	profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port")
+	profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port (default=false)")
 	profilingPort := flag.Uint("profilingPort", 80, "port of the profiling service (default=80)")
 	prettyLogging := flag.Bool("prettyLogging", false, "enables the pretty console writing, intended for debugging (slow)")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent and check for updates")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenging layer")
-	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
+	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided (default=tgz)")
 	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client in milliseconds (0 means disabled)")
 	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds (default=5000)")
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds (0 means none, default=1250)")
@@ -130,6 +132,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		Profiling:                  *profiling,
 		ProfilingPort:              *profilingPort,
 		ShouldUpdate:               *shouldUpdate,
+		ForceUpdate:                *forceUpdate,
 		DatabaseFileName:           *databaseFileName,
 		PingPongTimeout:            *pingPongTimeout,
 		ResponseTimeout:            *responseTimeout,

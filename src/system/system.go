@@ -11,6 +11,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
+	"runtime"
 	"strings"
 	"time"
 
@@ -55,15 +56,20 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
-func (sys *System) UpdateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
+func (sys *System) GetArch() string {
+	arch := runtime.GOARCH
+	if arch == "arm" {
+		return "armv7" // currently only support armv7
+	}
+	return arch
+}
 
-	// The update is already in progress
+func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	agentDir := sys.config.CommandLineArguments.AgentDir
 	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
-	agentURL := remoteUpdateURL + "/reagent-" + versionString
-
-	newAgentDestination := fmt.Sprintf("%s/reagent-%s", agentDir, versionString)
-	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-" + versionString
+	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, sys.GetArch(), versionString)
+	newAgentDestination := fmt.Sprintf("%s/reagent-v%s", agentDir, versionString)
+	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-v" + versionString
 
 	if !sys.updateLock.TryAcquire(1) {
 		return errdefs.InProgress(errors.New("update already in progress"))
@@ -71,9 +77,7 @@ func (sys *System) UpdateAgent(versionString string, progressCallback func(incre
 
 	defer sys.updateLock.Release(1)
 
-	log.Debug().Msg("Reagent update Initialized...")
-
-	// download it to /tmp first
+	log.Debug().Msgf("Attempting to download latest REagent at %s", agentURL)
 	err := filesystem.DownloadURL(tmpFilePath, agentURL, progressCallback)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
@@ -149,7 +153,7 @@ func (system *System) GetLatestVersion() (string, error) {
 	return strings.Join(strings.Fields(strings.TrimSpace(buf.String())), " "), nil
 }
 
-func (system *System) UpdateIfRequired(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
+func (system *System) Update(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
 	latestVersion, err := system.GetLatestVersion()
 	if err != nil {
 		return UpdateResult{}, err
@@ -157,9 +161,37 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 
 	currentVersion := GetVersion()
 	log.Info().Msgf("Latest version: %s, Current version: %s", latestVersion, currentVersion)
+	err = system.updateAgent(latestVersion, progressCallback)
+	if err != nil {
+		if errdefs.IsInProgress(err) {
+			return UpdateResult{
+				CurrentVersion: currentVersion,
+				LatestVersion:  latestVersion,
+				DidUpdate:      false,
+				InProgress:     true,
+			}, err
+		}
+		return UpdateResult{}, err
+	}
+
+	return UpdateResult{
+		CurrentVersion: currentVersion,
+		LatestVersion:  latestVersion,
+		DidUpdate:      latestVersion != currentVersion,
+	}, nil
+}
+
+func (system *System) UpdateIfRequired(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
+	latestVersion, err := system.GetLatestVersion()
+	if err != nil {
+		return UpdateResult{}, err
+	}
+
+	currentVersion := GetVersion()
+	log.Info().Msgf("Should update? Latest: %s, Current: %s", latestVersion, currentVersion)
 	if latestVersion != currentVersion {
-		log.Info().Msgf("Agent not up to date, downloading: v%s", latestVersion)
-		err = system.UpdateAgent("v"+latestVersion, progressCallback)
+		log.Info().Msgf("Agent not up to date, downloading: %s", latestVersion)
+		err = system.updateAgent(latestVersion, progressCallback)
 		if err != nil {
 			if errdefs.IsInProgress(err) {
 				return UpdateResult{

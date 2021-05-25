@@ -53,6 +53,10 @@ func (agent *Agent) OnConnect() error {
 		})
 	}
 
+	if agent.Config.CommandLineArguments.ForceUpdate {
+		agent.System.Update(nil)
+	}
+
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
 	err := agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
