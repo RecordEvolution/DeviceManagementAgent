@@ -4,14 +4,17 @@ build-arm7:
 publish-arm7:
 	./publish-arm7.sh
 
-publish-intel:
-	./publish-intel.sh
+publish-amd64:
+	./publish-amd64.sh
 
 build-arm64:
 	rm reagent-linux-arm64 || true && ${GOPATH}/bin/xgo -v --targets=linux/arm64 .
 
 rollout-arm7:
 	make build-arm7 && make publish-arm7
+
+rollout-amd64:
+	./build-amd64.sh && ./publish-amd64.sh
 
 publish-version:
 	gsutil cp "system/version.txt" gs://re-agent
