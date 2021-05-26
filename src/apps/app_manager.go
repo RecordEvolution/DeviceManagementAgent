@@ -335,8 +335,6 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 		return err
 	}
 
-	fmt.Printf("%+v\n", newestPayloads)
-
 	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(newestPayloads))
 
 	for i := range newestPayloads {
