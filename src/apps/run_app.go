@@ -31,11 +31,6 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
 	if err != nil {
 		if errdefs.IsImageNotFound(err) {
-			err := sm.setState(app, common.DOWNLOADING)
-			if err != nil {
-				return err
-			}
-
 			pullErr := sm.pullApp(payload, app)
 			if pullErr != nil {
 				return pullErr

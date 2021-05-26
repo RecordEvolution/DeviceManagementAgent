@@ -275,6 +275,9 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 		return err
 	}
 
+	// in case requested state is transient, convert to actual state
+	payload.RequestedState = common.TransientToActualState(payload.RequestedState)
+
 	// if app was not found in memory, will create a new entry from payload
 	if app == nil {
 		app, err = am.AppStore.AddApp(payload)
@@ -298,9 +301,7 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 
 	app.StateLock.Unlock()
 
-	am.AppStore.UpdateLocalRequestedState(payload)
-
-	return nil
+	return am.AppStore.UpdateLocalRequestedState(payload)
 }
 
 // EnsureRemoteRequestedStates iterates over all requested states found in the local database, and transitions were neccessary.
@@ -333,6 +334,8 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("%+v\n", newestPayloads)
 
 	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(newestPayloads))
 
