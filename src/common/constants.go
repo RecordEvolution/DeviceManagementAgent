@@ -42,7 +42,6 @@ func GetCurrentLogType(currentState AppState) LogType {
 func TransientToActualState(appState AppState) AppState {
 	switch appState {
 	case BUILDING,
-		BUILT,
 		TRANSFERED,
 		DOWNLOADING,
 		TRANSFERING,
