@@ -22,5 +22,22 @@ func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPay
 		return sm.buildApp(payload, app)
 	}
 
+	// Check if the image exists
+	var fullImageName string
+	if payload.Stage == common.DEV {
+		fullImageName = payload.RegistryImageName.Dev
+	} else if payload.Stage == common.PROD {
+		fullImageName = payload.RegistryImageName.Prod
+	}
+
+	images, err := sm.Container.GetImages(ctx, fullImageName)
+	if err != nil {
+		return err
+	}
+
+	if len(images) != 0 {
+		return sm.setState(app, common.PRESENT)
+	}
+
 	return sm.pullApp(payload, app)
 }
