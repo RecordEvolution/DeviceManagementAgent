@@ -45,7 +45,6 @@ func TransientToActualState(appState AppState) AppState {
 		TRANSFERED,
 		DOWNLOADING,
 		TRANSFERING,
-		PUBLISHED,
 		PUBLISHING,
 		UPDATING,
 		STOPPING:
