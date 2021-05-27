@@ -1,14 +1,17 @@
 build-arm7:
 	rm reagent-linux-arm-7 || true && ${GOPATH}/bin/xgo -v --targets=linux/arm-7 .
 
+build-arm64:
+	./build-arm64.sh
+
+publish-arm64:
+	./publish-arm64.sh
+
 publish-arm7:
 	./publish-arm7.sh
 
 publish-amd64:
 	./publish-amd64.sh
-
-build-arm64:
-	rm reagent-linux-arm64 || true && ${GOPATH}/bin/xgo -v --targets=linux/arm64 .
 
 rollout-arm7:
 	make build-arm7 && make publish-arm7
