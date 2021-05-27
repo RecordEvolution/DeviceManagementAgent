@@ -10,7 +10,11 @@ import (
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	currentVersion := system.GetVersion()
-	reswarmOSVersion := system.GetReswarmOSVersion()
+	OSVersion, err := system.GetOSVersion()
+	if err != nil {
+		return nil, err
+	}
+
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
 	dict := common.Dict{
@@ -26,8 +30,8 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		dict["hasLatest"] = latestVersion == currentVersion
 	}
 
-	if reswarmOSVersion != "" {
-		dict["reswarmOSVersion"] = reswarmOSVersion
+	if OSVersion != "" {
+		dict["OSVersion"] = OSVersion
 	}
 
 	return &messenger.InvokeResult{

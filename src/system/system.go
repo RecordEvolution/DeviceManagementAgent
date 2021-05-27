@@ -106,18 +106,59 @@ func GetVersion() string {
 	return version
 }
 
-func GetReswarmOSVersion() string {
-	versionBytes, err := os.ReadFile("/etc/reswarmos")
+func getOSReleaseContents() (map[string]string, error) {
+	osInfoBytes, err := os.ReadFile("/etc/os-release")
 	if err != nil {
-		return ""
+		return nil, err
 	}
-	versionString := string(versionBytes)
-	versionSplit := strings.Split(versionString, "-")
+	osInfoString := string(osInfoBytes)
+	osInfoSplit := strings.Split(osInfoString, "\n")
 
-	if len(versionSplit) == 2 {
-		return versionSplit[1]
+	dict := make(map[string]string)
+	for _, line := range osInfoSplit {
+		keyValuePair := strings.Split(line, "=")
+		if len(keyValuePair) == 2 {
+			key := keyValuePair[0]
+			var value string
+
+			valueSplit := strings.Split(keyValuePair[1], "\"")
+			if len(valueSplit) == 3 {
+				value = valueSplit[1]
+			} else {
+				value = valueSplit[0]
+			}
+
+			dict[key] = value
+		}
 	}
-	return versionString
+
+	return dict, nil
+}
+
+func GetOSVersion() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		osRelease, err := getOSReleaseContents()
+		if err == nil {
+			prettyName := osRelease["PRETTY_NAME"]
+			if prettyName != "" {
+				return prettyName, nil
+			}
+
+			name := osRelease["NAME"]
+			if name != "" {
+				return name, nil
+			}
+		}
+
+		return "Linux/Unix-based", nil
+	case "windows":
+		return "Windows", nil
+	case "darwin":
+		return "MacOS", nil
+	}
+
+	return "", nil
 }
 
 func (system *System) GetLatestVersion() (string, error) {
