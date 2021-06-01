@@ -31,7 +31,7 @@ func (clm *AppManager) retry(crashTask *CrashLoop) {
 		// cap to 2,5 minutes
 		sleepTime = time.Duration(common.Min(int64(sleepTime), int64(time.Second*150)))
 
-		log.Info().Msgf("CrackLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
+		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
 		time.Sleep(sleepTime)
 
