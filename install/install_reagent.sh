@@ -88,14 +88,21 @@ if [[ $os = "darwin" ]]; then
         sudo mv ${PWD}/reagent ${binary_folder}/
         echo "=== moved executable to $binary_folder"
         new_path="\"${binary_folder}:\$PATH\""
-
-        if grep -q "$new_path" "/Users/${USER}/.bash_profile"; then
-            echo "=== command is already in /Users/${USER}/.bash_profile"
+        if [ ! -f /Users/${USER}/.bashrc ]; then
+            echo "export PATH=${new_path}" >> "/Users/${USER}/.bashrc"
+            echo "=== command added to newly created /Users/${USER}/.bashrc"
+        fi
+        if grep -q "$new_path" "/Users/${USER}/.bashrc"; then
+            echo "=== command is already in /Users/${USER}/.bashrc"
         else
-            echo "export PATH=${new_path}" >> "/Users/${USER}/.bash_profile"
-            echo "=== command added to /Users/${USER}/.bash_profile"
+            echo "export PATH=${new_path}" >> "/Users/${USER}/.bashrc"
+            echo "=== command added to /Users/${USER}/.bashrc"
         fi
 
+        if [ ! -f /Users/${USER}/.zshenv ]; then
+            echo "export PATH=${new_path}" >> "/Users/${USER}/.zshenv"
+            echo "=== command added to newly created /Users/${USER}/.zshenv"
+        fi
         if grep -q "$new_path" "/Users/${USER}/.zshenv"; then
             echo "=== command is already in /Users/${USER}/.zshenv"
         else

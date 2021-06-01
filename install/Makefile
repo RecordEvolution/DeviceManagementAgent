@@ -1,9 +1,9 @@
-# This Makefile is created for the testers convenience. 
+# This Makefile is created for the testers convenience.
 
-install_reagent:
+install:
 	echo "get the install_reagent from a link"
 	sudo chmod 777 install_reagent.sh
-	./install_reagent.sh darwin 10.6 amd64
+	./install_reagent.sh
 
-uninstall_reagent:
-	echo "uninstall all reagent folders according to OS, i.e. binary folder" 
+upload:
+	gsutil cp ./install_reagent.sh gs://re-agent/install/install_reagent.sh
