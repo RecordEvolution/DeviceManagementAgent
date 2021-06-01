@@ -79,7 +79,7 @@ if [[ $os = "darwin" ]]; then
 
     if [ ! -f ./reagent ]; then
         echo "=== ----- Downloading binaries -----"
-        curl -o ${PWD}/reagent --head --fail "${download_from}"
+        curl -o ${PWD}/reagent --fail "${download_from}"
     fi
 
     if [ -f ./reagent ]; then
