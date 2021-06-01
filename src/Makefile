@@ -19,6 +19,9 @@ rollout-arm7:
 rollout-amd64:
 	./build-amd64.sh && ./publish-amd64.sh
 
+rollout-arm64:
+	./build-arm64.sh && ./publish-arm64.sh
+
 publish-version:
 	gsutil cp "system/version.txt" gs://re-agent
 	gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/version.txt
