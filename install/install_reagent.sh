@@ -88,6 +88,9 @@ if [[ $os = "darwin" ]]; then
         sudo mv ${PWD}/reagent ${binary_folder}/
         echo "=== moved executable to $binary_folder"
         new_path="\"${binary_folder}:\$PATH\""
+
+        export PATH=${new_path}
+
         if [ ! -f /Users/${USER}/.bashrc ]; then
             echo "export PATH=${new_path}" >> "/Users/${USER}/.bashrc"
             echo "=== command added to newly created /Users/${USER}/.bashrc"
