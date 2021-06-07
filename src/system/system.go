@@ -23,6 +23,7 @@ import (
 
 //go:embed version.txt
 var version string
+var BuildArch string = ""
 
 type System struct {
 	config     *config.Config
@@ -56,18 +57,10 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
-func (sys *System) GetArch() string {
-	arch := runtime.GOARCH
-	if arch == "arm" {
-		return "armv7" // currently only support armv7
-	}
-	return arch
-}
-
 func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	agentDir := sys.config.CommandLineArguments.AgentDir
 	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
-	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, sys.GetArch(), versionString)
+	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, BuildArch, versionString)
 	newAgentDestination := fmt.Sprintf("%s/reagent-v%s", agentDir, versionString)
 	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-v" + versionString
 

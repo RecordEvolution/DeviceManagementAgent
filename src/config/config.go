@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"reagent/errdefs"
 	"runtime"
 )
 
@@ -47,6 +46,7 @@ type CommandLineArguments struct {
 	Debug                      bool
 	DebugMessaging             bool
 	Version                    bool
+	Arch                       bool
 	Offline                    bool
 	Profiling                  bool
 	ProfilingPort              uint
@@ -95,6 +95,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	forceUpdate := flag.Bool("forceUpdate", false, "forces the agent to download the latest version (default=false)")
 	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on start (default=true)")
 	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging (default=false)")
+	arch := flag.Bool("arch", false, "displays the version of ARM that was used during the build of the binary")
 	version := flag.Bool("version", false, "displays the current version of the agent")
 	profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port (default=false)")
 	profilingPort := flag.Uint("profilingPort", 80, "port of the profiling service (default=80)")
@@ -109,10 +110,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds (0 means none, default=1250)")
 	cfgFile := flag.String("config", "", "reswarm configuration file")
 	flag.Parse()
-
-	if *cfgFile == "" && !*version {
-		return nil, errdefs.ErrConfigNotProvided
-	}
 
 	cliArgs := CommandLineArguments{
 		AppsDirectory:              appsDir,
@@ -137,6 +134,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		PingPongTimeout:            *pingPongTimeout,
 		ResponseTimeout:            *responseTimeout,
 		ConnectionEstablishTimeout: *socketConnectionEstablishTimeout,
+		Arch:                       *arch,
 	}
 
 	return &cliArgs, nil

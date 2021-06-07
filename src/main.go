@@ -1,19 +1,17 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"reagent/benchmark"
 	"reagent/config"
-	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/safe"
-
 	"reagent/system"
+
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -33,12 +31,22 @@ func main() {
 
 	cliArgs, err := config.GetCliArguments()
 	if err != nil {
-		if errors.Is(err, errdefs.ErrConfigNotProvided) {
-			fmt.Println("'-config' argument is required. -help for usage")
+		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
+	}
+
+	if cliArgs.ConfigFileLocation == "" {
+		if cliArgs.Version {
+			fmt.Println(system.GetVersion())
 			os.Exit(0)
-		} else {
-			log.Fatal().Stack().Err(err).Msg("Failed to GetCliArguments")
 		}
+
+		if cliArgs.Arch {
+			fmt.Println(system.BuildArch)
+			os.Exit(0)
+		}
+
+		fmt.Println("'-config' argument is required. -help for usage")
+		os.Exit(0)
 	}
 
 	if cliArgs.Profiling {
@@ -59,11 +67,6 @@ func main() {
 		defer profile.GoroutineProfile(&profile.Config{}).Start().Stop()
 		defer profile.MutexProfile(&profile.Config{}).Start().Stop()
 		defer profile.MemProfile(&profile.Config{}).Start().Stop()
-	}
-
-	if cliArgs.Version {
-		fmt.Println(system.GetVersion())
-		os.Exit(0)
 	}
 
 	logging.SetupLogger(cliArgs)

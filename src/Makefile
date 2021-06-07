@@ -1,5 +1,11 @@
 build-arm7:
-	rm reagent-linux-arm-7 || true && ${GOPATH}/bin/xgo -v --targets=linux/arm-7 .
+	rm reagent-linux-arm-7 || true && ${GOPATH}/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv7'" --targets=linux/arm-7 .
+
+build-arm6:
+	rm reagent-linux-arm-6 || true && ${GOPATH}/bin/xgo -v  -ldflags "-X 'reagent/system.BuildArch=armv6'" --targets=linux/arm-6 .
+
+build-arm5:
+	rm reagent-linux-arm-5 || true && ${GOPATH}/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv5'" --targets=linux/arm-5 .
 
 build-arm64:
 	./build-arm64.sh
