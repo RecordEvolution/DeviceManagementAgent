@@ -16,11 +16,23 @@ publish-arm64:
 publish-arm7:
 	./publish-arm7.sh
 
+publish-arm6:
+	./publish-arm6.sh
+
+publish-arm5:
+	./publish-arm5.sh
+
 publish-amd64:
 	./publish-amd64.sh
 
 rollout-arm7:
 	make build-arm7 && make publish-arm7
+
+rollout-arm6:
+	make build-arm6 && make publish-arm6
+
+rollout-arm5:
+	make build-arm5 && make publish-arm5
 
 rollout-amd64:
 	./build-amd64.sh && ./publish-amd64.sh
