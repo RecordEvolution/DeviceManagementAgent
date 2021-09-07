@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"encoding/json"
 
 	_ "embed"
 
@@ -128,6 +129,24 @@ func getOSReleaseContents() (map[string]string, error) {
 	return dict, nil
 }
 
+func GetOSReleaseCurrent() (map[string]string, error) {
+	return getOSReleaseContents()
+}
+
+func GetOSReleaseLatest() (map[string]string, error) {
+	osInfoBytes, err := os.ReadFile("/etc/os-release-latest.json")
+	if err != nil {
+		return nil, err
+	}
+	dict := make(map[string]string)
+	err = json.Unmarshal(osInfoBytes, &dict)
+	if err != nil {
+    return nil, err
+  }
+
+	return dict, nil
+}
+
 func GetOSVersion() (string, error) {
 	switch runtime.GOOS {
 	case "linux":
@@ -152,6 +171,58 @@ func GetOSVersion() (string, error) {
 	}
 
 	return "", nil
+}
+
+// getOSUpdateTags read and extracts info tags about latest available update
+func getOSUpdateTags() (string,string,error) {
+
+	// obtain release URL from OS that observes and logs latest OS version
+	updateInfoBytes, err := os.ReadFile("/etc/reswarmos-update")
+	if err != nil {
+		return "", "", err
+	}
+	updateInfo := strings.Split(string(updateInfoBytes),"\n")[0]
+	updateURL := strings.Split(updateInfo,",")[2]
+	updateURLSplit := strings.Split(updateURL,"/")
+	updateFile := updateURLSplit[len(updateURLSplit)-1]
+
+	return updateURL, updateFile, nil
+}
+
+// GetOSUpdate downloads the actual update-bundle to the device
+func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (error) {
+
+	// find release tags from update file regularly updated by the system
+	updateURL, updateFile, err := getOSUpdateTags()
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to obtain update tags")
+	}
+
+	// download update bundle at given URL
+	err = filesystem.DownloadURL("/tmp/" + updateFile, updateURL, progressCallback)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to download from URL: %s", updateURL)
+		return err
+	}
+
+	log.Debug().Msg("ReswarmOS update-bundle download finished from " + updateURL + "...")
+
+	return nil
+}
+
+// InstallOSUpdate installs the latest update-bundle available on the device
+func InstallOSUpdate(progressCallback func(percent uint64)) (error) {
+
+	// find update-bundle installer file
+	_, updateFile, err := getOSUpdateTags()
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to obtain update tags")
+	}
+	bundleFile := "/tmp/" + updateFile
+	fmt.Printf("using bundle "+bundleFile+"\n")
+	err = raucInstallBundle(bundleFile,progressCallback)
+
+	return nil
 }
 
 func (system *System) GetLatestVersion() (string, error) {

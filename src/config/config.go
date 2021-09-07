@@ -88,7 +88,8 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		defaultAgentDir = fmt.Sprintf("%s/%s", homeDir, "reagent")
 	}
 
-	appsDir := defaultAgentDir + "/apps"
+	// app-data goes to separate dedicated partition mounted at "/apps"
+	appsDir := "/apps"
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
 	debug := flag.Bool("debug", true, "sets the log level to debug (default=true)")
