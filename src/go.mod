@@ -13,10 +13,8 @@ require (
 	github.com/gammazero/nexus/v3 v3.0.3
 	github.com/godbus/dbus/v5 v5.0.4
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/google/pprof v0.0.0-20210423192551-a2663126120b // indirect
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/ianlancetaylor/demangle v0.0.0-20210406231658-61c622dd7d50 // indirect
 	github.com/mattn/go-sqlite3 v1.14.7
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
