@@ -50,7 +50,7 @@ func raucInstallBundle(bundlePath string, progressCallback func(percent uint64))
     return errors.New("failed to set up new RAUC DBus instance")
   }
   method := fmt.Sprintf("%s.%s.%s",raucDBusInterface,"Installer","InstallBundle")
-  call := raucbus.object.Call(method,0,bundlePath)
+  call := raucbus.object.Call(method,0,bundlePath,map[string]interface{}{"ignore-compatible": true})
   // https://pkg.go.dev/github.com/godbus/dbus#Call
   if call.Err != nil {
     fmt.Printf(call.Err.Error()+"\n")
