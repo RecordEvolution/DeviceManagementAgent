@@ -7,7 +7,7 @@ import (
 	"reagent/messenger/topics"
 	"reagent/system"
 	"strings"
-	"errors"
+	// "errors"
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -15,7 +15,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	// current release information
 	osReleaseCurrent, err := system.GetOSReleaseCurrent()
 	if err != nil {
-		return nil, errors.New("failed to GetOSReleaseCurrent")
+		return nil, err
 	}
 	osReleaseVersionSplit := strings.Split(osReleaseCurrent["VERSION"],"-")
 	osReleaseVersion := ""
@@ -33,7 +33,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	// latest release information
 	osReleaseLatest, err := system.GetOSReleaseLatest()
 	if err != nil {
-		return nil, errors.New("failed to GetOSReleaseLatest")
+		return nil, err
 	}
 	newOSRelease := system.OSRelease {
 		osReleaseLatest[""],
@@ -70,10 +70,7 @@ func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.R
 	// start downloading...
 	err := system.GetOSUpdate(progressCallback)
 	if err != nil {
-		// return nil, errors.New("failed to GetOSUpdate")
-		return &messenger.InvokeResult{
-			Arguments: []interface{}{},
-		}, err
+		return nil, err
 	}
 
 	return &messenger.InvokeResult{
@@ -83,23 +80,30 @@ func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.R
 
 func (ex *External) installOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 
-	// prepare callback monitoring progress of installation
-	progressCallback := func(percent uint64) {
-		progress := common.Dict{
-			"progress": percent,
-		}
-
-		serialNumber := ex.Config.ReswarmConfig.SerialNumber
-		topic := common.BuildOSInstallProgress(serialNumber)
-		ex.LogMessenger.Publish(topics.Topic(topic), []interface{}{progress}, nil, nil)
-	}
-
-	err := system.InstallOSUpdate(progressCallback)
+	err := system.InstallOSUpdate()
 	if err != nil {
-		return nil, errors.New("failed to InstallOSUpdate")
+		return nil, err
 	}
 
 	return &messenger.InvokeResult{
 		Arguments: []interface{}{},
+	}, nil
+}
+
+func (ex *External) getInstallOSUpdateProgressHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+
+	prog, mess, nest, err := system.GetInstallOSUpdateProgress()
+	if err != nil {
+		return nil, err
+	}
+
+	updateProgress := common.Dict{
+		"percentage": prog,
+		"message": mess,
+		"nestingDepth": nest,
+	}
+
+	return &messenger.InvokeResult{
+		Arguments: []interface{}{updateProgress},
 	}, nil
 }

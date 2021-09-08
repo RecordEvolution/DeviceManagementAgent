@@ -35,6 +35,6 @@ const AgentProgress Topic = "agent_update_progress"
 
 const GetOSRelease Topic = "get_os_release"
 const GetOSUpdate Topic = "get_os_update"
-const GetOSUpdateProgress Topic = "get_os_update_progress"
+const GetOSUpdateProgress Topic = "os_update_progress"
 const InstallOSUpdate Topic = "install_os_update"
-const InstallOSUpdateProgress Topic = "install_os_update_progress"
+const GetInstallOSUpdateProgress Topic = "get_install_os_update_progress"

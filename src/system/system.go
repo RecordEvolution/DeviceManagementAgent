@@ -58,6 +58,8 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
+// ------------------------------------------------------------------------- //
+
 func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	agentDir := sys.config.CommandLineArguments.AgentDir
 	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
@@ -99,6 +101,8 @@ func (sys *System) updateAgent(versionString string, progressCallback func(incre
 func GetVersion() string {
 	return version
 }
+
+// ------------------------------------------------------------------------- //
 
 func getOSReleaseContents() (map[string]string, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release")
@@ -189,6 +193,8 @@ func getOSUpdateTags() (string,string,error) {
 	return updateURL, updateFile, nil
 }
 
+// ------------------------------------------------------------------------- //
+
 // GetOSUpdate downloads the actual update-bundle to the device
 func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (error) {
 
@@ -211,7 +217,7 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 }
 
 // InstallOSUpdate installs the latest update-bundle available on the device
-func InstallOSUpdate(progressCallback func(percent uint64)) (error) {
+func InstallOSUpdate() (err error) {
 
 	// find update-bundle installer file
 	_, updateFile, err := getOSUpdateTags()
@@ -220,10 +226,24 @@ func InstallOSUpdate(progressCallback func(percent uint64)) (error) {
 	}
 	bundleFile := "/tmp/" + updateFile
 	fmt.Printf("using bundle "+bundleFile+"\n")
-	err = raucInstallBundle(bundleFile,progressCallback)
+	err = raucInstallBundle(bundleFile)
 
 	return nil
 }
+
+func GetInstallOSUpdateOperation() (operation string, err error) {
+	return raucGetOperation()
+}
+
+func GetInstallOSUpdateError() (message string, err error) {
+	return raucGetLastError()
+}
+
+func GetInstallOSUpdateProgress() (percentage int32, messsage string, nestingDepth int32, err error) {
+	return raucGetProgress()
+}
+
+// ------------------------------------------------------------------------- //
 
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
