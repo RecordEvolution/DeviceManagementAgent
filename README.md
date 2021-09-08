@@ -31,26 +31,53 @@ running in containers on the device and retrieve their result and logs.
 
 The _Reagent_ is provided as a statically linked binary and accepts various
 CLI parameters to configure it when launched. To show a list of the parameters
-it accepts do `./reagent-<platform>-<arch> --help` resulting in
+it accepts apply the help parameter `./reagent -help`
 
 ```Shell
-Usage of ./reagent-linux-amd64:
-  -cfgfile string
-    	Configuration file of IoT device running on localhost (default "device-config.reswarm")
-  -logfile string
-    	Log file used by the ReAgent to store all its log messages (default "/var/log/reagent.log")
-  -logflag
-    	ReAgent logs to stdout/stderr (false) or given file (true) (default true)
-  -loglevel string
-    	Log level is one of DEBUG, INFO, WARNING, ERROR, CRITICAL (default "INFO")
+Usage of ./reagent:
+  -agentDir string
+    	default location of the agent binary (default "/Users/ruben/reagent")
+  -arch
+    	displays the architecture for which the binary was built
+  -compressedBuildExtension string
+    	sets the extension in which the compressed build files will be provided (default "tgz")
+  -config string
+    	reswarm configuration file
+  -connTimeout uint
+    	Sets the connection timeout for the socket connection in milliseconds (0 means no timeout) (default 1250)
+  -dbFileName string
+    	defines the name used to persist the database file (default "reagent.db")
+  -debug
+    	sets the log level to debug (default true)
+  -debugMessaging
+    	enables debug logs for messenging layer
+  -forceUpdate
+    	forces the agent to download the latest version
+  -logFile string
+    	log file used by the reagent (default "/opt/reagent/reagent.log")
+  -offline
+    	starts the agent without establishing a socket connection. meant for debugging (default=false)
+  -ppTimeout uint
+    	Sets the ping pong timeout of the client in milliseconds (0 means disabled)
+  -prettyLogging
+    	enables the pretty console writing, intended for debugging
+  -profiling
+    	spins up a pprof webserver on the defined port
+  -profilingPort uint
+    	port of the profiling service (default=80) (default 80)
+  -remoteUpdateURL string
+    	used to download new versions of the agent and check for updates (default "https://storage.googleapis.com/re-agent")
+  -respTimeout uint
+    	Sets the response timeout of the client in milliseconds (default 5000)
+  -update
+    	determines if the agent should update on start (default true)
+  -version
+    	displays the current version of the agen
 ```
 
-The `cfgfile` provides the path and filename to a locally available configuration
-file for the IoT device the Reagent is managing and running on. This configuration
-comprises the device's _identity_, _hostname_, _authentication details_ at the
-_Reswarm backend instance_ the Reagent is supposed to connect and i.a. the
-endpoint URL itself. The remaining parameters control the system-level _logging_
-of the Reagent.
+The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
+
+Read more on `.reswarm` files and how they work here: https://docs.record-evolution.de/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
 
 ## Build
 
@@ -101,7 +128,3 @@ root permissions by default.
 ##### Definition of types used in API
 
 - https://godoc.org/github.com/docker/docker/api/types#Container
-
-##### Deprecated API
-
-- https://github.com/docker/engine-api/
