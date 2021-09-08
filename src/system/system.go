@@ -222,9 +222,8 @@ func InstallOSUpdate() (err error) {
 	}
 	bundleFile := "/tmp/" + updateFile
 	fmt.Printf("using bundle " + bundleFile + "\n")
-	err = raucInstallBundle(bundleFile)
 
-	return nil
+	return raucInstallBundle(bundleFile)
 }
 
 func GetInstallOSUpdateOperation() (operation string, err error) {
