@@ -25,9 +25,9 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 		osReleaseBuildTime = osReleaseVersionSplit[2]
 	}
 	currentOSRelease := system.OSRelease{
-		osReleaseCurrent["Name"],
-		osReleaseVersion,
-		osReleaseBuildTime,
+		Name:      osReleaseCurrent["Name"],
+		Version:   osReleaseVersion,
+		BuildTime: osReleaseBuildTime,
 	}
 
 	// latest release information
@@ -36,9 +36,9 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 		return nil, err
 	}
 	newOSRelease := system.OSRelease{
-		osReleaseLatest[""],
-		osReleaseLatest["version"],
-		osReleaseLatest["buildtime"],
+		Name:      osReleaseLatest[""],
+		Version:   osReleaseLatest["version"],
+		BuildTime: osReleaseLatest["buildtime"],
 	}
 
 	// merge both
