@@ -3,6 +3,7 @@ package system
 import (
 	"errors"
 	"fmt"
+
 	"github.com/godbus/dbus/v5"
 )
 
@@ -154,7 +155,7 @@ func raucGetProgress() (percentagy int32, message string, nestingDepth int32, er
 	var response progressResponse
 	err = dbus.Store(src, &response)
 	if err != nil {
-		return 0, "", 0, fmt.Errorf("RAUC: failed store result of GetPropertyProgress:", err)
+		return 0, "", 0, fmt.Errorf("RAUC: failed store result of GetPropertyProgress: %v", err)
 	}
 
 	return response.Percentage, response.Message, response.NestingDepth, nil
