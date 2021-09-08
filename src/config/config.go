@@ -99,7 +99,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	forceUpdate := flag.Bool("forceUpdate", false, "forces the agent to download the latest version")
 	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on start")
 	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging")
-	arch := flag.Bool("arch", false, "displays the version of ARM that was used during the build of the binary")
+	arch := flag.Bool("arch", false, "displays the architecture for which the binary was built")
 	version := flag.Bool("version", false, "displays the current version of the agent")
 	profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port")
 	profilingPort := flag.Uint("profilingPort", 80, "port of the profiling service")
