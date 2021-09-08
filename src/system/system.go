@@ -1,6 +1,7 @@
 package system
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-	"encoding/json"
 
 	_ "embed"
 
@@ -104,7 +104,7 @@ func GetVersion() string {
 
 // ------------------------------------------------------------------------- //
 
-func getOSReleaseContents() (map[string]string, error) {
+func GetOSReleaseCurrent() (map[string]string, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release")
 	if err != nil {
 		return nil, err
@@ -133,10 +133,6 @@ func getOSReleaseContents() (map[string]string, error) {
 	return dict, nil
 }
 
-func GetOSReleaseCurrent() (map[string]string, error) {
-	return getOSReleaseContents()
-}
-
 func GetOSReleaseLatest() (map[string]string, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release-latest.json")
 	if err != nil {
@@ -145,8 +141,8 @@ func GetOSReleaseLatest() (map[string]string, error) {
 	dict := make(map[string]string)
 	err = json.Unmarshal(osInfoBytes, &dict)
 	if err != nil {
-    return nil, err
-  }
+		return nil, err
+	}
 
 	return dict, nil
 }
@@ -154,7 +150,7 @@ func GetOSReleaseLatest() (map[string]string, error) {
 func GetOSVersion() (string, error) {
 	switch runtime.GOOS {
 	case "linux":
-		osRelease, err := getOSReleaseContents()
+		osRelease, err := GetOSReleaseCurrent()
 		if err == nil {
 			prettyName := osRelease["PRETTY_NAME"]
 			if prettyName != "" {
@@ -178,16 +174,16 @@ func GetOSVersion() (string, error) {
 }
 
 // getOSUpdateTags read and extracts info tags about latest available update
-func getOSUpdateTags() (string,string,error) {
+func getOSUpdateTags() (string, string, error) {
 
 	// obtain release URL from OS that observes and logs latest OS version
 	updateInfoBytes, err := os.ReadFile("/etc/reswarmos-update")
 	if err != nil {
 		return "", "", err
 	}
-	updateInfo := strings.Split(string(updateInfoBytes),"\n")[0]
-	updateURL := strings.Split(updateInfo,",")[2]
-	updateURLSplit := strings.Split(updateURL,"/")
+	updateInfo := strings.Split(string(updateInfoBytes), "\n")[0]
+	updateURL := strings.Split(updateInfo, ",")[2]
+	updateURLSplit := strings.Split(updateURL, "/")
 	updateFile := updateURLSplit[len(updateURLSplit)-1]
 
 	return updateURL, updateFile, nil
@@ -196,7 +192,7 @@ func getOSUpdateTags() (string,string,error) {
 // ------------------------------------------------------------------------- //
 
 // GetOSUpdate downloads the actual update-bundle to the device
-func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (error) {
+func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 
 	// find release tags from update file regularly updated by the system
 	updateURL, updateFile, err := getOSUpdateTags()
@@ -205,7 +201,7 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 	}
 
 	// download update bundle at given URL
-	err = filesystem.DownloadURL("/tmp/" + updateFile, updateURL, progressCallback)
+	err = filesystem.DownloadURL("/tmp/"+updateFile, updateURL, progressCallback)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to download from URL: %s", updateURL)
 		return err
@@ -225,7 +221,7 @@ func InstallOSUpdate() (err error) {
 		log.Error().Err(err).Msgf("Failed to obtain update tags")
 	}
 	bundleFile := "/tmp/" + updateFile
-	fmt.Printf("using bundle "+bundleFile+"\n")
+	fmt.Printf("using bundle " + bundleFile + "\n")
 	err = raucInstallBundle(bundleFile)
 
 	return nil

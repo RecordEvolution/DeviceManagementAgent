@@ -9,7 +9,7 @@ const (
 )
 
 type OSRelease struct {
-	Name                 string
-	Version              string
-	BuildTime            string
+	Name      string
+	Version   string
+	BuildTime string
 }

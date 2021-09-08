@@ -88,8 +88,11 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		defaultAgentDir = fmt.Sprintf("%s/%s", homeDir, "reagent")
 	}
 
-	// app-data goes to separate dedicated partition mounted at "/apps"
-	appsDir := "/apps"
+	// By default apps are stored inside the default agent directory, as well, to
+	// support a variety of distributions/systems with a rootfs only. However,
+	// for the agent running on actual embedded linux we tend to use a separate
+	// dedicated (update-)persistent partition mounted at "/apps"
+	defaultAppsDir := defaultAgentDir + "/apps"
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
 	debug := flag.Bool("debug", true, "sets the log level to debug (default=true)")
@@ -103,6 +106,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	prettyLogging := flag.Bool("prettyLogging", false, "enables the pretty console writing, intended for debugging (slow)")
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent and check for updates")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
+	appsDir := flag.String("appsDir", defaultAppsDir, "default path for apps and app-data")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenging layer")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided (default=tgz)")
@@ -113,9 +117,9 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	flag.Parse()
 
 	cliArgs := CommandLineArguments{
-		AppsDirectory:              appsDir,
-		AppsBuildDir:               (appsDir) + "/build",
-		AppsSharedDir:              (appsDir) + "/shared",
+		AppsDirectory:              *appsDir,
+		AppsBuildDir:               (*appsDir) + "/build",
+		AppsSharedDir:              (*appsDir) + "/shared",
 		AgentDownloadDir:           (*agentDir) + "/downloads",
 		AgentDir:                   *agentDir,
 		RemoteUpdateURL:            *remoteUpdateURL,

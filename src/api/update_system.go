@@ -17,14 +17,14 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	if err != nil {
 		return nil, err
 	}
-	osReleaseVersionSplit := strings.Split(osReleaseCurrent["VERSION"],"-")
+	osReleaseVersionSplit := strings.Split(osReleaseCurrent["VERSION"], "-")
 	osReleaseVersion := ""
 	osReleaseBuildTime := ""
 	if len(osReleaseVersionSplit) == 3 {
-		osReleaseVersion = strings.Trim(osReleaseVersionSplit[0],"v")
+		osReleaseVersion = strings.Trim(osReleaseVersionSplit[0], "v")
 		osReleaseBuildTime = osReleaseVersionSplit[2]
 	}
-	currentOSRelease := system.OSRelease {
+	currentOSRelease := system.OSRelease{
 		osReleaseCurrent["Name"],
 		osReleaseVersion,
 		osReleaseBuildTime,
@@ -35,7 +35,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	if err != nil {
 		return nil, err
 	}
-	newOSRelease := system.OSRelease {
+	newOSRelease := system.OSRelease{
 		osReleaseLatest[""],
 		osReleaseLatest["version"],
 		osReleaseLatest["buildtime"],
@@ -43,7 +43,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 
 	// merge both
 	osrelease := common.Dict{
-		"current": currentOSRelease,
+		"current":   currentOSRelease,
 		"available": newOSRelease,
 	}
 
@@ -98,8 +98,8 @@ func (ex *External) getInstallOSUpdateProgressHandler(ctx context.Context, respo
 	}
 
 	updateProgress := common.Dict{
-		"percentage": prog,
-		"message": mess,
+		"percentage":   prog,
+		"message":      mess,
 		"nestingDepth": nest,
 	}
 
