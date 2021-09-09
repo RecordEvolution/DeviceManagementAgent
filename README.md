@@ -36,43 +36,45 @@ it accepts apply the help parameter `./reagent -help`
 ```Shell
 Usage of ./reagent:
   -agentDir string
-    	default location of the agent binary (default "/Users/ruben/reagent")
+       default location of the agent binary (default "/opt/reagent" (linux), "/Users/<user>/reagent" (darwin))
+  -appsDir string
+       default path for apps and app-data (default (default agentDir) + "/apps")
   -arch
-    	displays the architecture for which the binary was built
+       displays the architecture for which the binary was built
   -compressedBuildExtension string
-    	sets the extension in which the compressed build files will be provided (default "tgz")
+       sets the extension in which the compressed build files will be provided (default "tgz")
   -config string
-    	reswarm configuration file
+       reswarm configuration file
   -connTimeout uint
-    	Sets the connection timeout for the socket connection in milliseconds (0 means no timeout) (default 1250)
+       Sets the connection timeout for the socket connection in milliseconds (0 means no timeout) (default 1250)
   -dbFileName string
-    	defines the name used to persist the database file (default "reagent.db")
+       defines the name used to persist the database file (default "reagent.db")
   -debug
-    	sets the log level to debug (default true)
+       sets the log level to debug (default true)
   -debugMessaging
-    	enables debug logs for messenging layer
+       enables debug logs for messenging layer
   -forceUpdate
-    	forces the agent to download the latest version
+       forces the agent to download the latest version
   -logFile string
-    	log file used by the reagent (default "/opt/reagent/reagent.log")
+       log file used by the reagent (default "/var/log/reagent.log" (linux), "/Users/<user>/reagent/reagent.log" (darwin))
   -offline
-    	starts the agent without establishing a socket connection. meant for debugging (default=false)
+       starts the agent without establishing a socket connection. meant for debugging (default=false)
   -ppTimeout uint
-    	Sets the ping pong timeout of the client in milliseconds (0 means disabled)
+       Sets the ping pong timeout of the client in milliseconds (0 means no timeout)
   -prettyLogging
-    	enables the pretty console writing, intended for debugging
+       enables the pretty console writing, intended for debugging
   -profiling
-    	spins up a pprof webserver on the defined port
+       spins up a pprof webserver on the defined port
   -profilingPort uint
-    	port of the profiling service (default=80) (default 80)
+       port of the profiling service (default 80)
   -remoteUpdateURL string
-    	used to download new versions of the agent and check for updates (default "https://storage.googleapis.com/re-agent")
+       used to download new versions of the agent and check for updates (default "https://storage.googleapis.com/re-agent")
   -respTimeout uint
-    	Sets the response timeout of the client in milliseconds (default 5000)
+       Sets the response timeout of the client in milliseconds (default 5000)
   -update
-    	determines if the agent should update on start (default true)
+       determines if the agent should update on start (default true)
   -version
-    	displays the current version of the agen
+       displays the current version of the agent
 ```
 
 The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
