@@ -117,6 +117,7 @@ func (agent *Agent) InitConnectionStatusHeartbeat() {
 }
 
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
+	cliArgs := generalConfig.CommandLineArguments
 
 	systemAPI := system.New(generalConfig)
 
@@ -146,7 +147,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
 	var networkInstance network.Network
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" && cliArgs.UseNetworkManager {
 		networkInstance, err = network.NewNMWNetwork()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to setup network")
@@ -173,7 +174,6 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	// try to establish the main session
-	cliArgs := generalConfig.CommandLineArguments
 	mainSocketConfig := messenger.SocketConfig{
 		SetupTestament:    true,
 		ResponseTimeout:   time.Millisecond * time.Duration(cliArgs.ResponseTimeout),

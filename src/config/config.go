@@ -53,6 +53,7 @@ type CommandLineArguments struct {
 	ShouldUpdate               bool
 	ForceUpdate                bool
 	PrettyLogging              bool
+	UseNetworkManager          bool
 	LogFileLocation            string
 	ConfigFileLocation         string
 	DatabaseFileName           string
@@ -109,6 +110,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	appsDir := flag.String("appsDir", defaultAppsDir, "default path for apps and app-data")
 	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenging layer")
+	nmw := flag.Bool("nmw", true, "enables the agent to use the NetworkManager API on Linux machines")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
 	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client in milliseconds (0 means no timeout)")
 	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds")
@@ -140,6 +142,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		ResponseTimeout:            *responseTimeout,
 		ConnectionEstablishTimeout: *socketConnectionEstablishTimeout,
 		Arch:                       *arch,
+		UseNetworkManager:          *nmw,
 	}
 
 	return &cliArgs, nil
