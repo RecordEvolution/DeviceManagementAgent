@@ -88,9 +88,9 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	payload.RegisteryToken = token
 
 	// if there's an active crashloopbackoff and we are no longer transitioning to running state, clear the loop
-	if payload.Stage == common.PROD && payload.RequestedState != common.RUNNING {
-		am.clearCrashLoop(payload.AppKey, payload.Stage)
-	}
+	// if payload.Stage == common.PROD && payload.RequestedState != common.RUNNING {
+	// 	am.clearCrashLoop(payload.AppKey, payload.Stage)
+	// }
 
 	errC := am.StateMachine.InitTransition(app, payload)
 	if errC == nil {
