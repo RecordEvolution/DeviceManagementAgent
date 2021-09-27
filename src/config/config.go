@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+        "path/filepath"
 )
 
 // ReswarmConfig types for the .reswarm file
@@ -93,7 +94,10 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	// support a variety of distributions/systems with a rootfs only. However,
 	// for the agent running on actual embedded linux we tend to use a separate
 	// dedicated (update-)persistent partition mounted at "/apps"
-	defaultAppsDir := defaultAgentDir + "/apps"
+	defaultAppsDir := filepath.Join(defaultAgentDir,"apps")
+
+        // sqlite database files go into the default agent directory as well
+        defaultDatabaseFileName := filepath.Join(defaultAgentDir,"reagent.db")
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
 	debug := flag.Bool("debug", true, "sets the log level to debug")
@@ -108,7 +112,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent and check for updates")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	appsDir := flag.String("appsDir", defaultAppsDir, "default path for apps and app-data")
-	databaseFileName := flag.String("dbFileName", "reagent.db", "defines the name used to persist the database file")
+	databaseFileName := flag.String("dbFileName", defaultDatabaseFileName, "defines the name used to persist the database file")
 	debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenging layer")
 	nmw := flag.Bool("nmw", true, "enables the agent to use the NetworkManager API on Linux machines")
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
