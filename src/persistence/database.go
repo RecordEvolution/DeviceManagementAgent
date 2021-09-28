@@ -38,7 +38,7 @@ func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 
 	firstLetter := databaseFileName[0:1]
 
-	if firstLetter != "/" {
+	if firstLetter != "/" && firstLetter != "." {
 		databaseFileName += "./"
 	}
 
