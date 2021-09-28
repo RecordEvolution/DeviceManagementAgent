@@ -35,7 +35,14 @@ const (
 
 func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 	databaseFileName := config.CommandLineArguments.DatabaseFileName
-	connectionString := fmt.Sprintf("./%s?%s&%s&%s", databaseFileName, cacheShared, busyTimeout, journalMode)
+
+	firstLetter := databaseFileName[0:1]
+
+	if firstLetter != "/" {
+		databaseFileName += "./"
+	}
+
+	connectionString := fmt.Sprintf("%s?%s&%s&%s", databaseFileName, cacheShared, busyTimeout, journalMode)
 	log.Debug().Msgf("Setup database with %s as connection string", connectionString)
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {

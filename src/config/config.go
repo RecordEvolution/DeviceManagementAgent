@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"runtime"
-        "path/filepath"
 )
 
 // ReswarmConfig types for the .reswarm file
@@ -94,10 +94,10 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	// support a variety of distributions/systems with a rootfs only. However,
 	// for the agent running on actual embedded linux we tend to use a separate
 	// dedicated (update-)persistent partition mounted at "/apps"
-	defaultAppsDir := filepath.Join(defaultAgentDir,"apps")
+	defaultAppsDir := filepath.Join(defaultAgentDir, "apps")
 
-        // sqlite database files go into the default agent directory as well
-        defaultDatabaseFileName := filepath.Join(defaultAgentDir,"reagent.db")
+	// sqlite database files go into the default agent directory as well
+	defaultDatabaseFileName := filepath.Join(defaultAgentDir, "reagent.db")
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
 	debug := flag.Bool("debug", true, "sets the log level to debug")
