@@ -43,8 +43,16 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 
 	// merge both
 	osrelease := common.Dict{
-		"current":   currentOSRelease,
-		"available": newOSRelease,
+		"current": common.Dict{
+			"Name":      currentOSRelease.Name,
+			"Version":   currentOSRelease.Version,
+			"BuildTime": currentOSRelease.BuildTime,
+		},
+		"available": common.Dict{
+			"Name":      newOSRelease.Name,
+			"Version":   newOSRelease.Version,
+			"BuildTime": newOSRelease.BuildTime,
+		},
 	}
 
 	return &messenger.InvokeResult{
