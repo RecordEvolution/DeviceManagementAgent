@@ -34,7 +34,7 @@ const (
 	raucDBusMethodSlot    = raucDBusMethodBase + ".GetSlotStatus"
 	raucDBusMethodPrimary = raucDBusMethodBase + ".GetPrimary"
 
-	raucDBusSignalFinish = raucDBusMethodBase + "::Completed"
+	raucDBusSignalFinish = raucDBusMethodBase + ".Completed"
 
 	raucDBusPropertyOperation  = raucDBusMethodBase + ".Operation"
 	raucDBusPropertyLastError  = raucDBusMethodBase + ".LastError"
@@ -62,6 +62,7 @@ func NewRaucDBus() (raucDBus, error) {
 		return raucDBus{}, err
 	}
 
+	// https://github.com/godbus/dbus/blob/v4.1.0/conn.go#L419
 	raucbus.object = raucbus.conn.Object(raucDBusInterface, raucDBusObjectPath)
 
 	return raucbus, nil
@@ -84,7 +85,7 @@ func raucInstallBundle(bundlePath string) (err error) {
 	// https://pkg.go.dev/github.com/godbus/dbus#Call
 	if call.Err != nil {
 		fmt.Printf(call.Err.Error() + "\n")
-		return errors.New("D-Bus call to " + raucDBusInterface + ".Installer for Install Bundle: " + call.Err.Error())
+		return errors.New("D-Bus call to " + raucDBusMethodInstall + " failed: " + call.Err.Error())
 	}
 
 	return nil
@@ -92,6 +93,31 @@ func raucInstallBundle(bundlePath string) (err error) {
 
 // ------------------------------------------------------------------------- //
 // signals
+
+func raucGetSignalCompleted() (completed bool, err error) {
+
+	// get DBus instance connected to RAUC daemon
+	raucbus, err := NewRaucDBus()
+	if err != nil {
+		return false, errors.New("failed to set up new RAUC DBus instance")
+	}
+
+	// https://github.com/godbus/dbus/blob/v4.1.0/conn.go#L560
+	completedChannel := make(chan *dbus.Signal, 60)
+	raucbus.conn.Signal(completedChannel)
+
+	signal, ok := <-completedChannel
+	if !ok {
+		return false, errors.New("D-Bus RAUC: failed to read from channel")
+	}
+
+	// https://github.com/godbus/dbus/blob/a389bdde4dd695d414e47b755e95e72b7826432c/conn.go#L608
+	if signal.Name == raucDBusSignalFinish {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}
 
 // ------------------------------------------------------------------------- //
 // properties
@@ -128,7 +154,7 @@ func raucGetLastError() (errormessage string, err error) {
 	return variant.String(), nil
 }
 
-func raucGetProgress() (percentagy int32, message string, nestingDepth int32, err error) {
+func raucGetProgress() (percentage int32, message string, nestingDepth int32, err error) {
 
 	// get DBus instance connected to RAUC daemon
 	raucbus, err := NewRaucDBus()
