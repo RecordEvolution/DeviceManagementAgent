@@ -200,6 +200,8 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 		log.Error().Err(err).Msgf("Failed to obtain update tags")
 	}
 
+	log.Debug().Msg("Starting to download ReswarmOS bundle from " + updateURL + " to /tmp/" + updateFile)
+
 	// download update bundle at given URL
 	err = filesystem.DownloadURL("/tmp/"+updateFile, updateURL, progressCallback)
 	if err != nil {
@@ -208,6 +210,11 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 	}
 
 	log.Debug().Msg("ReswarmOS update-bundle download finished from " + updateURL + "...")
+
+	err = InstallOSUpdate()
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS bundle")
+	}
 
 	return nil
 }
@@ -221,7 +228,8 @@ func InstallOSUpdate() (err error) {
 		log.Error().Err(err).Msgf("Failed to obtain update tags")
 	}
 	bundleFile := "/tmp/" + updateFile
-	fmt.Printf("using bundle " + bundleFile + "\n")
+
+	log.Debug().Msg("installing ReswarmOS update-bundle " + bundleFile)
 
 	return raucInstallBundle(bundleFile)
 }

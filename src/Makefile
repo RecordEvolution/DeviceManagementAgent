@@ -7,6 +7,12 @@ build-arm6:
 build-arm5:
 	rm reagent-linux-arm-5 || true && ${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv5'" --targets=linux/arm-5 .
 
+build-ubuntu-armhf:
+	CC=arm-linux-gnueabihf-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
+
+build-ubuntu-aarch64:
+	CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 GOARM=7 go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
+
 build-arm64:
 	./build-arm64.sh
 
