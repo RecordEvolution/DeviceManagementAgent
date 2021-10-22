@@ -8,6 +8,7 @@ import (
 	"reagent/system"
 	"strings"
 	// "errors"
+        //"fmt"
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -35,29 +36,30 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	if err != nil {
 		return nil, err
 	}
-	newOSRelease := system.OSRelease{
-		Name:      osReleaseLatest[""],
+	latestOSRelease := system.OSRelease{
+	        Name:      osReleaseLatest[""],
 		Version:   osReleaseLatest["version"],
 		BuildTime: osReleaseLatest["buildtime"],
 	}
 
 	// merge both
 	osrelease := common.Dict{
-		"current": common.Dict{
+		"currentRelease": common.Dict{
 			"Name":      currentOSRelease.Name,
 			"Version":   currentOSRelease.Version,
 			"BuildTime": currentOSRelease.BuildTime,
 		},
-		"available": common.Dict{
-			"Name":      newOSRelease.Name,
-			"Version":   newOSRelease.Version,
-			"BuildTime": newOSRelease.BuildTime,
+		"latestRelease": common.Dict{
+			"Name":      latestOSRelease.Name,
+			"Version":   latestOSRelease.Version,
+			"BuildTime": latestOSRelease.BuildTime,
 		},
 	}
 
 	return &messenger.InvokeResult{
 		Arguments: []interface{}{osrelease},
 	}, nil
+
 }
 
 func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
