@@ -8,7 +8,7 @@ import (
 	"reagent/system"
 	"strings"
 	// "errors"
-        //"fmt"
+	//"fmt"
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -37,7 +37,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 		return nil, err
 	}
 	latestOSRelease := system.OSRelease{
-	        Name:      osReleaseLatest[""],
+		Name:      osReleaseLatest[""],
 		Version:   osReleaseLatest["version"],
 		BuildTime: osReleaseLatest["buildtime"],
 	}

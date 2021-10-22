@@ -211,10 +211,10 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 
 	log.Debug().Msg("ReswarmOS update-bundle download finished from " + updateURL + "...")
 
-        err = InstallOSUpdate()
-        if err != nil {
-          log.Error().Err(err).Msgf("Failed to install ReswarmOS bundle")
-        }
+	err = InstallOSUpdate()
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS bundle")
+	}
 
 	return nil
 }
