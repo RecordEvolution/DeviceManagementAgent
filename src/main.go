@@ -34,7 +34,6 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
 	}
 
-	system.BuildArch = "amd64"
 	if system.BuildArch == "" {
 		fmt.Println("The 'reagent/system.BuildArch' build flag was not included during the build of this version.")
 		os.Exit(1)
