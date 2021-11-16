@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
+	"github.com/rs/zerolog/log"
 )
 
 func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App) error {
@@ -31,6 +32,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
 	if err != nil {
 		if errdefs.IsImageNotFound(err) {
+			log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
 			pullErr := sm.pullApp(payload, app)
 			if pullErr != nil {
 				return pullErr

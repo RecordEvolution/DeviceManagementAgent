@@ -168,6 +168,7 @@ func (am *AppStore) UpdateRemoteAppState(ctx context.Context, app *common.App, s
 		"release_key":           app.ReleaseKey,
 		"request_update":        app.RequestUpdate,
 		"release_build":         app.ReleaseBuild,
+		"updateStatus":          app.UpdateStatus,
 	}}
 
 	_, err := am.messenger.Call(ctx, topics.SetActualAppOnDeviceState, payload, nil, nil, nil)
@@ -175,10 +176,13 @@ func (am *AppStore) UpdateRemoteAppState(ctx context.Context, app *common.App, s
 		return err
 	}
 
-	// The update has been sent, we know that the backend is aware now
-	if app.RequestUpdate {
-		app.RequestUpdate = false
+	app.StateLock.Lock()
+	// we successfully let the backend know we updated, we can now set this to false
+	if app.UpdateStatus == common.PENDING_REMOTE_CONFIRMATION {
+		app.UpdateStatus = common.COMPLETED
 	}
+
+	app.StateLock.Unlock()
 
 	return nil
 }

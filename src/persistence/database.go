@@ -193,7 +193,6 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
 	// note: this is only neccessary because we do not force users to update to the latest version
 	// The database will then check if this version is actually the latest version, if not it will request another update
-	requestedState.RequestUpdate = app.RequestUpdate
 	requestedState.CurrentState = newState
 	requestedState.RequestedState = app.RequestedState
 	requestedState.PresentVersion = app.Version
@@ -252,7 +251,6 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 	}
 
 	// neccessary to update remote app state (need to know e.g. who to publish updates to)
-	app.RequestUpdate = requestedState.RequestUpdate
 	app.RequestorAccountKey = requestedState.RequestorAccountKey
 	app.RequestedState = requestedState.RequestedState
 
@@ -294,7 +292,6 @@ func (ast *AppStateDatabase) GetAppStates() ([]*common.App, error) {
 				// neccessary to update remote app state (need to know e.g. who to publish updates to)
 				app.RequestorAccountKey = requestedState.RequestorAccountKey
 				app.RequestedState = requestedState.RequestedState
-				app.RequestUpdate = requestedState.RequestUpdate
 			}
 
 		}

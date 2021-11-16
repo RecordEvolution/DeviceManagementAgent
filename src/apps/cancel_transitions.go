@@ -36,3 +36,14 @@ func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common
 
 	return sm.setState(app, common.REMOVED)
 }
+
+func (sm *StateMachine) cancelUpdate(payload common.TransitionPayload, app *common.App) error {
+	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
+
+	sm.Container.CancelStream(pullID)
+
+	// let the backend know the update has been canceled
+	app.UpdateStatus = common.CANCELED
+
+	return sm.setState(app, common.PRESENT)
+}

@@ -156,7 +156,6 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			}
 
 			app.StateLock.Unlock()
-
 			if currentAppState != correctedAppState {
 				if updateRemote {
 					// notify the remote database of any changed states due to correction
@@ -190,6 +189,8 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			common.BUILDING,
 			common.PUBLISHING:
 			correctedAppState = common.REMOVED
+		case common.UPDATING:
+			correctedAppState = common.PRESENT
 		case common.STOPPING,
 			common.STARTING:
 			correctedAppState = appStateDeterminedByContainer

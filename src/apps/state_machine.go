@@ -130,7 +130,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.RUNNING:     sm.runApp,
 		},
 		common.UPDATING: {
-			common.PRESENT:     nil,
+			common.PRESENT:     sm.cancelUpdate,
 			common.REMOVED:     nil,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,

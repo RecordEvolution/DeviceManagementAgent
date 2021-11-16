@@ -7,6 +7,7 @@ import (
 // AppState states
 type AppState string
 type Stage string
+type UpdateStatus string
 
 func IsCancelableState(appState AppState) bool {
 	switch appState {
@@ -27,7 +28,7 @@ const (
 
 func GetCurrentLogType(currentState AppState) LogType {
 	var logType LogType
-	if currentState == DOWNLOADING {
+	if currentState == DOWNLOADING || currentState == UPDATING {
 		logType = PULL
 	} else if currentState == PUBLISHING {
 		logType = PUSH
@@ -124,6 +125,12 @@ const (
 	UPDATING    AppState = "UPDATING"
 	DELETING    AppState = "DELETING"
 	RUNNING     AppState = "RUNNING"
+)
+
+const (
+	COMPLETED                   UpdateStatus = "completed"
+	CANCELED                    UpdateStatus = "canceled"
+	PENDING_REMOTE_CONFIRMATION UpdateStatus = "pending_remote_confirmation"
 )
 
 const (

@@ -1,7 +1,6 @@
 package apps
 
 import (
-	"context"
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
@@ -160,8 +159,8 @@ func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayloa
 		return true
 	}
 
-	// cannot publish apps while offline
-	if payload.RequestedState == common.PUBLISHED {
+	// cannot publish, update apps while offline
+	if payload.RequestedState == common.PUBLISHED || (payload.RequestedState == common.PRESENT && payload.RequestUpdate) {
 		return true
 	}
 
@@ -341,71 +340,73 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
 
-		currentAppState := payload.CurrentState
-		containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)
+		// currentAppState := payload.CurrentState
+		// containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)
 
-		ctx := context.Background()
-		container, err := am.StateMachine.Container.GetContainerState(ctx, containerName)
-		if err != nil {
-			if !errdefs.IsContainerNotFound(err) {
-				return err
-			}
+		// ctx := context.Background()
+		// container, err := am.StateMachine.Container.GetContainerState(ctx, containerName)
+		// if err != nil {
+		// 	if !errdefs.IsContainerNotFound(err) {
+		// 		return err
+		// 	}
 
-			// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
-			var fullImageName string
-			if payload.Stage == common.DEV {
-				fullImageName = payload.RegistryImageName.Dev
-			} else if payload.Stage == common.PROD {
-				fullImageName = payload.RegistryImageName.Prod
-			}
+		// 	// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
+		// 	var fullImageName string
+		// 	if payload.Stage == common.DEV {
+		// 		fullImageName = payload.RegistryImageName.Dev
+		// 	} else if payload.Stage == common.PROD {
+		// 		fullImageName = payload.RegistryImageName.Prod
+		// 	}
 
-			images, err := am.StateMachine.Container.GetImages(ctx, fullImageName)
-			if err != nil {
-				return err
-			}
+		// 	images, err := am.StateMachine.Container.GetImages(ctx, fullImageName)
+		// 	if err != nil {
+		// 		return err
+		// 	}
 
-			var correctedAppState common.AppState
-			// no images were found (and no container) for this guy, so this guy is REMOVED
-			if len(images) == 0 {
-				if currentAppState == common.UNINSTALLED {
-					correctedAppState = common.UNINSTALLED
-				} else {
-					correctedAppState = common.REMOVED
-				}
-			} else {
-				// images were found for this guy, but no container, this means --> PRESENT
-				correctedAppState = common.PRESENT
-			}
+		// 	var correctedAppState common.AppState
+		// 	// no images were found (and no container) for this guy, so this guy is REMOVED
+		// 	if len(images) == 0 {
+		// 		if currentAppState == common.UNINSTALLED {
+		// 			correctedAppState = common.UNINSTALLED
+		// 		} else {
+		// 			correctedAppState = common.REMOVED
+		// 		}
+		// 	} else {
+		// 		// images were found for this guy, but no container, this means --> PRESENT
+		// 		correctedAppState = common.PRESENT
+		// 	}
 
-			if err != nil {
-				log.Error().Err(err).Msg("failed to notify app state")
-			}
+		// 	if err != nil {
+		// 		log.Error().Err(err).Msg("failed to notify app state")
+		// 	}
 
-			payload.CurrentState = correctedAppState
+		// 	payload.CurrentState = correctedAppState
 
-		} else {
+		// } else {
 
-			appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
-			if err != nil {
-				return err
-			}
+		// 	appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
+		// 	if err != nil {
+		// 		return err
+		// 	}
 
-			var correctedAppState common.AppState
-			switch currentAppState {
-			case common.DOWNLOADING,
-				common.TRANSFERING,
-				common.BUILDING,
-				common.PUBLISHING:
-				correctedAppState = common.REMOVED
-			case common.STOPPING,
-				common.STARTING:
-				correctedAppState = appStateDeterminedByContainer
-			default:
-				correctedAppState = appStateDeterminedByContainer
-			}
+		// 	var correctedAppState common.AppState
+		// 	switch currentAppState {
+		// 	case common.DOWNLOADING,
+		// 		common.TRANSFERING,
+		// 		common.BUILDING,
+		// 		common.PUBLISHING:
+		// 		correctedAppState = common.REMOVED
+		// 	case common.UPDATING:
+		// 		correctedAppState = common.PRESENT
+		// 	case common.STOPPING,
+		// 		common.STARTING:
+		// 		correctedAppState = appStateDeterminedByContainer
+		// 	default:
+		// 		correctedAppState = appStateDeterminedByContainer
+		// 	}
 
-			payload.CurrentState = correctedAppState
-		}
+		// 	payload.CurrentState = correctedAppState
+		// }
 
 		err = am.CreateOrUpdateApp(payload)
 		if err != nil {

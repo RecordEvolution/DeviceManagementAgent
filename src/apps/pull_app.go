@@ -69,12 +69,6 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return streamErr
 	}
 
-	if payload.NewestVersion != app.Version {
-		app.Version = payload.NewestVersion
-		app.ReleaseKey = payload.NewReleaseKey
-		app.RequestUpdate = true // set flag to make backend aware we updated
-	}
-
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
 	writeErr := sm.LogManager.Write(payload.ContainerName.Prod, pullMessage)
 	if writeErr != nil {

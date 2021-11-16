@@ -20,6 +20,7 @@ type App struct {
 	AppName             string
 	RequestedState      AppState
 	CurrentState        AppState
+	UpdateStatus        UpdateStatus
 	Stage               Stage
 	RequestUpdate       bool
 	ReleaseBuild        bool
