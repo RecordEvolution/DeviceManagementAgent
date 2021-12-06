@@ -305,7 +305,7 @@ func (system *System) Update(progressCallback func(increment uint64, currentByte
 	return UpdateResult{
 		CurrentVersion: currentVersion,
 		LatestVersion:  latestVersion,
-		DidUpdate:      latestVersion != currentVersion,
+		DidUpdate:      true,
 	}, nil
 }
 
@@ -316,27 +316,34 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 	}
 
 	currentVersion := GetVersion()
+
 	log.Info().Msgf("Should update? Latest: %s, Current: %s", latestVersion, currentVersion)
-	if latestVersion != currentVersion {
-		log.Info().Msgf("Agent not up to date, downloading: %s", latestVersion)
-		err = system.updateAgent(latestVersion, progressCallback)
-		if err != nil {
-			if errdefs.IsInProgress(err) {
-				return UpdateResult{
-					CurrentVersion: currentVersion,
-					LatestVersion:  latestVersion,
-					DidUpdate:      false,
-					InProgress:     true,
-				}, err
-			}
-			return UpdateResult{}, err
+	if latestVersion == currentVersion {
+		return UpdateResult{
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			DidUpdate:      false,
+		}, nil
+	}
+
+	log.Info().Msgf("Agent not up to date, downloading: %s", latestVersion)
+	err = system.updateAgent(latestVersion, progressCallback)
+	if err != nil {
+		if errdefs.IsInProgress(err) {
+			return UpdateResult{
+				CurrentVersion: currentVersion,
+				LatestVersion:  latestVersion,
+				DidUpdate:      false,
+				InProgress:     true,
+			}, err
 		}
+		return UpdateResult{}, err
 	}
 
 	return UpdateResult{
 		CurrentVersion: currentVersion,
 		LatestVersion:  latestVersion,
-		DidUpdate:      latestVersion != currentVersion,
+		DidUpdate:      true,
 	}, nil
 }
 

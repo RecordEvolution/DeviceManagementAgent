@@ -48,7 +48,7 @@ func (agent *Agent) OnConnect() error {
 			}
 
 			if updateResult.DidUpdate {
-				log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.CurrentVersion)
+				log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.LatestVersion)
 			}
 		})
 	}
