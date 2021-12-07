@@ -1,50 +1,26 @@
-build-arm7:
-	rm reagent-linux-arm-7 || true && ${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv7'" --targets=linux/arm-7 .
+.PHONY: build
 
-build-arm6:
-	rm reagent-linux-arm-6 || true && ${HOME}/go/bin/xgo -v  -ldflags "-X 'reagent/system.BuildArch=armv6'" --targets=linux/arm-6 .
+# ${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv5'" --targets=linux/arm-5 .
+# mv reagent-linux-arm-5 build/reagent-linux-armv5
+# ${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv6'" --targets=linux/arm-6 .
+# mv reagent-linux-arm-6 build/reagent-linux-armv6
 
-build-arm5:
-	rm reagent-linux-arm-5 || true && ${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv5'" --targets=linux/arm-5 .
+build:
+	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv5'" --targets=linux/arm-5 .
+	mv reagent-linux-arm-5 build/reagent-linux-armv5
+	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=armv6'" --targets=linux/arm-6 .
+	mv reagent-linux-arm-6 build/reagent-linux-armv6
+	node build.js --armv=7
+	node build.js --arch=arm64
+	node build.js --arch=amd64 --os=linux
+	node build.js --arch=amd64 --os=darwin
+	node build.js --arch=amd64 --os=windows
 
-build-ubuntu-armhf:
-	CC=arm-linux-gnueabihf-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
 
-build-ubuntu-aarch64:
-	CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 GOARM=7 go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
+rollout: build publish
 
-build-arm64:
-	./build-arm64.sh
-
-publish-arm64:
-	./publish-arm64.sh
-
-publish-arm7:
-	./publish-arm7.sh
-
-publish-arm6:
-	./publish-arm6.sh
-
-publish-arm5:
-	./publish-arm5.sh
-
-publish-amd64:
-	./publish-amd64.sh
-
-rollout-arm7:
-	make build-arm7 && make publish-arm7
-
-rollout-arm6:
-	make build-arm6 && make publish-arm6
-
-rollout-arm5:
-	make build-arm5 && make publish-arm5
-
-rollout-amd64:
-	./build-amd64.sh && ./publish-amd64.sh
-
-rollout-arm64:
-	./build-arm64.sh && ./publish-arm64.sh
+publish:
+	./publish.sh
 
 publish-version:
 	gsutil cp "system/version.txt" gs://re-agent
