@@ -300,7 +300,20 @@ func (docker *Docker) GetImage(ctx context.Context, fullImageName string, tag st
 }
 
 func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) error {
-	_, err := docker.client.ImagesPrune(ctx, filters.NewArgs())
+	filters := filters.NewArgs()
+
+	if options["all"] != nil {
+		all, ok := options["all"].(bool)
+		if !ok {
+			return errors.New("all value for container prune is not a boolean")
+		}
+		fmt.Println(all)
+		if all {
+			filters.Add("dangling", "false")
+		}
+	}
+
+	_, err := docker.client.ImagesPrune(ctx, filters)
 	return err
 }
 
