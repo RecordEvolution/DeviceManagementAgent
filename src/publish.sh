@@ -1,3 +1,5 @@
+#!/bin/bash
+
 array=($(ls build))
 version=`cat system/version.txt`
 

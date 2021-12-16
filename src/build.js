@@ -4,14 +4,9 @@ const builderArch = process.arch === "x64" ? "amd64" : process.arch;
 
 const flagMap = {
   cc: {
-    5: "armv5",
-    6: "armv6",
-    7: "armv7-a -fPIC",
-  },
-  cxx: {
-    5: "armv5",
-    6: "armv6",
-    7: "armv7-a -fPIC",
+    5: "-march=armv5",
+    6: "-march=armv6 -mfpu=vfp -mfloat-abi=hard",
+    7: "-march=armv7-a -fPIC",
   },
 };
 
@@ -19,10 +14,10 @@ let { arch, armv, bflags, cc, os, outputDir, v, ccgcc, ccgxx } = args;
 
 if (!arch) arch = "arm";
 if (!ccgcc && arch === "arm") {
-  ccgcc = "arm-unknown-linux-gnueabihf-gcc";
+  ccgcc = "arm-linux-gnueabihf-gcc";
 }
 if (!ccgxx && arch === "arm") {
-  ccgxx = "arm-unknown-linux-gnueabihf-g++";
+  ccgxx = "arm-linux-gnueabihf-g++";
 }
 if (!outputDir) {
   outputDir = "build/";
@@ -39,12 +34,11 @@ if (!cc) cc = true;
 const buildArgString = armv ? arch + "v" + armv : arch;
 bflags = [`reagent/system.BuildArch=${buildArgString}`];
 
-let options = `GOOS=${os} GOARCH=${arch}`;
+let options = `GOOS=${os} GOARCH=${arch} CGO_ENABLED=1`;
 if (cc && ccgcc && builderArch !== arch) {
-  options += ` CC=${ccgcc} CGO_ENABLED=1 CXX=${ccgxx} `;
+  options += ` CC=${ccgcc} `;
   if (armv) {
-    options += ` CGO_CFLAGS="-march=${flagMap.cc[armv]}" `;
-    options += ` CGO_CXXFLAGS="-march=${flagMap.cxx[armv]}" `;
+    options += ` CGO_CFLAGS="${flagMap.cc[armv]}" `;
   }
 }
 
@@ -59,7 +53,7 @@ if (os === "windows") {
   outputName += ".exe";
 }
 
-const command = `${options} go build -v -a -o ${outputDir}${outputName} -ldflags "${buildFlagString}" .`;
+const command = `${options} go build -v -a -o ${outputDir}${outputName} -ldflags "${buildFlagString} -extldflags=-static" .`;
 console.log(`Building ${outputName}...`);
 if (v) {
   console.log("Command:", command);
@@ -84,9 +78,20 @@ buildProcess.stderr.on("data", function (data) {
   }
 });
 
+buildProcess.on("error", function (data) {
+  const stringData = data.toString();
+  if (stringData.includes("\n")) {
+    process.stdout.write(stringData);
+  } else {
+    console.log(stringData);
+  }
+});
+
 buildProcess.on("exit", function (code) {
   if (code === 0) {
     console.log("Done!\n");
+  } else {
+    console.log("Exited with exit code:", code)
   }
 });
 
