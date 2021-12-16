@@ -33,6 +33,9 @@ const GetAgentLogs Topic = "get_agent_logs"
 const UpdateAgent Topic = "update_agent"
 const AgentProgress Topic = "agent_update_progress"
 
+const CmdExecutionPrefix Topic = "cmd_output"
+const ExecuteCommand Topic = "execute_cmd"
+
 const GetOSRelease Topic = "get_os_release"
 const GetOSUpdate Topic = "get_os_update"
 const GetOSUpdateProgress Topic = "os_update_progress"
