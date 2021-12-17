@@ -185,23 +185,22 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 
 	// Update RequestedAppState
 	requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
-	if err != nil {
-		app.StateLock.Unlock()
-		return "", err
-	}
+	if err == nil {
+		// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
+		// note: this is only neccessary because we do not force users to update to the latest version
+		// The database will then check if this version is actually the latest version, if not it will request another update
+		requestedState.CurrentState = newState
+		requestedState.RequestedState = app.RequestedState
+		requestedState.PresentVersion = app.Version
+		requestedState.ReleaseKey = app.ReleaseKey
 
-	// if true: when it reconnects, it can try to let the database know it is now a different version as the remote database
-	// note: this is only neccessary because we do not force users to update to the latest version
-	// The database will then check if this version is actually the latest version, if not it will request another update
-	requestedState.CurrentState = newState
-	requestedState.RequestedState = app.RequestedState
-	requestedState.PresentVersion = app.Version
-	requestedState.ReleaseKey = app.ReleaseKey
-
-	err = ast.UpsertRequestedStateChange(requestedState)
-	if err != nil {
-		app.StateLock.Unlock()
-		return "", err
+		err = ast.UpsertRequestedStateChange(requestedState)
+		if err != nil {
+			app.StateLock.Unlock()
+			return "", err
+		}
+	} else {
+		log.Debug().Msgf("Requested app state for %d (%s) was not found\n", app.AppKey, app.Stage)
 	}
 
 	timestamp := common.Timestamp(historyTimestamp)
