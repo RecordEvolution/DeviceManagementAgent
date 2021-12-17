@@ -105,9 +105,12 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 	}
 
 	rows, err := selectStatement.Query(app.AppKey, app.Stage)
+	if err != nil {
+		return "", err
+	}
 	hasResult := rows.Next() // only get first result since there should only be one
 
-	if hasResult == false {
+	if !hasResult {
 		err := rows.Close()
 		if err != nil {
 			app.StateLock.Unlock()
@@ -245,13 +248,11 @@ func (ast *AppStateDatabase) GetAppState(appKey uint64, stage common.Stage) (*co
 	}
 
 	requestedState, err := ast.GetRequestedState(app.AppKey, app.Stage)
-	if err != nil {
-		return &common.App{}, err
+	if err == nil {
+		// neccessary to update remote app state (need to know e.g. who to publish updates to)
+		app.RequestorAccountKey = requestedState.RequestorAccountKey
+		app.RequestedState = requestedState.RequestedState
 	}
-
-	// neccessary to update remote app state (need to know e.g. who to publish updates to)
-	app.RequestorAccountKey = requestedState.RequestorAccountKey
-	app.RequestedState = requestedState.RequestedState
 
 	return app, nil
 }
@@ -399,14 +400,13 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	}
 
 	hasResult := rows.Next() // only get first result
-
-	if hasResult == false {
+	if !hasResult {
 		err := rows.Close()
 		if err != nil {
 			return common.TransitionPayload{}, err
 		}
 
-		return common.TransitionPayload{}, fmt.Errorf("No requested state found for app_key: %d with stage: %s", aKey, aStage)
+		return common.TransitionPayload{}, fmt.Errorf("no requested state found for app_key: %d with stage: %s", aKey, aStage)
 	}
 
 	var appName string
@@ -609,13 +609,13 @@ func (ast *AppStateDatabase) GetAppLogHistory(appName string, appKey uint64, sta
 	}
 
 	hasResult := rows.Next() // only get first result
-	if hasResult == false {
+	if !hasResult {
 		err := rows.Close()
 		if err != nil {
 			return nil, err
 		}
 
-		return nil, fmt.Errorf("No logs found for %d (%s) ", appKey, stage)
+		return nil, fmt.Errorf("no logs found for %d (%s) ", appKey, stage)
 	}
 
 	var logsString string
@@ -648,15 +648,18 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus messenger.DeviceStatus,
 	defer selectStatement.Close()
 
 	rows, err := selectStatement.Query()
+	if err != nil {
+		return err
+	}
 	hasResult := rows.Next() // only get first result
 
-	if hasResult == false {
+	if !hasResult {
 		err := rows.Close()
 		if err != nil {
 			return err
 		}
 
-		return fmt.Errorf("No device state to update")
+		return fmt.Errorf("no device state to update")
 	}
 
 	var curInterfaceType string
@@ -672,7 +675,7 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus messenger.DeviceStatus,
 			return err
 		}
 
-		return fmt.Errorf("The current interface is already %s", curInterfaceType)
+		return fmt.Errorf("the current interface is already %s", curInterfaceType)
 	}
 
 	if curDeviceStatus == string(newStatus) {
@@ -681,7 +684,7 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus messenger.DeviceStatus,
 			return err
 		}
 
-		return fmt.Errorf("The device status is already %s", curDeviceStatus)
+		return fmt.Errorf("the device status is already %s", curDeviceStatus)
 	}
 
 	err = rows.Close()
