@@ -209,18 +209,14 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 		return err
 	}
 
-	log.Debug().Msg("ReswarmOS update-bundle download finished from " + updateURL + "...")
-
-	err = InstallOSUpdate()
-	if err != nil {
-		log.Error().Err(err).Msgf("Failed to install ReswarmOS bundle")
-	}
+        //log.Info().Msgf(
+	log.Debug().Msg("ReswarmOS update bundle download finished from " + updateURL + "...")
 
 	return nil
 }
 
 // InstallOSUpdate installs the latest update-bundle available on the device
-func InstallOSUpdate() (err error) {
+func InstallOSUpdate(progressCallback func(operationName string, progressPercent float64)) error {
 
 	// find update-bundle installer file
 	_, updateFile, err := getOSUpdateTags()
@@ -229,22 +225,27 @@ func InstallOSUpdate() (err error) {
 	}
 	bundleFile := "/tmp/" + updateFile
 
-	log.Debug().Msg("installing ReswarmOS update-bundle " + bundleFile)
+	log.Debug().Msg("installing ReswarmOS update bundle " + bundleFile)
 
-	return raucInstallBundle(bundleFile)
+	err = raucInstallBundle(bundleFile, progressCallback)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle")
+	}
+
+	return nil
 }
 
-func GetInstallOSUpdateOperation() (operation string, err error) {
-	return raucGetOperation()
-}
-
-func GetInstallOSUpdateError() (message string, err error) {
-	return raucGetLastError()
-}
-
-func GetInstallOSUpdateProgress() (percentage int32, messsage string, nestingDepth int32, err error) {
-	return raucGetProgress()
-}
+//func GetInstallOSUpdateOperation() (operation string, err error) {
+//	return raucGetOperation()
+//}
+//
+//func GetInstallOSUpdateError() (message string, err error) {
+//	return raucGetLastError()
+//}
+//
+//func GetInstallOSUpdateProgress() (percentage int32, messsage string, nestingDepth int32, err error) {
+//	return raucGetProgress()
+//}
 
 // ------------------------------------------------------------------------- //
 

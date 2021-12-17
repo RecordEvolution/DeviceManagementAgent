@@ -32,8 +32,16 @@ func BuildAgentUpdateProgress(serialNumber string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.AgentProgress)
 }
 
-func BuildOSUpdateProgress(serialNumber string) string {
-	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.GetOSUpdateProgress)
+func BuildDownloadOSUpdateProgress(serialNumber string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.DownloadOSUpdateProgress)
+}
+
+func BuildInstallOSUpdateProgress(serialNumber string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.InstallOSUpdateProgress)
+}
+
+func BuildPerformOSUpdateProgress(serialNumber string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.PerformOSUpdateProgress)
 }
 
 const topicPrefix = "re.mgmt"

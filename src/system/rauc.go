@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // usage of D-Bus API recommended!!
@@ -51,7 +52,7 @@ type raucDBus struct {
 
 // ------------------------------------------------------------------------- //
 
-// NewRaucDBus initializes a new SystemBus and an DBus Object for RAUC
+// NewRaucDBus initializes a new SystemBus and a DBus Object for RAUC
 func NewRaucDBus() (raucDBus, error) {
 
 	raucbus := raucDBus{}
@@ -65,28 +66,80 @@ func NewRaucDBus() (raucDBus, error) {
 	// https://github.com/godbus/dbus/blob/v4.1.0/conn.go#L419
 	raucbus.object = raucbus.conn.Object(raucDBusInterface, raucDBusObjectPath)
 
+        // subscribe DBus object to "Complete" signal
+        raucbus.conn.AddMatchSignal(
+          dbus.WithMatchInterface(raucDBusMethodBase),
+          dbus.WithMatchMember("Completed"),
+          dbus.WithMatchObjectPath(raucbus.object.Path()))
+
 	return raucbus, nil
 }
 
 // ------------------------------------------------------------------------- //
 // methods
 
-func raucInstallBundle(bundlePath string) (err error) {
+func raucInstallBundle(bundlePath string, progressCallback func(operationName string, progressPercent float64)) (err error) {
 
-	// get DBus instance connected to RAUC daemon
+        log.Debug().Msg("raucInstallBundle: " + bundlePath)
+
+        // get DBus instance connected to RAUC daemon
 	raucbus, err := NewRaucDBus()
 	if err != nil {
 		return errors.New("failed to set up new RAUC DBus instance")
 	}
+        defer raucbus.conn.Close()
 
-	opts := map[string]interface{}{"ignore-compatible": false}
+        // https://github.com/godbus/dbus/blob/v4.1.0/conn.go#L560
+	completedChannel := make(chan *dbus.Signal, 60)
+	raucbus.conn.Signal(completedChannel)
+        log.Debug().Msg("raucInstallBundle: " + "setup Channel")
+
+	opts := map[string]interface{}{ "ignore-compatible": false }
 	call := raucbus.object.Call(raucDBusMethodInstall, 0, bundlePath, opts)
+        log.Debug().Msg("raucInstallBundle: " + "launched install...")
 
 	// https://pkg.go.dev/github.com/godbus/dbus#Call
 	if call.Err != nil {
 		fmt.Printf(call.Err.Error() + "\n")
 		return errors.New("D-Bus call to " + raucDBusMethodInstall + " failed: " + call.Err.Error())
 	}
+
+        // wait for complete signal while reading from channel
+        for {
+          log.Debug().Msg("raucInstallBundle: " + "loop Channel")
+          signal, ok := <-completedChannel
+	  if !ok {
+            return errors.New("could not retrieve channel from RAUC DBus")
+          }
+          log.Debug().Msg("raucInstallBundle: " + "retrieved Channel" + "signal.Name " + signal.Name)
+
+          // check for error code and evtl. retrieve LastError
+          var code int32
+	  err = dbus.Store(signal.Body, &code)
+	  if err != nil {
+            return err
+	  }
+          if code != 0 {
+            errorString, err := raucGetLastError()
+	    if err != nil {
+	      return err
+	    }
+
+	    return errors.New(errorString)
+	  }
+
+          // check progress
+          percentage,message,nestingDepth, err := raucGetProgress()
+          if err != nil {
+            log.Debug().Msg("raucInstallBundle: " + "failed to get progress: " + err.Error())
+          }
+          log.Debug().Msg("raucInstallBundle: " + "progress: " + fmt.Sprintf("%s - %s - %s",percentage,message,nestingDepth))
+
+          if signal.Name == raucDBusSignalFinish {
+            log.Debug().Msg("raucInstallBundle: " + "got final signal " + signal.Name)
+            return nil
+          }
+        }
 
 	return nil
 }
