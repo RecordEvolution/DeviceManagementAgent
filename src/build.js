@@ -53,7 +53,7 @@ if (os === "windows") {
   outputName += ".exe";
 }
 
-const command = `${options} go build -v -a -o ${outputDir}${outputName} -ldflags "${buildFlagString} -extldflags=-static" .`;
+const command = `${options} go build -v -a -o ${outputDir}${outputName} -ldflags "${buildFlagString}" .`;
 console.log(`Building ${outputName}...`);
 if (v) {
   console.log("Command:", command);
