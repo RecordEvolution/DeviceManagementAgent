@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
@@ -130,6 +131,8 @@ func GetOSReleaseCurrent() (map[string]string, error) {
 		}
 	}
 
+	log.Debug().Msg("GetOSReleaseCurrent(): " + common.DictAsString(dict))
+
 	return dict, nil
 }
 
@@ -143,6 +146,8 @@ func GetOSReleaseLatest() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	log.Debug().Msg("GetOSReleaseLatest(): " + common.DictAsString(dict))
 
 	return dict, nil
 }
@@ -186,6 +191,8 @@ func getOSUpdateTags() (string, string, error) {
 	updateURLSplit := strings.Split(updateURL, "/")
 	updateFile := updateURLSplit[len(updateURLSplit)-1]
 
+	log.Debug().Msg("getOSUpdateTags(): " + updateInfo + " : " + updateURL + ":" + updateFile)
+
 	return updateURL, updateFile, nil
 }
 
@@ -209,7 +216,6 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 		return err
 	}
 
-        //log.Info().Msgf(
 	log.Debug().Msg("ReswarmOS update bundle download finished from " + updateURL + "...")
 
 	return nil
