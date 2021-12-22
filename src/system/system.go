@@ -222,7 +222,7 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 }
 
 // InstallOSUpdate installs the latest update-bundle available on the device
-func InstallOSUpdate(progressCallback func(operationName string, progressPercent float64)) error {
+func InstallOSUpdate(progressCallback func(operationName string, progressPercent uint64)) error {
 
 	// find update-bundle installer file
 	_, updateFile, err := getOSUpdateTags()

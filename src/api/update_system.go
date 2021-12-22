@@ -91,7 +91,7 @@ func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messen
 func (ex *External) installOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 
 	// prepare callback monitoring progress of OS installation
-	progressCallback := func(operationName string, progressPercent float64) {
+	progressCallback := func(operationName string, progressPercent uint64) {
 		progress := common.Dict{
 			"operationName":   operationName,
 			"progressPercent": progressPercent,

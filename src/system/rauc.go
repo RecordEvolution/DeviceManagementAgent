@@ -3,6 +3,7 @@ package system
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/rs/zerolog/log"
@@ -78,7 +79,7 @@ func NewRaucDBus() (raucDBus, error) {
 // ------------------------------------------------------------------------- //
 // methods
 
-func raucInstallBundle(bundlePath string, progressCallback func(operationName string, progressPercent float64)) (err error) {
+func raucInstallBundle(bundlePath string, progressCallback func(operationName string, progressPercent uint64)) (err error) {
 
 	log.Debug().Msg("raucInstallBundle: " + bundlePath)
 
@@ -104,10 +105,11 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 		return errors.New("D-Bus call to " + raucDBusMethodInstall + " failed: " + call.Err.Error())
 	}
 
+	// launch lightweight thread to track/publish progress of bundle installation
+	go raucReportProgress(&raucbus, progressCallback)
+
 	// wait for complete signal while reading from channel
 	for {
-
-		log.Debug().Msg("raucInstallBundle: " + "loop Channel")
 		signal, ok := <-completedChannel
 		if !ok {
 			return errors.New("could not retrieve channel from RAUC DBus")
@@ -129,23 +131,6 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 			return errors.New(errorString)
 		}
 
-		// get current operation name
-		currentOprt, err := raucGetOperation(&raucbus)
-		if err != nil {
-			return err
-		}
-		log.Debug().Msg("raucInstallBundle: " + "current operation: " + currentOprt)
-
-		// check progress
-		percentage, message, nestingDepth, err := raucGetProgress(&raucbus)
-		if err != nil {
-			return err
-		}
-		log.Debug().Msg("raucInstallBundle: " + fmt.Sprintf("%s - %s - %s", percentage, message, nestingDepth))
-
-		// publish progress
-		progressCallback(message, float64(percentage))
-
 		// got signal
 		if signal.Name == raucDBusSignalFinish {
 			log.Debug().Msg("raucInstallBundle: " + "got final signal " + signal.Name)
@@ -154,6 +139,22 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 	}
 
 	return nil
+}
+
+func raucReportProgress(raucbus *raucDBus, progressCallback func(operationName string, progressPercent uint64)) {
+
+	var completed uint64 = 0
+	for completed < 100 {
+		pctng, mssg, _, err := raucGetProgress(raucbus)
+		completed = uint64(pctng)
+		if err != nil {
+			log.Debug().Msg("raucInstallBundle: raucReportProgress: " + err.Error())
+		}
+		progressCallback(mssg, uint64(pctng))
+		//log.Debug().Msg("raucInstallBundle: raucReportProgress " + fmt.Sprintf("%s - %s - %s",pctng,mssg,nstng) )
+		time.Sleep(200 * time.Millisecond)
+	}
+	log.Debug().Msg("raucInstallBundle: raucReportProgress: " + "done")
 }
 
 // ------------------------------------------------------------------------- //
