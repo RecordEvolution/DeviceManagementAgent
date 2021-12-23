@@ -69,11 +69,8 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 
 		topics.GetOSRelease:     ex.getOSReleaseHandler,
 		topics.DownloadOSUpdate: ex.downloadOSUpdateHandler,
-		//topics.DownloadOSUpdateProgress: ex.downloadOSUpdateProgressHandler,
-		topics.InstallOSUpdate: ex.installOSUpdateHandler,
-		//topics.InstallOSUpdateProgress:  ex.installOSUpdateProgressHandler,
-		topics.PerformOSUpdate: ex.performOSUpdateHandler,
-		//topics.PerformOSUpdateProgress:  ex.performOSUpdateProgressHandler,
+		topics.InstallOSUpdate:  ex.installOSUpdateHandler,
+		topics.PerformOSUpdate:  ex.performOSUpdateHandler,
 
 		topics.ExecuteCommand: ex.codeExecutionHandler,
 	}
