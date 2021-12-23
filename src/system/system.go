@@ -232,7 +232,7 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 
 	err = raucInstallBundle(bundleFile, progressCallback)
 	if err != nil {
-		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle")
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle\n")
 	}
 
 	return nil
