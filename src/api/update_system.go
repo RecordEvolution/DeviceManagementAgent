@@ -119,35 +119,3 @@ func (ex *External) performOSUpdateHandler(ctx context.Context, response messeng
 		Arguments: []interface{}{},
 	}, nil
 }
-
-//func (ex *External) downloadOSUpdateProgressHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-//
-//        return &messenger.InvokeResult{
-//		Arguments: []interface{}{},
-//	}, nil
-//}
-//
-//func (ex *External) installOSUpdateProgressHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-//
-//	prog, mess, nest, err := system.GetInstallOSUpdateProgress()
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	updateProgress := common.Dict{
-//		"percentage":   prog,
-//		"message":      mess,
-//		"nestingDepth": nest,
-//	}
-//
-//	return &messenger.InvokeResult{
-//		Arguments: []interface{}{updateProgress},
-//	}, nil
-//}
-//
-//func (ex *External) performOSUpdateProgressHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-//
-//        return &messenger.InvokeResult{
-//		Arguments: []interface{}{},
-//	}, nil
-//}

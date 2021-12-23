@@ -184,11 +184,3 @@ func PrettyFormat(data interface{}) (string, error) {
 
 	return string(p), nil
 }
-
-func DictAsString(myDict map[string]string) string {
-	var dictstr string
-	for key, val := range myDict {
-		dictstr += fmt.Sprintf("%s=%s,", key, val)
-	}
-	return dictstr
-}

@@ -3,6 +3,7 @@ package system
 import (
 	"errors"
 	"fmt"
+	"reagent/safe"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -51,8 +52,6 @@ type raucDBus struct {
 	object dbus.BusObject
 }
 
-// ------------------------------------------------------------------------- //
-
 // NewRaucDBus initializes a new SystemBus and a DBus Object for RAUC
 func NewRaucDBus() (raucDBus, error) {
 
@@ -76,12 +75,9 @@ func NewRaucDBus() (raucDBus, error) {
 	return raucbus, nil
 }
 
-// ------------------------------------------------------------------------- //
-// methods
-
 func raucInstallBundle(bundlePath string, progressCallback func(operationName string, progressPercent uint64)) (err error) {
 
-	log.Debug().Msg("raucInstallBundle: " + bundlePath)
+	log.Debug().Msgf("raucInstallBundle: %s", bundlePath)
 
 	// get DBus instance connected to RAUC daemon
 	raucbus, err := NewRaucDBus()
@@ -93,20 +89,21 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 	// https://github.com/godbus/dbus/blob/v4.1.0/conn.go#L560
 	completedChannel := make(chan *dbus.Signal, 60)
 	raucbus.conn.Signal(completedChannel)
-	log.Debug().Msg("raucInstallBundle: " + "setup Channel")
+	log.Debug().Msg("raucInstallBundle: Setup Channel")
 
 	opts := map[string]interface{}{"ignore-compatible": false}
 	call := raucbus.object.Call(raucDBusMethodInstall, 0, bundlePath, opts)
-	log.Debug().Msg("raucInstallBundle: " + "launched install...")
+	log.Debug().Msg("raucInstallBundle: launched install...")
 
 	// https://pkg.go.dev/github.com/godbus/dbus#Call
 	if call.Err != nil {
-		fmt.Printf(call.Err.Error() + "\n")
-		return errors.New("D-Bus call to " + raucDBusMethodInstall + " failed: " + call.Err.Error())
+		return fmt.Errorf("D-Bus call to %s failed: %s", raucDBusMethodInstall, call.Err.Error())
 	}
 
 	// launch lightweight thread to track/publish progress of bundle installation
-	go raucReportProgress(&raucbus, progressCallback)
+	safe.Go(func() {
+		raucReportProgress(&raucbus, progressCallback)
+	})
 
 	// wait for complete signal while reading from channel
 	for {
@@ -114,7 +111,7 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 		if !ok {
 			return errors.New("could not retrieve channel from RAUC DBus")
 		}
-		log.Debug().Msg("raucInstallBundle: " + "retrieved Channel" + "signal.Name " + signal.Name)
+		log.Debug().Msgf("raucInstallBundle: retrieved channel, signal name: %s", signal.Name)
 
 		// check for error code and evtl. retrieve LastError
 		var code int32
@@ -133,41 +130,27 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 
 		// got signal
 		if signal.Name == raucDBusSignalFinish {
-			log.Debug().Msg("raucInstallBundle: " + "got final signal " + signal.Name)
+			log.Debug().Msgf("raucInstallBundle: got final signal %s", signal.Name)
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func raucReportProgress(raucbus *raucDBus, progressCallback func(operationName string, progressPercent uint64)) {
-
 	var completed uint64 = 0
 	for completed < 100 {
 		pctng, mssg, _, err := raucGetProgress(raucbus)
 		completed = uint64(pctng)
 		if err != nil {
-			log.Debug().Msg("raucInstallBundle: raucReportProgress: " + err.Error())
+			log.Error().Err(err).Msg("raucInstallBundle: raucReportProgress")
 		}
 		progressCallback(mssg, uint64(pctng))
-		//log.Debug().Msg("raucInstallBundle: raucReportProgress " + fmt.Sprintf("%s - %s - %s",pctng,mssg,nstng) )
 		time.Sleep(200 * time.Millisecond)
 	}
-	log.Debug().Msg("raucInstallBundle: raucReportProgress: " + "done")
+	log.Debug().Msg("raucInstallBundle: raucReportProgress: done")
 }
 
-// ------------------------------------------------------------------------- //
-// properties
-
 func raucGetOperation(raucbus *raucDBus) (operation string, err error) {
-
-	// get DBus instance connected to RAUC daemon
-	//raucbus, err := NewRaucDBus()
-	//if err != nil {
-	//	return "", errors.New("failed to set up new RAUC DBus instance")
-	//}
-
 	oper, err := raucbus.object.GetProperty(raucDBusPropertyOperation)
 	if err != nil {
 		return "", err
@@ -177,13 +160,6 @@ func raucGetOperation(raucbus *raucDBus) (operation string, err error) {
 }
 
 func raucGetLastError(raucbus *raucDBus) (errormessage string, err error) {
-
-	// get DBus instance connected to RAUC daemon
-	//raucbus, err := NewRaucDBus()
-	//if err != nil {
-	//	return "", errors.New("failed to set up new RAUC DBus instance")
-	//}
-
 	variant, err := raucbus.object.GetProperty(raucDBusPropertyLastError)
 	if err != nil {
 		return "", err
@@ -193,17 +169,10 @@ func raucGetLastError(raucbus *raucDBus) (errormessage string, err error) {
 }
 
 func raucGetProgress(raucbus *raucDBus) (percentage int32, message string, nestingDepth int32, err error) {
-
-	// get DBus instance connected to RAUC daemon
-	//raucbus, err := NewRaucDBus()
-	//if err != nil {
-	//	return 0, "", 0, errors.New("failed to set up new RAUC DBus instance")
-	//}
-
 	// call the DBus
 	variant, err := raucbus.object.GetProperty(raucDBusPropertyProgress)
 	if err != nil {
-		return 0, "", 0, fmt.Errorf("RAUC: failed to GetPropertyProgress: %v", err)
+		return 0, "", 0, fmt.Errorf("RAUC: failed to GetPropertyProgress: %+v", err)
 	}
 
 	// process response
@@ -219,10 +188,8 @@ func raucGetProgress(raucbus *raucDBus) (percentage int32, message string, nesti
 	var response progressResponse
 	err = dbus.Store(src, &response)
 	if err != nil {
-		return 0, "", 0, fmt.Errorf("RAUC: failed to store result of GetPropertyProgress: %v", err)
+		return 0, "", 0, fmt.Errorf("RAUC: failed to store result of GetPropertyProgress: %+v", err)
 	}
 
 	return response.Percentage, response.Message, response.NestingDepth, nil
 }
-
-// ------------------------------------------------------------------------- //

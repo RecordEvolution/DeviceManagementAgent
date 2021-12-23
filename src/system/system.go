@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
@@ -103,8 +102,6 @@ func GetVersion() string {
 	return version
 }
 
-// ------------------------------------------------------------------------- //
-
 func GetOSReleaseCurrent() (map[string]string, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release")
 	if err != nil {
@@ -131,7 +128,7 @@ func GetOSReleaseCurrent() (map[string]string, error) {
 		}
 	}
 
-	log.Debug().Msg("GetOSReleaseCurrent(): " + common.DictAsString(dict))
+	log.Debug().Msgf("GetOSReleaseCurrent(): %+v\n", dict)
 
 	return dict, nil
 }
@@ -147,7 +144,7 @@ func GetOSReleaseLatest() (map[string]string, error) {
 		return nil, err
 	}
 
-	log.Debug().Msg("GetOSReleaseLatest(): " + common.DictAsString(dict))
+	log.Debug().Msgf("GetOSReleaseLatest(): %+v\n", dict)
 
 	return dict, nil
 }
@@ -191,7 +188,7 @@ func getOSUpdateTags() (string, string, error) {
 	updateURLSplit := strings.Split(updateURL, "/")
 	updateFile := updateURLSplit[len(updateURLSplit)-1]
 
-	log.Debug().Msg("getOSUpdateTags(): " + updateInfo + " : " + updateURL + ":" + updateFile)
+	log.Debug().Msgf("getOSUpdateTags(): %s : %s : %s\n", updateInfo, updateURL, updateFile)
 
 	return updateURL, updateFile, nil
 }
@@ -240,20 +237,6 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 
 	return nil
 }
-
-//func GetInstallOSUpdateOperation() (operation string, err error) {
-//	return raucGetOperation()
-//}
-//
-//func GetInstallOSUpdateError() (message string, err error) {
-//	return raucGetLastError()
-//}
-//
-//func GetInstallOSUpdateProgress() (percentage int32, messsage string, nestingDepth int32, err error) {
-//	return raucGetProgress()
-//}
-
-// ------------------------------------------------------------------------- //
 
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
