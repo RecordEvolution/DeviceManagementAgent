@@ -102,8 +102,6 @@ func GetVersion() string {
 	return version
 }
 
-// ------------------------------------------------------------------------- //
-
 func GetOSReleaseCurrent() (map[string]string, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release")
 	if err != nil {
@@ -130,6 +128,8 @@ func GetOSReleaseCurrent() (map[string]string, error) {
 		}
 	}
 
+	log.Debug().Msgf("GetOSReleaseCurrent(): %+v\n", dict)
+
 	return dict, nil
 }
 
@@ -143,6 +143,8 @@ func GetOSReleaseLatest() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	log.Debug().Msgf("GetOSReleaseLatest(): %+v\n", dict)
 
 	return dict, nil
 }
@@ -186,6 +188,8 @@ func getOSUpdateTags() (string, string, error) {
 	updateURLSplit := strings.Split(updateURL, "/")
 	updateFile := updateURLSplit[len(updateURLSplit)-1]
 
+	log.Debug().Msgf("getOSUpdateTags(): %s : %s : %s\n", updateInfo, updateURL, updateFile)
+
 	return updateURL, updateFile, nil
 }
 
@@ -209,18 +213,13 @@ func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, to
 		return err
 	}
 
-	log.Debug().Msg("ReswarmOS update-bundle download finished from " + updateURL + "...")
-
-	err = InstallOSUpdate()
-	if err != nil {
-		log.Error().Err(err).Msgf("Failed to install ReswarmOS bundle")
-	}
+	log.Debug().Msg("ReswarmOS update bundle download finished from " + updateURL + "...")
 
 	return nil
 }
 
 // InstallOSUpdate installs the latest update-bundle available on the device
-func InstallOSUpdate() (err error) {
+func InstallOSUpdate(progressCallback func(operationName string, progressPercent uint64)) error {
 
 	// find update-bundle installer file
 	_, updateFile, err := getOSUpdateTags()
@@ -229,24 +228,15 @@ func InstallOSUpdate() (err error) {
 	}
 	bundleFile := "/tmp/" + updateFile
 
-	log.Debug().Msg("installing ReswarmOS update-bundle " + bundleFile)
+	log.Debug().Msg("installing ReswarmOS update bundle " + bundleFile)
 
-	return raucInstallBundle(bundleFile)
+	err = raucInstallBundle(bundleFile, progressCallback)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle\n")
+	}
+
+	return nil
 }
-
-func GetInstallOSUpdateOperation() (operation string, err error) {
-	return raucGetOperation()
-}
-
-func GetInstallOSUpdateError() (message string, err error) {
-	return raucGetLastError()
-}
-
-func GetInstallOSUpdateProgress() (percentage int32, messsage string, nestingDepth int32, err error) {
-	return raucGetProgress()
-}
-
-// ------------------------------------------------------------------------- //
 
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL

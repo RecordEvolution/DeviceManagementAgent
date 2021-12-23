@@ -62,7 +62,7 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 
 }
 
-func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 
 	// prepare callback monitoring progress of download
 	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {
@@ -73,7 +73,7 @@ func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.R
 		}
 
 		serialNumber := ex.Config.ReswarmConfig.SerialNumber
-		topic := common.BuildOSUpdateProgress(serialNumber)
+		topic := common.BuildDownloadOSUpdateProgress(serialNumber)
 		ex.LogMessenger.Publish(topics.Topic(topic), []interface{}{progress}, nil, nil)
 	}
 
@@ -90,7 +90,20 @@ func (ex *External) getOSUpdateHandler(ctx context.Context, response messenger.R
 
 func (ex *External) installOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 
-	err := system.InstallOSUpdate()
+	// prepare callback monitoring progress of OS installation
+	progressCallback := func(operationName string, progressPercent uint64) {
+		progress := common.Dict{
+			"operationName":   operationName,
+			"progressPercent": progressPercent,
+		}
+
+		serialNumber := ex.Config.ReswarmConfig.SerialNumber
+		topic := common.BuildInstallOSUpdateProgress(serialNumber)
+		ex.LogMessenger.Publish(topics.Topic(topic), []interface{}{progress}, nil, nil)
+	}
+
+	// start installing OS bundle...
+	err := system.InstallOSUpdate(progressCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -100,20 +113,9 @@ func (ex *External) installOSUpdateHandler(ctx context.Context, response messeng
 	}, nil
 }
 
-func (ex *External) getInstallOSUpdateProgressHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
-	prog, mess, nest, err := system.GetInstallOSUpdateProgress()
-	if err != nil {
-		return nil, err
-	}
-
-	updateProgress := common.Dict{
-		"percentage":   prog,
-		"message":      mess,
-		"nestingDepth": nest,
-	}
+func (ex *External) performOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 
 	return &messenger.InvokeResult{
-		Arguments: []interface{}{updateProgress},
+		Arguments: []interface{}{},
 	}, nil
 }

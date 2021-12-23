@@ -10,6 +10,12 @@ build:
 	true || mv reagent-darwin-10.12-amd64 build/reagent-darwin-amd64
 	node build.js --arch=amd64 --os=windows
 
+GCCARM7 := arm-linux-gnueabihf-gcc
+ENVARM7 := CC=$(GCCARM7) CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7
+
+build-arm7:
+	$(ENVARM7) go get .
+	$(ENVARM7) go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
 
 rollout: build publish publish-version
 
