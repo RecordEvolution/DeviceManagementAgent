@@ -111,7 +111,7 @@ func raucInstallBundle(bundlePath string, progressCallback func(operationName st
 		if !ok {
 			return errors.New("could not retrieve channel from RAUC DBus")
 		}
-		log.Debug().Msgf("raucInstallBundle: retrieved channel, signal name: %s", signal.Name)
+		log.Debug().Msgf("raucInstallBundle: retrieved channel, signal name: %s\n", signal.Name)
 
 		// check for error code and evtl. retrieve LastError
 		var code int32
