@@ -83,9 +83,7 @@ func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messen
 		return nil, err
 	}
 
-	return &messenger.InvokeResult{
-		Arguments: []interface{}{},
-	}, nil
+	return &messenger.InvokeResult{}, nil
 }
 
 func (ex *External) installOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -108,14 +106,5 @@ func (ex *External) installOSUpdateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	return &messenger.InvokeResult{
-		Arguments: []interface{}{},
-	}, nil
-}
-
-func (ex *External) performOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
-	return &messenger.InvokeResult{
-		Arguments: []interface{}{},
-	}, nil
+	return &messenger.InvokeResult{}, nil
 }
