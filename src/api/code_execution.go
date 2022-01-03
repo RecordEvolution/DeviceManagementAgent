@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"reagent/common"
 	"reagent/messenger"
@@ -28,6 +29,11 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 		return nil, fmt.Errorf("cmd param should be a string")
 	}
 
+	blocking, ok := argsDict["blocking"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("blocking param should be a boolean")
+	}
+
 	cmdArgsInterface, ok := argsDict["args"].([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("args param should be an array of primitive values")
@@ -41,17 +47,30 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 		}
 	}
 
-	cmdArgs := make([]string, len(cmdArgsInterface))
+	var cmdArgs []string
 	for _, arg := range cmdArgsInterface {
 		cmdArgs = append(cmdArgs, fmt.Sprint(arg))
 	}
 
 	cmd := exec.Command(cmdName, cmdArgs...)
-	cmdStdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
+
+	var err error
+	var cmdStdout io.ReadCloser
+
+	if (blocking) {
+		output, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+
+		return &messenger.InvokeResult{Arguments: []interface{}{string(output)}}, nil
+	} else {
+		cmdStdout, err = cmd.StdoutPipe()
+		if err != nil {
+			return nil, err
+		}
+		cmd.Stderr = cmd.Stdout
 	}
-	cmd.Stderr = cmd.Stdout
 
 	go func() {
 		time.Sleep(time.Millisecond * time.Duration(commandTimeout))
