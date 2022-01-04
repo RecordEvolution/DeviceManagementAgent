@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
@@ -307,7 +308,6 @@ func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) erro
 		if !ok {
 			return errors.New("all value for container prune is not a boolean")
 		}
-		fmt.Println(all)
 		if all {
 			filters.Add("dangling", "false")
 		}
@@ -315,6 +315,17 @@ func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) erro
 
 	_, err := docker.client.ImagesPrune(ctx, filters)
 	return err
+}
+
+func (docker *Docker) PruneSystem(ctx context.Context) (string, error) {
+	cmd := exec.Command("docker", "system", "prune", "-a", "-f")
+	cmd.Stderr = cmd.Stdout
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
 }
 
 // ListImages lists all images available on the host.

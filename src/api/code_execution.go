@@ -34,9 +34,12 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 		return nil, fmt.Errorf("blocking param should be a boolean")
 	}
 
-	cmdArgsInterface, ok := argsDict["args"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("args param should be an array of primitive values")
+	var cmdArgsInterface []interface{}
+	if argsDict["args"] != nil {
+		cmdArgsInterface, ok = argsDict["args"].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("args param should be an array of primitive values")
+		}
 	}
 
 	commandTimeout := uint64(1000)
@@ -53,11 +56,12 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 	}
 
 	cmd := exec.Command(cmdName, cmdArgs...)
+	cmd.Stderr = cmd.Stdout
 
 	var err error
 	var cmdStdout io.ReadCloser
 
-	if (blocking) {
+	if blocking {
 		output, err := cmd.Output()
 		if err != nil {
 			return nil, err
@@ -69,7 +73,6 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 		if err != nil {
 			return nil, err
 		}
-		cmd.Stderr = cmd.Stdout
 	}
 
 	go func() {

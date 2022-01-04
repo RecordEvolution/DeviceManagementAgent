@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/messenger"
@@ -20,6 +21,22 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 		}
 
 		options = argsDict
+	}
+
+	if options["all"] != nil {
+		all, ok := options["all"].(bool)
+		if !ok {
+			return nil, errors.New("all value for container prune is not a boolean")
+		}
+
+		if all {
+			output, err := ex.Container.PruneSystem(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			return &messenger.InvokeResult{Arguments: []interface{}{string(output)}}, nil
+		}
 	}
 
 	err := ex.Container.PruneImages(context.Background(), options)
