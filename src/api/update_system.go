@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"reagent/common"
+	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/system"
@@ -12,7 +14,6 @@ import (
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-
 	// current release information
 	osReleaseCurrent, err := system.GetOSReleaseCurrent()
 	if err != nil {
@@ -63,6 +64,14 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 }
 
 func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("MAINTAIN", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reswarmos"))
+	}
 
 	// prepare callback monitoring progress of download
 	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {
@@ -78,7 +87,7 @@ func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messen
 	}
 
 	// start downloading...
-	err := system.GetOSUpdate(progressCallback)
+	err = system.GetOSUpdate(progressCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +96,14 @@ func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messen
 }
 
 func (ex *External) installOSUpdateHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("MAINTAIN", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reswarmos"))
+	}
 
 	// prepare callback monitoring progress of OS installation
 	progressCallback := func(operationName string, progressPercent uint64) {
@@ -101,7 +118,7 @@ func (ex *External) installOSUpdateHandler(ctx context.Context, response messeng
 	}
 
 	// start installing OS bundle...
-	err := system.InstallOSUpdate(progressCallback)
+	err = system.InstallOSUpdate(progressCallback)
 	if err != nil {
 		return nil, err
 	}

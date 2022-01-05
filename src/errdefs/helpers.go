@@ -89,6 +89,26 @@ func ImageNotFound(err error) error {
 
 /*------------*/
 
+type ErrInsufficientPrivileges struct{ error }
+
+func (e ErrInsufficientPrivileges) Cause() error {
+	return e.error
+}
+
+func (e ErrInsufficientPrivileges) Unwrap() error {
+	return e.error
+}
+
+func InsufficientPrivileges(err error) error {
+	if err == nil || IsInsufficientPrivileges(err) {
+		return err
+	}
+
+	return ErrInsufficientPrivileges{err}
+}
+
+/*------------*/
+
 type ErrContainerRemovalAlreadyInProgress struct{ error }
 
 func (e ErrContainerRemovalAlreadyInProgress) Cause() error {

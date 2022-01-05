@@ -12,6 +12,7 @@ import (
 	"reagent/messenger"
 	"reagent/network"
 	"reagent/persistence"
+	"reagent/privilege"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/system"
@@ -205,8 +206,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	appStore.SetMessenger(mainSession)
 	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
-
 	logManager.SetMessenger(mainSession)
+	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{
 		Container:       container,
@@ -214,6 +215,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogMessenger:    mainSession,
 		Database:        database,
 		Network:         networkInstance,
+		Privilege:       &privilege,
 		Filesystem:      &filesystem,
 		System:          &systemAPI,
 		AppManager:      appManager,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reagent/common"
+	"reagent/errdefs"
 	"reagent/messenger"
 )
 
@@ -28,6 +29,15 @@ func (ex *External) listEthernetDevices(ctx context.Context, response messenger.
 }
 
 func (ex *External) updateIPConfigHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update ip config"))
+	}
+
 	if response.Arguments == nil {
 		return nil, errors.New("failed to parse args, payload is missing")
 	}

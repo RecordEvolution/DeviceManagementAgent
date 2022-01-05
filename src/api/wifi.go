@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reagent/common"
+	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/network"
 )
@@ -44,6 +45,15 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 }
 
 func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to remove wifi config"))
+	}
+
 	payloadArg := response.Arguments
 	if len(payloadArg) == 0 {
 		return nil, errors.New("args for add wifi config is empty")
@@ -63,14 +73,34 @@ func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Re
 }
 
 func (ex *External) wifiScanHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	// TODO: privilege check
+
 	return &messenger.InvokeResult{}, ex.Network.Scan()
 }
 
 func (ex *External) wifiRebootHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to restart wifi"))
+	}
+
 	return &messenger.InvokeResult{}, ex.Network.Reload()
 }
 
 func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to add wifi config"))
+	}
+
 	payload := response.Arguments
 	if len(payload) == 0 {
 		return nil, errors.New("args for add wifi config is empty")
@@ -126,7 +156,7 @@ func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response me
 		SecurityType: securityType,
 	}
 
-	err := ex.Network.AddWiFi(mac, wifiEntryPayload)
+	err = ex.Network.AddWiFi(mac, wifiEntryPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +165,15 @@ func (ex *External) addWiFiConfigurationHandler(ctx context.Context, response me
 }
 
 func (ex *External) selectWiFiNetworkHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to select wifi network"))
+	}
+
 	payload := response.Arguments
 	if len(payload) == 0 {
 		return nil, errors.New("args for add wifi config is empty")
@@ -158,7 +197,7 @@ func (ex *External) selectWiFiNetworkHandler(ctx context.Context, response messe
 		return nil, errors.New("failed to parse mac, invalid type")
 	}
 
-	err := ex.Network.ActivateWiFi(mac, ssid)
+	err = ex.Network.ActivateWiFi(mac, ssid)
 	if err != nil {
 		return nil, err
 	}

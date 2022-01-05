@@ -21,27 +21,27 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 
 	fileName, ok := fileNameArg.(string)
 	if !ok {
-		return nil, errors.New("Failed to parse name argument")
+		return nil, errors.New("failed to parse name argument")
 	}
 
 	chunk, ok := chunkArg.(string)
 	if !ok {
-		return nil, errors.New("Failed to parse chunk argument")
+		return nil, errors.New("failed to parse chunk argument")
 	}
 
 	containerName, ok := containerNameArg.(string)
 	if !ok {
-		return nil, errors.New("Failed to parse containerName argument")
+		return nil, errors.New("failed to parse containerName argument")
 	}
 
 	total, ok := totalArg.(uint64)
 	if !ok {
-		return nil, errors.New("Failed to parse total argument")
+		return nil, errors.New("failed to parse total argument")
 	}
 
 	id, ok := idArg.(string)
 	if !ok {
-		return nil, errors.New("Failed to parse id argument")
+		return nil, errors.New("failed to parse id argument")
 	}
 
 	fileDir := ex.Messenger.GetConfig().CommandLineArguments.AppsBuildDir
