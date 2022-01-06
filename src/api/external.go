@@ -85,6 +85,10 @@ func wrapDetails(handler RegistrationHandler) RegistrationHandler {
 			requestorAccountKeyKw := response.ArgumentsKw["requestor_account_key"]
 
 			if requestorAccountKeyKw == nil {
+				if len(response.Arguments) == 0 {
+					return handler(ctx, response)
+				}
+
 				argsOne := response.Arguments[0]
 				argsDict, ok := argsOne.(common.Dict)
 				if !ok {
