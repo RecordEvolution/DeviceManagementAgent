@@ -12,8 +12,10 @@ import (
 	"reagent/messenger/topics"
 	"reagent/network"
 	"reagent/persistence"
+	"reagent/privilege"
 	"reagent/system"
 	"reagent/terminal"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -27,6 +29,7 @@ type External struct {
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
 	Network         network.Network
+	Privilege       *privilege.Privilege
 	Filesystem      *filesystem.Filesystem
 	System          *system.System
 	AppManager      *apps.AppManager
@@ -75,6 +78,40 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 	}
 }
 
+func wrapDetails(handler RegistrationHandler) RegistrationHandler {
+	return func(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+		if response.Details["caller_authid"] == "system" {
+			kwargs := response.ArgumentsKw
+			requestorAccountKeyKw := kwargs["requestor_account_key"]
+			var requestorAccountKey uint64
+			var ok bool
+
+			if requestorAccountKeyKw == nil {
+				return handler(ctx, response)
+			}
+
+			requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
+			if !ok {
+				return handler(ctx, response)
+			}
+
+			requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
+			if !ok {
+				return handler(ctx, response)
+			}
+
+			value, err := strconv.Atoi(requestorAccountKeyString)
+			if err == nil {
+				requestorAccountKey = uint64(value)
+			}
+
+			response.Details["caller_authid"] = requestorAccountKey
+		}
+
+		return handler(ctx, response)
+	}
+}
+
 // RegisterAll registers all the static topics exposed by the reagent
 func (ex *External) RegisterAll() error {
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
@@ -82,7 +119,7 @@ func (ex *External) RegisterAll() error {
 	for topic, handler := range topicHandlerMap {
 		// will register all topics, e.g.: re.mgmt.request_app_state
 		fullTopic := common.BuildExternalApiTopic(serialNumber, string(topic))
-		err := ex.Messenger.Register(topics.Topic(fullTopic), handler, nil)
+		err := ex.Messenger.Register(topics.Topic(fullTopic), wrapDetails(handler), nil)
 		if err != nil {
 			// on reconnect we will reregister, which could cause a already exists exception
 			if strings.Contains(err.Error(), "wamp.error.procedure_already_exists") {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/messenger"
@@ -9,6 +10,15 @@ import (
 )
 
 func (ex *External) updateReagent(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("MAINTAIN", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reagent"))
+	}
+
 	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {
 		progress := common.Dict{
 			"increment":    increment,

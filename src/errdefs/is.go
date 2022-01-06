@@ -59,3 +59,8 @@ func IsInProgress(err error) bool {
 	_, ok := err.(ErrInProgress)
 	return ok
 }
+
+func IsInsufficientPrivileges(err error) bool {
+	_, ok := err.(ErrInsufficientPrivileges)
+	return ok
+}

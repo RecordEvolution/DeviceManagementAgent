@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/config"
@@ -17,6 +18,23 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	payload, err := responseToTransitionPayload(ex.Config, response)
 	if err != nil {
 		return nil, err
+	}
+
+	var privileged bool
+	if payload.CurrentState == common.REMOVED || payload.CurrentState == common.UNINSTALLED {
+		privileged, err = ex.Privilege.Check("INSTALL", response.Details)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		privileged, err = ex.Privilege.Check("OPERATE", response.Details)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to request app state"))
 	}
 
 	safe.Go(func() {

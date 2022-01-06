@@ -7,10 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"reagent/common"
+	"reagent/errdefs"
 	"reagent/messenger"
 )
 
 func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("MAINTAIN", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to prune images"))
+	}
+
 	args := response.Arguments
 	options := common.Dict{}
 
@@ -39,7 +49,7 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 		}
 	}
 
-	err := ex.Container.PruneImages(context.Background(), options)
+	err = ex.Container.PruneImages(context.Background(), options)
 	if err != nil {
 		return nil, err
 	}
