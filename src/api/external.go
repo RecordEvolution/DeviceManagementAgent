@@ -82,8 +82,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 func wrapDetails(handler RegistrationHandler) RegistrationHandler {
 	return func(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 		if response.Details["caller_authid"] == "system" {
-			kwargs := response.ArgumentsKw
-			requestorAccountKeyKw := kwargs["requestor_account_key"]
+			requestorAccountKeyKw := response.ArgumentsKw["requestor_account_key"]
 			var requestorAccountKey uint64
 
 			if requestorAccountKeyKw == nil {
