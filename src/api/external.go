@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"reagent/apps"
 	"reagent/common"
 	"reagent/config"
@@ -84,23 +85,12 @@ func wrapDetails(handler RegistrationHandler) RegistrationHandler {
 			kwargs := response.ArgumentsKw
 			requestorAccountKeyKw := kwargs["requestor_account_key"]
 			var requestorAccountKey uint64
-			var ok bool
 
 			if requestorAccountKeyKw == nil {
 				return handler(ctx, response)
 			}
 
-			requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
-			if !ok {
-				return handler(ctx, response)
-			}
-
-			requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
-			if !ok {
-				return handler(ctx, response)
-			}
-
-			value, err := strconv.Atoi(requestorAccountKeyString)
+			value, err := strconv.Atoi(fmt.Sprint(requestorAccountKeyKw))
 			if err == nil {
 				requestorAccountKey = uint64(value)
 			}
