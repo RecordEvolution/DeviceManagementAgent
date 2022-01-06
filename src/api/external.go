@@ -86,18 +86,23 @@ func wrapDetails(handler RegistrationHandler) RegistrationHandler {
 			var requestorAccountKey uint64
 			var ok bool
 
-			if requestorAccountKeyKw != nil {
-				requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
-				if ok {
-					requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
-					if ok {
+			if requestorAccountKeyKw == nil {
+				return handler(ctx, response)
+			}
 
-						value, err := strconv.Atoi(requestorAccountKeyString)
-						if err == nil {
-							requestorAccountKey = uint64(value)
-						}
-					}
-				}
+			requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
+			if !ok {
+				return handler(ctx, response)
+			}
+
+			requestorAccountKeyString, ok := requestorAccountKeyKw.(string)
+			if !ok {
+				return handler(ctx, response)
+			}
+
+			value, err := strconv.Atoi(requestorAccountKeyString)
+			if err == nil {
+				requestorAccountKey = uint64(value)
 			}
 
 			response.Details["caller_authid"] = requestorAccountKey
