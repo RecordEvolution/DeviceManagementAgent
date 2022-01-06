@@ -83,18 +83,26 @@ func wrapDetails(handler RegistrationHandler) RegistrationHandler {
 	return func(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 		if response.Details["caller_authid"] == "system" {
 			requestorAccountKeyKw := response.ArgumentsKw["requestor_account_key"]
-			var requestorAccountKey uint64
 
 			if requestorAccountKeyKw == nil {
-				return handler(ctx, response)
+				argsOne := response.Arguments[0]
+				argsDict, ok := argsOne.(common.Dict)
+				if !ok {
+					return handler(ctx, response)
+				}
+
+				argsRequestorAccountKey := argsDict["requestor_account_key"]
+				if argsRequestorAccountKey != nil {
+					requestorAccountKeyKw = argsRequestorAccountKey
+				} else {
+					return handler(ctx, response)
+				}
 			}
 
 			value, err := strconv.Atoi(fmt.Sprint(requestorAccountKeyKw))
 			if err == nil {
-				requestorAccountKey = uint64(value)
+				response.Details["caller_authid"] = uint64(value)
 			}
-
-			response.Details["caller_authid"] = requestorAccountKey
 		}
 
 		return handler(ctx, response)
