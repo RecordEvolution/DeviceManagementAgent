@@ -9,7 +9,6 @@ const RequestTerminalSession Topic = "request_terminal_session"
 const StartTerminalSession Topic = "start_terminal_session"
 const StopTerminalSession Topic = "stop_terminal_session"
 const GetAppLogHistory Topic = "get_app_log_history"
-const StreamLogHistory Topic = "stream_log_history"
 const ListContainers Topic = "list_containers"
 
 const ListEthernetDevices Topic = "list_ethernet_devices"
@@ -31,7 +30,6 @@ const GetAgentMetaData Topic = "get_agent_metadata"
 const GetAgentLogs Topic = "get_agent_logs"
 
 const UpdateAgent Topic = "update_agent"
-const AgentProgress Topic = "agent_update_progress"
 
 const CmdExecutionPrefix Topic = "cmd_output"
 const ExecuteCommand Topic = "execute_cmd"

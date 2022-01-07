@@ -2,6 +2,7 @@ package topics
 
 type Topic string
 
+const AgentProgress Topic = "agent_update_progress"
 const BootConfig Topic = "reswarm.containers.get_boot_config"
 const SetActualAppOnDeviceState Topic = "reswarm.containers.update_app_on_device"
 const GetRequestedAppStates Topic = "reswarm.containers.get_requested_app_states"
