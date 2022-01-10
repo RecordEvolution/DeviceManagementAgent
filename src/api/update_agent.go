@@ -7,6 +7,8 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/messenger/topics"
+	"reagent/system"
+	"strings"
 )
 
 func (ex *External) updateReagent(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -17,6 +19,15 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 
 	if !privileged {
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reagent"))
+	}
+
+	osVersion, err := system.GetOSVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.Contains(osVersion, "ReswarmOS") {
+		return nil, errors.New("cannot update the agent on a not ReswarmOS system")
 	}
 
 	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {

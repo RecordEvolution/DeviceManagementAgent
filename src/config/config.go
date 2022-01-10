@@ -30,6 +30,7 @@ type ReswarmConfig struct {
 	SwarmOwnerName       string `json:"swarm_owner_name"`
 	ConfigPassphrase     string `json:"config_passphrase"`
 	DeviceEndpointURL    string `json:"device_endpoint_url"`
+	Environment          string `json:"environment"`
 	DockerRegistryURL    string `json:"docker_registry_url"`
 	InsecureRegistries   string `json:"insecure-registries"`
 	DockerMainRepository string `json:"docker_main_repository"`

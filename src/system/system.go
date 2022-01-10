@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -238,9 +237,23 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 	return nil
 }
 
+func (system *System) GetEnvironment() string {
+	env := system.config.ReswarmConfig.Environment
+	if env != "" {
+		return env
+	}
+
+	endpoint := system.config.ReswarmConfig.DeviceEndpointURL
+	if strings.Contains(endpoint, "datapods") {
+		return "test"
+	} else if strings.Contains(endpoint, "record-evolution") {
+		return "production"
+	}
+	return "local"
+}
+
 func (system *System) GetLatestVersion() (string, error) {
 	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
-
 	client := http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
@@ -253,22 +266,25 @@ func (system *System) GetLatestVersion() (string, error) {
 		Timeout: 10 * time.Second, // timeout for the entire request, i.e. the download itself
 	}
 
-	resp, err := client.Get(reagentBucketURL + "/version.txt")
+	resp, err := client.Get(reagentBucketURL + "/availableVersions.json")
 	if err != nil {
-		// happens when time is not set yet
+		// happens when time setup (ReswarmOS) is not setup yet
 		if strings.Contains(err.Error(), "certificate has expired or is not yet valid") {
 			time.Sleep(time.Second * 1)
 			return system.GetLatestVersion()
 		}
 		return "", err
 	}
-	buf := new(strings.Builder)
-	_, err = io.Copy(buf, resp.Body)
-	if err != nil {
-		return "", err
+
+	var environmentVersionMap map[string]string
+	json.NewDecoder(resp.Body).Decode(&environmentVersionMap)
+
+	versionString := environmentVersionMap[system.GetEnvironment()]
+	if versionString != "" {
+		versionString = environmentVersionMap["all"]
 	}
 
-	return strings.Join(strings.Fields(strings.TrimSpace(buf.String())), " "), nil
+	return versionString, nil
 }
 
 func (system *System) Update(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {

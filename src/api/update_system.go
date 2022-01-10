@@ -9,8 +9,6 @@ import (
 	"reagent/messenger/topics"
 	"reagent/system"
 	"strings"
-	// "errors"
-	//"fmt"
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
