@@ -4,12 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/safe"
 )
 
 func (ex *External) writeToFileHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("DEVELOP", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges write data to device"))
+	}
+
 	args := response.Arguments
 
 	// Matches file_transfer.ts payload
@@ -55,7 +65,7 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 		Total:         total,
 	}
 
-	err := ex.Filesystem.Write(fileChunk)
+	err = ex.Filesystem.Write(fileChunk)
 	if err != nil {
 		return nil, err
 	}

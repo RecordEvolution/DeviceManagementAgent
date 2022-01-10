@@ -9,6 +9,15 @@ import (
 )
 
 func (ex *External) listEthernetDevices(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("READ", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to list ethernet devices"))
+	}
+
 	ethernetDevices, err := ex.Network.ListEthernetDevices()
 	if err != nil {
 		return nil, err

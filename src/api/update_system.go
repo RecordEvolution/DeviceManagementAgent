@@ -14,6 +14,15 @@ import (
 )
 
 func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("READ", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get os release data"))
+	}
+
 	// current release information
 	osReleaseCurrent, err := system.GetOSReleaseCurrent()
 	if err != nil {

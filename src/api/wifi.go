@@ -10,6 +10,15 @@ import (
 )
 
 func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("READ", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to list wifi networks"))
+	}
+
 	wifis, err := ex.Network.ListWifiNetworks()
 	if err != nil {
 		return nil, err

@@ -9,7 +9,7 @@ import (
 )
 
 func (ex *External) startTerminalSessHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	privileged, err := ex.Privilege.Check("OPERATE", response.Details)
+	privileged, err := ex.Privilege.Check("DEVELOP", response.Details)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (ex *External) startTerminalSessHandler(ctx context.Context, response messe
 }
 
 func (ex *External) stopTerminalSession(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	privileged, err := ex.Privilege.Check("OPERATE", response.Details)
+	privileged, err := ex.Privilege.Check("DEVELOP", response.Details)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (ex *External) stopTerminalSession(ctx context.Context, response messenger.
 }
 
 func (ex *External) requestTerminalSessHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	privileged, err := ex.Privilege.Check("OPERATE", response.Details)
+	privileged, err := ex.Privilege.Check("DEVELOP", response.Details)
 	if err != nil {
 		return nil, err
 	}

@@ -2,11 +2,22 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reagent/errdefs"
 	"reagent/messenger"
 )
 
 func (ex *External) getAppLogHistoryHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("READ", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get app log history"))
+	}
+
 	args := response.Arguments
 
 	if args == nil || args[0] == nil {
