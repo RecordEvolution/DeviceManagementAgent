@@ -24,8 +24,13 @@ func NewPrivilege(messenger messenger.Messenger, config *config.Config) Privileg
 func (p *Privilege) Check(privilege string, details common.Dict) (bool, error) {
 	deviceKey := uint64(p.config.ReswarmConfig.DeviceKey)
 	swarmKey := uint64(p.config.ReswarmConfig.SwarmKey)
+	callerAuthId := fmt.Sprint(details["caller_authid"])
 
-	requestorAccountKey, err := strconv.Atoi(fmt.Sprint(details["caller_authid"]))
+	if callerAuthId == "system" {
+		return true, nil
+	}
+
+	requestorAccountKey, err := strconv.Atoi(callerAuthId)
 	if err != nil {
 		return false, err
 	}
