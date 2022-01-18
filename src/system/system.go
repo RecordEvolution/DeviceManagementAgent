@@ -57,6 +57,20 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
+func GetPlatformString() string {
+	osName := runtime.GOOS
+	arch := BuildArch
+
+	if strings.Contains(arch, "arm") {
+		splitArmArch := strings.Split(arch, "v")
+		if len(splitArmArch) == 2 {
+			arch = "arm/v" + splitArmArch[1]
+		}
+	}
+
+	return osName + "/" + arch
+}
+
 // ------------------------------------------------------------------------- //
 
 func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
