@@ -9,8 +9,8 @@ import (
 	"reagent/config"
 	"reagent/filesystem"
 	"reagent/logging"
+	"reagent/release"
 	"reagent/safe"
-	"reagent/system"
 
 	"runtime"
 	"runtime/debug"
@@ -34,19 +34,19 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
 	}
 
-	if system.BuildArch == "" {
+	if release.BuildArch == "" {
 		fmt.Println("The 'reagent/system.BuildArch' build flag was not included during the build of this version.")
 		os.Exit(1)
 	}
 
 	if cliArgs.ConfigFileLocation == "" {
 		if cliArgs.Version {
-			fmt.Println(system.GetVersion())
+			fmt.Println(release.GetVersion())
 			os.Exit(0)
 		}
 
 		if cliArgs.Arch {
-			fmt.Println(system.BuildArch)
+			fmt.Println(release.BuildArch)
 			os.Exit(0)
 		}
 

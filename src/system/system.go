@@ -11,6 +11,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
+	"reagent/release"
 	"runtime"
 	"strings"
 	"time"
@@ -20,10 +21,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
-
-//go:embed version.txt
-var version string
-var BuildArch string = ""
 
 type System struct {
 	config     *config.Config
@@ -57,30 +54,12 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
-func GetPlatformString() string {
-	osName := runtime.GOOS
-	arch := BuildArch
-
-	if arch == "" {
-		arch = "amd64"
-	}
-
-	if strings.Contains(arch, "arm") {
-		splitArmArch := strings.Split(arch, "v")
-		if len(splitArmArch) == 2 {
-			arch = "arm/v" + splitArmArch[1]
-		}
-	}
-
-	return osName + "/" + arch
-}
-
 // ------------------------------------------------------------------------- //
 
 func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
 	agentDir := sys.config.CommandLineArguments.AgentDir
 	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
-	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, BuildArch, versionString)
+	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, release.GetBuildArch(), versionString)
 	newAgentDestination := fmt.Sprintf("%s/reagent-v%s", agentDir, versionString)
 	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-v" + versionString
 
@@ -113,10 +92,6 @@ func (sys *System) updateAgent(versionString string, progressCallback func(incre
 	log.Debug().Msg("Reagent update finished...")
 
 	return nil
-}
-
-func GetVersion() string {
-	return version
 }
 
 func GetOSReleaseCurrent() (map[string]string, error) {
@@ -311,7 +286,7 @@ func (system *System) Update(progressCallback func(increment uint64, currentByte
 		return UpdateResult{}, err
 	}
 
-	currentVersion := GetVersion()
+	currentVersion := release.GetVersion()
 	log.Info().Msgf("Latest version: %s, Current version: %s", latestVersion, currentVersion)
 	err = system.updateAgent(latestVersion, progressCallback)
 	if err != nil {
@@ -339,7 +314,7 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 		return UpdateResult{}, err
 	}
 
-	currentVersion := GetVersion()
+	currentVersion := release.GetVersion()
 
 	log.Info().Msgf("Should update? Latest: %s, Current: %s", latestVersion, currentVersion)
 	if latestVersion == currentVersion {

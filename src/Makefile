@@ -3,10 +3,10 @@
 build:
 	node build.js --armv=6
 	node build.js --armv=7
-	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=arm64'" --targets=linux/arm64 .
+	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/release.BuildArch=arm64'" --targets=linux/arm64 .
 	mv reagent-linux-arm64 build/reagent-linux-arm64
 	node build.js --arch=amd64 --os=linux
-	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/system.BuildArch=amd64'" --targets=darwin/amd64 .
+	${HOME}/go/bin/xgo -v -ldflags "-X 'reagent/release.BuildArch=amd64'" --targets=darwin/amd64 .
 	mv reagent-darwin-10.16-amd64 build/reagent-darwin-amd64
 	# node build.js --arch=amd64 --os=windows
 
@@ -15,7 +15,7 @@ ENVARM7 := CC=$(GCCARM7) CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7
 
 build-arm7:
 	$(ENVARM7) go get .
-	$(ENVARM7) go build -ldflags "-X 'reagent/system.BuildArch=armv7'" .
+	$(ENVARM7) go build -ldflags "-X 'reagent/release.BuildArch=armv7'" .
 
 rollout: build publish publish-version publish-latestVersions
 

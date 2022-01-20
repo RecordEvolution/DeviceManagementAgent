@@ -32,7 +32,7 @@ if (!v) v = false;
 if (!cc) cc = true;
 
 const buildArgString = armv ? arch + "v" + armv : arch;
-bflags = [`reagent/system.BuildArch=${buildArgString}`];
+bflags = [`reagent/release.BuildArch=${buildArgString}`];
 
 let options = `GOOS=${os} GOARCH=${arch} CGO_ENABLED=1`;
 if (cc && ccgcc && builderArch !== arch) {

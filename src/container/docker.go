@@ -13,7 +13,6 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/safe"
-	"reagent/system"
 	"strings"
 	"sync"
 	"time"
@@ -452,7 +451,6 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 	pushOptions := types.ImagePushOptions{
 		RegistryAuth: authStr,
-		Platform:     system.GetPlatformString(),
 	}
 
 	reader, err := docker.client.ImagePush(ctx, imageName, pushOptions)
@@ -955,7 +953,6 @@ func (docker *Docker) Build(ctx context.Context, compressedBuildFilesPath string
 		return nil, err
 	}
 
-	options.Platform = system.GetPlatformString()
 	buildResponse, err := docker.client.ImageBuild(ctx, dockerBuildContext, options)
 	if err != nil {
 		if buildResponse.Body != nil {

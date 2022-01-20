@@ -6,8 +6,8 @@ import (
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/messenger"
+	"reagent/release"
 	"reagent/system"
-	"runtime"
 )
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -20,7 +20,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get agent metadata"))
 	}
 
-	currentVersion := system.GetVersion()
+	currentVersion := release.GetVersion()
 	OSVersion, err := system.GetOSVersion()
 	if err != nil {
 		return nil, err
@@ -28,12 +28,13 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
+	os, arch, variant := release.GetSystemInfo()
 	dict := common.Dict{
-		"oos":          runtime.GOOS,
-		"arch":         runtime.GOARCH,
+		"os":           os,
+		"arch":         arch,
+		"variant":      variant,
 		"version":      currentVersion,
 		"serialNumber": serialNumber,
-		"platform":     system.GetPlatformString(),
 	}
 
 	latestVersion, err := ex.System.GetLatestVersion()
