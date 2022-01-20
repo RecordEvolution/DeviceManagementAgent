@@ -61,6 +61,10 @@ func GetPlatformString() string {
 	osName := runtime.GOOS
 	arch := BuildArch
 
+	if arch == "" {
+		arch = "amd64"
+	}
+
 	if strings.Contains(arch, "arm") {
 		splitArmArch := strings.Split(arch, "v")
 		if len(splitArmArch) == 2 {

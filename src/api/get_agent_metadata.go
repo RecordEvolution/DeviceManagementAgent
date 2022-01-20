@@ -33,6 +33,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"arch":         runtime.GOARCH,
 		"version":      currentVersion,
 		"serialNumber": serialNumber,
+		"platform":     system.GetPlatformString(),
 	}
 
 	latestVersion, err := ex.System.GetLatestVersion()
