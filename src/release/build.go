@@ -19,12 +19,12 @@ func GetSystemInfo() (string, string, string) {
 	}
 
 	if strings.Contains(arch, "arm") {
-		arch = "arm"
-
 		splitArmArch := strings.Split(arch, "v")
 		if len(splitArmArch) == 2 {
 			variant = "v" + splitArmArch[1]
 		}
+
+		arch = "arm"
 	}
 
 	return runtime.GOOS, arch, variant
