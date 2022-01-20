@@ -448,9 +448,14 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 	if err != nil {
 		return nil, err
 	}
-	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 
-	reader, err := docker.client.ImagePush(ctx, imageName, types.ImagePushOptions{RegistryAuth: authStr})
+	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
+	pushOptions := types.ImagePushOptions{
+		RegistryAuth: authStr,
+		Platform:     system.GetPlatformString(),
+	}
+
+	reader, err := docker.client.ImagePush(ctx, imageName, pushOptions)
 	if err != nil {
 		if reader != nil {
 			reader.Close()
