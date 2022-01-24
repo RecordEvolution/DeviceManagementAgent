@@ -35,7 +35,7 @@ func main() {
 	}
 
 	if release.BuildArch == "" {
-		fmt.Println("The 'reagent/system.BuildArch' build flag was not included during the build of this version.")
+		fmt.Println("The 'reagent/release.BuildArch' build flag was not included during the build of this version.")
 		os.Exit(1)
 	}
 
