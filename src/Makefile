@@ -23,7 +23,7 @@ publish:
 	./publish.sh
 
 publish-version:
-	gsutil cp "system/version.txt" gs://re-agent
+	gsutil cp "release/version.txt" gs://re-agent
 	gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/version.txt
 
 publish-latestVersions:

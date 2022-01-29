@@ -1,7 +1,7 @@
 #!/bin/bash
 
 array=($(ls build))
-version=`cat system/version.txt`
+version=`cat release/version.txt`
 
 for element in "${array[@]}"; do
     OS=$(echo "$element" | cut -d "-" -f 2)
