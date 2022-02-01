@@ -1,18 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"reagent/api"
 	"reagent/apps"
 	"reagent/benchmark"
+	"reagent/common"
 	"reagent/config"
 	"reagent/container"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/network"
 	"reagent/persistence"
 	"reagent/privilege"
+	"reagent/release"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/system"
@@ -58,8 +62,13 @@ func (agent *Agent) OnConnect() error {
 		agent.System.Update(nil)
 	}
 
+	err := agent.updateRemoteDevice()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
+	}
+
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
-	err := agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
+	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to sync")
 	}
@@ -115,6 +124,25 @@ func (agent *Agent) InitConnectionStatusHeartbeat() {
 			agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
 		}
 	})
+}
+
+func (agent *Agent) updateRemoteDevice() error {
+	config := agent.Config
+	ctx := context.Background()
+
+	_, arch, variant := release.GetSystemInfo()
+	payload := common.Dict{
+		"swarm_key":    config.ReswarmConfig.SwarmKey,
+		"device_key":   config.ReswarmConfig.DeviceKey,
+		"architecture": arch + variant,
+	}
+
+	_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceArchitecture, []interface{}{payload}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func NewAgent(generalConfig *config.Config) (agent *Agent) {

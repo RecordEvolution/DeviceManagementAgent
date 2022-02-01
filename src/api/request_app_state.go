@@ -40,13 +40,13 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	safe.Go(func() {
 		err = ex.AppManager.CreateOrUpdateApp(payload)
 		if err != nil {
-			log.Error().Stack().Err(err)
+			log.Error().Err(err).Msgf("failed to create or update app")
 			return
 		}
 
 		err = ex.AppManager.RequestAppState(payload)
 		if err != nil {
-			log.Error().Stack().Err(err)
+			log.Error().Err(err).Msgf("failed to request app state")
 			return
 		}
 	})
@@ -68,7 +68,9 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	releaseKeyKw := kwargs["release_key"]
 	newReleaseKeyKw := kwargs["new_release_key"]
 	currentStateKw := kwargs["current_state"]
+	currentStateKw2 := kwargs["state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
+	requestorAccountKeyKw2 := kwargs["account_id"]
 	environmentKw := kwargs["environment"]
 	// dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
@@ -81,11 +83,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var releaseKey uint64
 	var newReleaseKey uint64
 	var requestorAccountKey uint64
+	var requestorAccountKey2 uint64
 	var appName string
 	var stage string
 	var requestedState string
 	var manuallyRequestedState string
 	var currentState string
+	var currentState2 string
 	var version string
 	var presentVersion string
 	var newestVersion string
@@ -146,6 +150,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if currentStateKw2 != nil {
+		currentState2, ok = currentStateKw2.(string)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("%w currentState2", errdefs.ErrFailedToParse)
+		}
+	}
+
 	if requestorAccountKeyKw != nil {
 		requestorAccountKey, ok = requestorAccountKeyKw.(uint64)
 		if !ok {
@@ -159,6 +170,22 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 				return common.TransitionPayload{}, err
 			}
 			requestorAccountKey = uint64(value)
+		}
+	}
+
+	if requestorAccountKeyKw2 != nil {
+		requestorAccountKey2, ok = requestorAccountKeyKw2.(uint64)
+		if !ok {
+			requestorAccountKeyString2, ok := requestorAccountKeyKw2.(string)
+			if !ok {
+				return common.TransitionPayload{}, fmt.Errorf("%w requestorAccountKey2", errdefs.ErrFailedToParse)
+			}
+
+			value, err := strconv.Atoi(requestorAccountKeyString2)
+			if err != nil {
+				return common.TransitionPayload{}, err
+			}
+			requestorAccountKey2 = uint64(value)
 		}
 	}
 
@@ -241,6 +268,14 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	// happens where there is no app yet, for example, when you press stop on first build
 	if requestedState == "" && manuallyRequestedState != "" {
 		requestedState = manuallyRequestedState
+	}
+
+	if currentState == "" && currentState2 != "" {
+		currentState = currentState2
+	}
+
+	if requestorAccountKey == 0 && requestorAccountKey2 != 0 {
+		requestorAccountKey = requestorAccountKey2
 	}
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey,

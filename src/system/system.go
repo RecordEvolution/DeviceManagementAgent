@@ -120,8 +120,6 @@ func GetOSReleaseCurrent() (map[string]string, error) {
 		}
 	}
 
-	log.Debug().Msgf("GetOSReleaseCurrent(): %+v\n", dict)
-
 	return dict, nil
 }
 
