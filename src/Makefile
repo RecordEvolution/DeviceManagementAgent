@@ -35,6 +35,3 @@ publish-version:
 publish-latestVersions:
 	gsutil cp "availableVersions.json" gs://re-agent
 	gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/availableVersions.json
-
-
-<a href="os,kfdqnsjnf">short</a>
