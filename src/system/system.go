@@ -271,7 +271,7 @@ func (system *System) GetLatestVersion() (string, error) {
 	json.NewDecoder(resp.Body).Decode(&environmentVersionMap)
 
 	versionString := environmentVersionMap[system.GetEnvironment()]
-	if versionString != "" {
+	if versionString == "" {
 		versionString = environmentVersionMap["all"]
 	}
 
