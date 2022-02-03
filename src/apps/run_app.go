@@ -63,6 +63,16 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		},
 		Mounts: mounts,
 		Resources: container.Resources{
+			// DeviceRequests: []container.DeviceRequest{
+			// 	{
+			// 		Count: -1,
+			// 		Capabilities: [][]string{
+			// 			{
+			// 				"gpu",
+			// 			},
+			// 		},
+			// 	},
+			// },
 			Devices: []container.DeviceMapping{
 				{
 					PathOnHost:      "/dev",
