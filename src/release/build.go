@@ -22,9 +22,8 @@ func GetSystemInfo() (string, string, string) {
 		splitArmArch := strings.Split(arch, "v")
 		if len(splitArmArch) == 2 {
 			variant = "v" + splitArmArch[1]
+			arch = "arm"
 		}
-
-		arch = "arm"
 	}
 
 	return runtime.GOOS, arch, variant
