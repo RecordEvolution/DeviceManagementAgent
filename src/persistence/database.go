@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/zerolog/log"
+	_ "modernc.org/sqlite"
 )
 
 type AppStateDatabase struct {
@@ -25,7 +25,7 @@ type AppStateDatabase struct {
 }
 
 const (
-	driver      = "sqlite3"
+	driver      = "sqlite"
 	cacheShared = "cache=shared"
 	busyTimeout = "_busy_timeout=2500"
 	journalMode = "_journal_mode=WAL"
