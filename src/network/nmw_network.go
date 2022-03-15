@@ -1,9 +1,12 @@
 package network
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"reagent/errdefs"
 	"reagent/networkmanager"
 	"reagent/safe"
@@ -607,6 +610,17 @@ func (n NWMNetwork) GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6Ad
 	return parsedIPv4Datas, parsedIPv6Datas, nil
 }
 
+func swapUint32(n uint32) uint32 {
+	return (n&0x000000FF)<<24 | (n&0x0000FF00)<<8 |
+		(n&0x00FF0000)>>8 | (n&0xFF000000)>>24
+}
+
+func ip2Long(ip string) uint32 {
+	var long uint32
+	binary.Read(bytes.NewBuffer(net.ParseIP(ip).To4()), binary.BigEndian, &long)
+	return swapUint32(long)
+}
+
 func (n NWMNetwork) updateIPv4Address(device networkmanager.Device, connection networkmanager.Connection, ipAddress string, prefix uint32) error {
 	settings, err := connection.GetSettings()
 	if err != nil {
@@ -632,8 +646,36 @@ func (n NWMNetwork) updateIPv4Address(device networkmanager.Device, connection n
 		delete(settings["ipv4"], "gateway")
 	}
 
-	settings["ipv4"]["method"] = "manual"
+	if settings["ipv4"]["dns"] != nil {
+		delete(settings["ipv4"], "dns")
+	}
 
+	devSettings, err := device.GetPropertyIP4Config()
+	if err != nil {
+		return err
+	}
+
+	if devSettings != nil {
+		gateway, err := devSettings.GetPropertyGateway()
+		if err != nil {
+			return err
+		}
+
+		dnsStrings, err := devSettings.GetPropertyNameservers()
+		if err != nil {
+			return err
+		}
+
+		dnsInts := make([]uint32, len(dnsStrings))
+		for i, dnsString := range dnsStrings {
+			dnsInts[i] = ip2Long(dnsString)
+		}
+
+		settings["ipv4"]["gateway"] = gateway
+		settings["ipv4"]["dns"] = dnsInts
+	}
+
+	settings["ipv4"]["method"] = "manual"
 	addressData := make([]map[string]interface{}, 1)
 	addressData[0] = make(map[string]interface{})
 	addressData[0]["address"] = ipAddress
