@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/rs/zerolog/log"
 )
 
 type NWMNetwork struct {
@@ -690,7 +691,10 @@ func (n NWMNetwork) updateIPv4Address(device networkmanager.Device, connection n
 
 	if device != nil {
 		safe.Go(func() {
-			device.Reapply(settings, 0, 0)
+			_, err = n.nm.ActivateConnection(connection, device, "/")
+			if err != nil {
+				log.Error().Err(err).Msgf("Error while activating connection: %s", err)
+			}
 		})
 	}
 
@@ -731,7 +735,10 @@ func (n NWMNetwork) enableDHCP(device networkmanager.Device, connection networkm
 
 	if device != nil {
 		safe.Go(func() {
-			device.Reapply(settings, 0, 0)
+			_, err = n.nm.ActivateConnection(connection, device, "/")
+			if err != nil {
+				log.Error().Err(err).Msgf("Error while activating connection: %s", err)
+			}
 		})
 	}
 
