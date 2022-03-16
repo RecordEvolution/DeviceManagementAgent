@@ -54,4 +54,4 @@ if [ -n "$target_arch_variant" ]; then
     binary_name="$prefix-$target_os-${target_arch}v${target_arch_variant}"
 fi
 
-cd $src_path && go build -v -a -ldflags "-X 'reagent/release.BuildArch=$target_os'" -o "$target_path/$binary_name"
+cd $src_path && go build -v -a -ldflags "-X 'reagent/release.BuildArch=$target_arch'" -o "$target_path/$binary_name"
