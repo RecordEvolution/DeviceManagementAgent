@@ -8,10 +8,7 @@ build-all-docker:
 	rm -f build/*
 
 	docker build . -t agent-builder
-	docker run \
-	--name agent_builder \
-	-v ${PWD}/build:/app/reagent/build \
-	agent-builder
+	docker run --name agent_builder -v ${PWD}/build:/app/reagent/build agent-builder
 
 rollout: build-all-docker publish publish-version publish-latestVersions
 
