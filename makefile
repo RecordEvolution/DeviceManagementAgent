@@ -3,14 +3,15 @@
 build-all:
 	scripts/build-all.sh
 
-build-all-docker:
-	docker rm -f agent_builder
-	rm -f build/*
-
+build-all-docker: clean
 	docker build . -t agent-builder
 	docker run --name agent_builder -v ${PWD}/build:/app/reagent/build agent-builder
 
 rollout: build-all-docker publish publish-version publish-latestVersions
+
+clean:
+	docker rm -f agent_builder
+	rm -f build/*
 
 publish:
 	scripts/publish.sh
