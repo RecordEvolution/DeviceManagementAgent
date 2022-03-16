@@ -8,14 +8,12 @@ build-all-docker:
 	rm -f build/*
 
 	docker build . -t agent-builder
-	docker run -d \
+	docker run \
 	--name agent_builder \
 	-v ${PWD}/build:/app/reagent/build \
 	agent-builder
 
-	docker wait agent-builder
-
-rollout: publish publish-version publish-latestVersions
+rollout: build-all-docker publish publish-version publish-latestVersions
 
 publish:
 	scripts/publish.sh
