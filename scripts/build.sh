@@ -38,6 +38,7 @@ fi
 
 export GOOS="$target_os"
 export GOARCH="$target_arch"
+export CGO_ENABLED=0
 
 if [ "$target_arch" == "arm" ]; then
     if [ -z "$target_arch_variant" ]; then
