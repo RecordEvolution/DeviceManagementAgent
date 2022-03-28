@@ -13,6 +13,8 @@ clean:
 	docker rm -f agent_builder
 	rm -f build/*
 
+publish-all: publish publish-version publish-latestVersions
+
 publish:
 	scripts/publish.sh
 
