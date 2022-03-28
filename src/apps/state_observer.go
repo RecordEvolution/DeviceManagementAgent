@@ -222,19 +222,6 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 
 		defer func() {
 			so.removeObserver(stage, appKey, appName)
-
-			// try to transition to the state it's supposed to be at
-			payload, err := so.AppStore.GetRequestedState(appKey, stage)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to get requested state")
-				return
-			}
-
-			err = so.AppManager.RequestAppState(payload)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to request app state")
-			}
-
 		}()
 
 		for {
@@ -321,6 +308,7 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 
 					if latestAppState == common.FAILED {
 						so.AppManager.incrementCrashLoop(payload)
+						return
 					} else {
 						so.AppManager.RequestAppState(payload)
 					}

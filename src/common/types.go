@@ -78,6 +78,7 @@ type TransitionPayload struct {
 	NewReleaseKey        uint64
 	Version              string
 	RequestUpdate        bool
+	Retrying             bool
 	CancelTransition     bool
 }
 

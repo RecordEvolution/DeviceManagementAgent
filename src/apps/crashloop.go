@@ -37,9 +37,27 @@ func (clm *AppManager) retry(crashTask *CrashLoop) {
 
 		if crashTask.Retries == 30 {
 			clm.crashLoopLock.Lock()
-			delete(clm.crashLoops, crashTask)
+			crashTask.Retries = 0
 			clm.crashLoopLock.Unlock()
 		}
+
+		// exit the goroutine if the crashloop was canceled in the meantime
+		clm.crashLoopLock.Lock()
+		var foundTask *CrashLoop
+		for task := range clm.crashLoops {
+			if task.Payload.Stage == crashTask.Payload.Stage && task.Payload.AppKey == crashTask.Payload.AppKey {
+				foundTask = task
+				break
+			}
+		}
+
+		if foundTask == nil {
+			log.Debug().Msgf("Crashloop task no longer exists for %d (%s), exiting goroutine...", crashTask.Payload.AppKey, crashTask.Payload.Stage)
+			clm.crashLoopLock.Unlock()
+			return
+		}
+
+		clm.crashLoopLock.Unlock()
 
 		app, _ := clm.AppStore.GetApp(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 		if app.CurrentState != crashTask.Payload.RequestedState {
@@ -83,16 +101,11 @@ func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) {
 	}
 	clm.crashLoopLock.Unlock()
 
-	if existingCrash != nil && existingCrash.Payload.RequestedState != payload.RequestedState {
-		log.Debug().Msgf("requested state changed for %s (%s) to %s", payload.AppName, payload.Stage, payload.RequestedState)
-		clm.clearCrashLoop(payload.AppKey, payload.Stage)
-		existingCrash = nil
-	}
-
 	if existingCrash != nil {
 		log.Debug().Msgf("retrying an existing crashloop for %s (%s)", payload.AppName, payload.Stage)
 		clm.retry(existingCrash)
 	} else {
+		payload.Retrying = true
 		crashLoopTask := &CrashLoop{Payload: payload, Retries: 0}
 
 		clm.crashLoopLock.Lock()

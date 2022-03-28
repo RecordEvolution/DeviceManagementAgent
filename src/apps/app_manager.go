@@ -44,6 +44,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	log.Debug().Msgf("Received Requested State (FROM %s to) %s for %s (%s)", curAppState, requestedAppState, payload.AppName, payload.Stage)
 
+	// clear crashloop counter if changing state request
+	if !payload.Retrying {
+		am.clearCrashLoop(app.AppKey, app.Stage)
+	}
+
 	// TODO: get rid of this ugly patch: cancel any filetransfers for this container on stop press
 	if (curAppState == common.REMOVED || curAppState == common.PRESENT || curAppState == common.FAILED) &&
 		(requestedAppState == common.PRESENT || requestedAppState == common.BUILT) && payload.Stage == common.DEV {
