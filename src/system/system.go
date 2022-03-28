@@ -18,6 +18,7 @@ import (
 
 	_ "embed"
 
+	"github.com/Masterminds/semver"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
 )
@@ -315,7 +316,37 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 	currentVersion := release.GetVersion()
 
 	log.Info().Msgf("Should update? Latest: %s, Current: %s", latestVersion, currentVersion)
-	if latestVersion == currentVersion {
+
+	constraint, err := semver.NewConstraint(fmt.Sprintf("> %s", currentVersion))
+	if err != nil {
+		return UpdateResult{
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			DidUpdate:      false,
+		}, err
+	}
+
+	newVersion, err := semver.NewVersion(latestVersion)
+	if err != nil {
+		return UpdateResult{
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			DidUpdate:      false,
+		}, err
+	}
+
+	shouldUpdate, errors := constraint.Validate(newVersion)
+	if err != nil {
+		return UpdateResult{
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			DidUpdate:      false,
+		}, nil
+	}
+
+	if !shouldUpdate {
+		log.Debug().Msgf("Not updating because: %+v\n", errors)
+
 		return UpdateResult{
 			CurrentVersion: currentVersion,
 			LatestVersion:  latestVersion,
