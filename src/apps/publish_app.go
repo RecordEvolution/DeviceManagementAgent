@@ -52,7 +52,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 	streamErr := sm.LogManager.StreamBlocking(payload.PublishContainerName, common.PUSH, reader)
 	if streamErr != nil {
 		if errdefs.IsDockerStreamCanceled(streamErr) {
-			pushMessage := "The push stream was canceled"
+			pushMessage := "The app release was canceled"
 			writeErr := sm.LogManager.Write(payload.PublishContainerName, pushMessage)
 			if writeErr != nil {
 				return writeErr

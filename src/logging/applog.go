@@ -23,7 +23,9 @@ import (
 )
 
 type LogType string
+type LoggerCommand string
 
+const LOGGER_CLEAR LoggerCommand = "LOGGER_CLEAR"
 const CONTAINER LogType = "CONTAINER"
 const AGENT LogType = "AGENT"
 
@@ -121,6 +123,10 @@ type JSONMessage struct {
 
 func (lm *LogManager) SetMessenger(messenger messenger.Messenger) {
 	lm.Messenger = messenger
+}
+
+func (lm *LogManager) ClearRemote(containerName string) error {
+	return lm.Publish(containerName, string(LOGGER_CLEAR))
 }
 
 func (lm *LogManager) ClearLogHistory(containerName string) error {
