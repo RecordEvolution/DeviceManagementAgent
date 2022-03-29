@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"reagent/common"
@@ -179,7 +181,7 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 
 			var duration time.Duration
 			requestStart := time.Now() // time request
-			client, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+			wClient, err := client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
 			if err != nil {
 				if cancelFunc != nil {
 					cancelFunc()
@@ -196,17 +198,30 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 				cancelFunc()
 			}
 
-			if client.Connected() {
+			// add a dummy topic that will be used as a means to check if a client has an existing session or not
+			topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+			invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult {
+				return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
+			}
+
+			err = wClient.Register(topic, invokeHandler, nil)
+			if err != nil && strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) {
+				exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
+				fmt.Println(exitMessage)
+				os.Exit(1)
+			}
+
+			if wClient.Connected() {
 				duration = time.Since(requestStart)
 				log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
-				resChan <- client
+				resChan <- wClient
 				close(resChan)
 				return
 			}
 
 			duration = time.Since(requestStart)
-			if client != nil {
-				client.Close()
+			if wClient != nil {
+				wClient.Close()
 			}
 
 			log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
