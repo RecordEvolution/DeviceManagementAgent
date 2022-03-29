@@ -7,6 +7,7 @@ target_string="$3"
 target_os=$(echo $target_string | cut -d "/" -f 1)
 target_arch=$(echo $target_string | cut -d "/" -f 2)
 target_arch_variant=$(echo $target_string | cut -d "/" -f 3)
+build_arch="$target_arch"
 
 if [ -z "$target_arch" ]; then
     echo "the first argument should be the target architecture"
@@ -46,6 +47,7 @@ if [ "$target_arch" == "arm" ]; then
         exit 1
     fi
 
+    build_arch="${target_arch}v${target_arch_variant}"
     export GOARM="$target_arch_variant"
 fi
 
@@ -55,4 +57,4 @@ if [ -n "$target_arch_variant" ]; then
     binary_name="$prefix-$target_os-${target_arch}v${target_arch_variant}"
 fi
 
-cd $src_path && go build -v -a -ldflags "-X 'reagent/release.BuildArch=$target_arch'" -o "$target_path/$binary_name"
+cd $src_path && go build -v -a -ldflags "-X 'reagent/release.BuildArch=$build_arch'" -o "$target_path/$binary_name"
