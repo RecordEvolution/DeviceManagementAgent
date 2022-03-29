@@ -3,7 +3,7 @@ module reagent
 go 1.16
 
 require (
-	github.com/Masterminds/semver v1.5.0 // indirect
+	github.com/Masterminds/semver v1.5.0
 	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/bygui86/multi-profile/v2 v2.1.0
 	github.com/containerd/containerd v1.6.1 // indirect
