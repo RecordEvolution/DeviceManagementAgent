@@ -169,8 +169,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	filesystem := filesystem.New()
 	appStore := store.NewAppStore(database, dummyMessenger)
-	stateObserver := apps.NewObserver(container, &appStore)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
+	stateObserver := apps.NewObserver(container, &appStore, &logManager)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
 	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)

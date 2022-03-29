@@ -89,6 +89,28 @@ func ParseExitCodeFromContainerStatus(status string) (int64, error) {
 	return exitCodeInt, nil
 }
 
+// Ordinal gives you the input number in a rank/ordinal format.
+//
+// Ordinal(3) -> 3rd
+func Ordinal(x uint) string {
+	suffix := "th"
+	switch x % 10 {
+	case 1:
+		if x%100 != 11 {
+			suffix = "st"
+		}
+	case 2:
+		if x%100 != 12 {
+			suffix = "nd"
+		}
+	case 3:
+		if x%100 != 13 {
+			suffix = "rd"
+		}
+	}
+	return strconv.Itoa(int(x)) + suffix
+}
+
 func ParseContainerName(containerName string) (Stage, uint64, string, error) {
 	if containerName == "" {
 		return "", 0, "", errors.New("container name is empty")

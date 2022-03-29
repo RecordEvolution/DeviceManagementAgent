@@ -2,9 +2,11 @@ package apps
 
 import (
 	"context"
+	"fmt"
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"reagent/logging"
 	"reagent/safe"
 	"reagent/store"
 	"regexp"
@@ -23,6 +25,7 @@ type AppStateObserver struct {
 
 type StateObserver struct {
 	AppStore         *store.AppStore
+	LogManager       *logging.LogManager
 	AppManager       *AppManager
 	Container        container.Container
 	activeObservers  map[string]*AppStateObserver
@@ -30,10 +33,11 @@ type StateObserver struct {
 	observerMapMutex sync.Mutex
 }
 
-func NewObserver(container container.Container, appStore *store.AppStore) StateObserver {
+func NewObserver(container container.Container, appStore *store.AppStore, logManager *logging.LogManager) StateObserver {
 	return StateObserver{
 		Container:       container,
 		AppStore:        appStore,
+		LogManager:      logManager,
 		activeObservers: make(map[string]*AppStateObserver),
 	}
 }
@@ -215,7 +219,7 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
 	errorC := make(chan error, 1)
-	pollingRate := time.Second * 5
+	pollingRate := time.Second * 1
 
 	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
@@ -292,11 +296,18 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 				log.Debug().Msgf("app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)
 
 				// update the current local and remote app state
-				err := so.Notify(app, latestAppState)
+				err = so.Notify(app, latestAppState)
 				if err != nil {
 					errorC <- err
 					log.Error().Err(err).Msg("failed to notify state")
 					return
+				}
+
+				if latestAppState == common.FAILED && (stage == common.DEV || stage == common.PROD) {
+					err = so.LogManager.Write(containerName, fmt.Sprintf("%s (%s) exited with status code: %d", appName, stage, state.ExitCode))
+					if err != nil {
+						log.Error().Err(err).Msgf("failed to publish exit message to container %s", containerName)
+					}
 				}
 
 				if stage == common.PROD {
@@ -307,7 +318,12 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 					}
 
 					if latestAppState == common.FAILED {
-						so.AppManager.incrementCrashLoop(payload)
+						retries, sleepTime := so.AppManager.incrementCrashLoop(payload)
+						err = so.LogManager.Write(containerName, fmt.Sprintf("Entered a crashloop (%s attempt), retrying in %s", common.Ordinal(retries), sleepTime))
+						if err != nil {
+							log.Error().Err(err).Msgf("failed to publish retry message to container %s", containerName)
+						}
+
 						return
 					} else {
 						so.AppManager.RequestAppState(payload)

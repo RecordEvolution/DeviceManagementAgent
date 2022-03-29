@@ -17,19 +17,27 @@ type CrashLoop struct {
 	Retries uint
 }
 
+func calculateLoopSleepTime(retries uint) time.Duration {
+	var sleepTime time.Duration
+	if retries == 0 {
+		sleepTime = time.Second * 5
+	} else {
+		sleepTime = time.Second * 5 * time.Duration(retries)
+	}
+
+	// cap to 2,5 minutes
+	sleepTime = time.Duration(common.Min(int64(sleepTime), int64(time.Second*150)))
+
+	return sleepTime
+}
+
 func (clm *AppManager) retry(crashTask *CrashLoop) {
 	crashTask.Retries++
 
 	safe.Go(func() {
-		var sleepTime time.Duration
-		if crashTask.Retries == 0 {
-			sleepTime = time.Second * 5
-		} else {
-			sleepTime = time.Second * 5 * time.Duration(crashTask.Retries)
-		}
 
 		// cap to 2,5 minutes
-		sleepTime = time.Duration(common.Min(int64(sleepTime), int64(time.Second*150)))
+		sleepTime := calculateLoopSleepTime(crashTask.Retries)
 
 		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
@@ -87,7 +95,7 @@ func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {
 	clm.crashLoopLock.Unlock()
 }
 
-func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) {
+func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) (uint, time.Duration) {
 	clm.crashLoopLock.Lock()
 	existingCrashes := clm.crashLoops
 
@@ -104,6 +112,9 @@ func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) {
 	if existingCrash != nil {
 		log.Debug().Msgf("retrying an existing crashloop for %s (%s)", payload.AppName, payload.Stage)
 		clm.retry(existingCrash)
+
+		sleepTime := calculateLoopSleepTime(existingCrash.Retries)
+		return existingCrash.Retries, sleepTime
 	} else {
 		payload.Retrying = true
 		crashLoopTask := &CrashLoop{Payload: payload, Retries: 0}
@@ -114,6 +125,8 @@ func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) {
 
 		log.Debug().Msgf("created a new crash loop for %s (%s)", payload.AppName, payload.Stage)
 		clm.retry(crashLoopTask)
-	}
 
+		sleepTime := calculateLoopSleepTime(crashLoopTask.Retries)
+		return crashLoopTask.Retries, sleepTime
+	}
 }
