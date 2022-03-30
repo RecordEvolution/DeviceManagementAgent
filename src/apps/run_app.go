@@ -143,7 +143,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s", payload.AppName))
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s (%s)", payload.AppName, app.Version))
 	if err != nil {
 		return err
 	}
