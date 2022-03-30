@@ -6,7 +6,6 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
-	"reagent/safe"
 	"time"
 
 	"github.com/pkg/errors"
@@ -112,10 +111,8 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	safe.Go((func() {
-		// remove old image
-		sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
-	}))
+	log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
+	sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
 
 	// update the version of the local requested states
 	payload.NewestVersion = app.Version
