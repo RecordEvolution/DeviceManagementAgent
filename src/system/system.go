@@ -135,8 +135,6 @@ func GetOSReleaseLatest() (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	log.Debug().Msgf("GetOSReleaseLatest(): %+v\n", dict)
-
 	return dict, nil
 }
 
