@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/messenger"
@@ -45,9 +46,9 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 		return nil, err
 	}
 	latestOSRelease := system.OSRelease{
-		Name:      osReleaseLatest[""],
-		Version:   osReleaseLatest["version"],
-		BuildTime: osReleaseLatest["buildtime"],
+		Name:      fmt.Sprint(osReleaseLatest[""]),
+		Version:   fmt.Sprint(osReleaseLatest["version"]),
+		BuildTime: fmt.Sprint(osReleaseLatest["buildtime"]),
 	}
 
 	// merge both

@@ -124,12 +124,12 @@ func GetOSReleaseCurrent() (map[string]string, error) {
 	return dict, nil
 }
 
-func GetOSReleaseLatest() (map[string]string, error) {
+func GetOSReleaseLatest() (map[string]interface{}, error) {
 	osInfoBytes, err := os.ReadFile("/etc/os-release-latest.json")
 	if err != nil {
 		return nil, err
 	}
-	dict := make(map[string]string)
+	dict := make(map[string]interface{})
 	err = json.Unmarshal(osInfoBytes, &dict)
 	if err != nil {
 		return nil, err
