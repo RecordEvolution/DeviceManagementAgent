@@ -83,6 +83,15 @@ Read more on `.reswarm` files and how they work here: https://docs.record-evolut
 
 ## Build
 
+On Macos building images: 
+```bash
+brew install coreutils
+cd src
+go mod tidy
+cd ..
+make build-all-docker
+```
+
 ## Implementation
 
 The _Reagent_ makes use of [WAMP](https://wamp-proto.org)

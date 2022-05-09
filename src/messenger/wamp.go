@@ -2,7 +2,7 @@ package messenger
 
 import (
 	"context"
-	"crypto/tls"
+	// "crypto/tls"
 	"errors"
 	"fmt"
 	"os"
@@ -72,10 +72,10 @@ type SocketConfig struct {
 func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
 	reswarmConfig := config.ReswarmConfig
 
-	tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
-	if err != nil {
-		return nil, err
-	}
+	// tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	cfg := client.Config{
 		Realm: "realm1",
@@ -87,10 +87,10 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 		},
 		Debug:  config.CommandLineArguments.DebugMessaging,
 		Logger: wrapZeroLogger(log.Logger),
-		TlsCfg: &tls.Config{
-			Certificates:       []tls.Certificate{tlscert},
-			InsecureSkipVerify: true,
-		},
+		// TlsCfg: &tls.Config{
+		// 	Certificates:       []tls.Certificate{tlscert},
+		// 	InsecureSkipVerify: true,
+		// },
 	}
 
 	if socketConfig.PingPongTimeout != 0 {
