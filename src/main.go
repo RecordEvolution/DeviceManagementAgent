@@ -130,6 +130,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt)
 	select {
 	case <-sigChan:
+		agent.TunnelManager.KillAll()
 		return
 	}
 }

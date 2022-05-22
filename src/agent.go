@@ -21,6 +21,7 @@ import (
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"reagent/tunnel"
 	"runtime"
 	"time"
 
@@ -38,6 +39,7 @@ type Agent struct {
 	External        *api.External
 	LogManager      *logging.LogManager
 	TerminalManager *terminal.TerminalManager
+	TunnelManager   tunnel.TunnelManager
 	Filesystem      *filesystem.Filesystem
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
@@ -168,6 +170,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	filesystem := filesystem.New()
+	tunnelManager := tunnel.NewPgrokTunnel(generalConfig.CommandLineArguments.TunnelAuthToken, "")
 	appStore := store.NewAppStore(database, dummyMessenger)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateObserver := apps.NewObserver(container, &appStore, &logManager)
@@ -245,6 +248,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Network:         networkInstance,
 		Privilege:       &privilege,
 		Filesystem:      &filesystem,
+		TunnelManager:   &tunnelManager,
 		System:          &systemAPI,
 		AppManager:      appManager,
 		TerminalManager: &terminalManager,
@@ -259,6 +263,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogManager:      &logManager,
 		Network:         networkInstance,
 		TerminalManager: &terminalManager,
+		TunnelManager:   &tunnelManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,

@@ -16,6 +16,7 @@ import (
 	"reagent/privilege"
 	"reagent/system"
 	"reagent/terminal"
+	"reagent/tunnel"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,7 @@ type External struct {
 	Messenger       messenger.Messenger
 	LogMessenger    messenger.Messenger
 	Database        persistence.Database
+	TunnelManager   tunnel.TunnelManager
 	Network         network.Network
 	Privilege       *privilege.Privilege
 	Filesystem      *filesystem.Filesystem
