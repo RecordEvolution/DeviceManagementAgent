@@ -11,6 +11,7 @@ import (
 	"reagent/messenger"
 	"reagent/safe"
 	"reagent/system"
+	"runtime"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ func NewSQLiteDb(config *config.Config) (*AppStateDatabase, error) {
 
 	firstLetter := databaseFileName[0:1]
 
-	if firstLetter != "/" && firstLetter != "." {
+	if firstLetter != "/" && firstLetter != "." && runtime.GOOS != "windows" {
 		databaseFileName += "./"
 	}
 
