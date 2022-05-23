@@ -83,7 +83,12 @@ Read more on `.reswarm` files and how they work here: https://docs.record-evolut
 
 ## Build
 
-On Macos building images: 
+```shell
+make rollout
+```
+
+
+On Macos building images locally (don't do that):
 ```bash
 brew install coreutils
 cd src
