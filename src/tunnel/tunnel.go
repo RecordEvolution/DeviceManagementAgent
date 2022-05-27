@@ -28,8 +28,8 @@ const TCP = "tcp"
 
 type PgrokManager struct {
 	TunnelManager
+	Config      *config.Config
 	binaryPath  string
-	authToken   string
 	serverAddr  string
 	tunnels     map[uint64]*Tunnel
 	tunnelsLock sync.Mutex
@@ -336,7 +336,7 @@ func NewPgrokTunnel(config *config.Config) PgrokManager {
 
 	binaryPath := getPgrokBinaryPath(config)
 	return PgrokManager{
-		authToken:  config.CommandLineArguments.TunnelAuthToken,
+		Config:     config,
 		binaryPath: binaryPath,
 		serverAddr: serverAddr,
 		tunnels:    make(map[uint64]*Tunnel),
@@ -430,7 +430,11 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 		protocol = HTTP_HTTPS
 	}
 
-	args = append(args, "-log", "stdout", "-authtoken", pm.authToken, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
+	deviceKey := pm.Config.ReswarmConfig.DeviceKey
+	deviceSecret := pm.Config.ReswarmConfig.Secret
+
+	auth := fmt.Sprintf("%d:%s", deviceKey, deviceSecret)
+	args = append(args, "-log", "stdout", "-auth", auth, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
 	pgrokTunnelCmd := cmd.NewCmd(pm.binaryPath, args...)
 	cmdStatusChan := pgrokTunnelCmd.Start()
 
