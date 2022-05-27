@@ -227,18 +227,19 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 	return nil
 }
 
-func (system *System) GetEnvironment() string {
-	env := system.config.ReswarmConfig.Environment
+func GetEnvironment(config *config.Config) string {
+	env := config.ReswarmConfig.Environment
 	if env != "" {
 		return env
 	}
 
-	endpoint := system.config.ReswarmConfig.DeviceEndpointURL
+	endpoint := config.ReswarmConfig.DeviceEndpointURL
 	if strings.Contains(endpoint, "datapods") {
 		return "test"
 	} else if strings.Contains(endpoint, "record-evolution") {
 		return "production"
 	}
+
 	return "local"
 }
 
@@ -269,7 +270,7 @@ func (system *System) GetLatestVersion() (string, error) {
 	var environmentVersionMap map[string]string
 	json.NewDecoder(resp.Body).Decode(&environmentVersionMap)
 
-	versionString := environmentVersionMap[system.GetEnvironment()]
+	versionString := environmentVersionMap[GetEnvironment(system.config)]
 	if versionString == "" {
 		versionString = environmentVersionMap["all"]
 	}

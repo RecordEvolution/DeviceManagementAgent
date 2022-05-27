@@ -6,25 +6,28 @@ import (
 	"reagent/errdefs"
 	"reagent/safe"
 	"reagent/store"
+	"reagent/tunnel"
 	"sync"
 
 	"github.com/rs/zerolog/log"
 )
 
 type AppManager struct {
-	AppStore      *store.AppStore
-	StateMachine  *StateMachine
-	StateObserver *StateObserver
-	crashLoops    map[*CrashLoop]struct{}
-	crashLoopLock sync.Mutex
+	AppStore         *store.AppStore
+	StateMachine     *StateMachine
+	StateObserver    *StateObserver
+	AppTunnelManager tunnel.AppTunnelManager
+	crashLoops       map[*CrashLoop]struct{}
+	crashLoopLock    sync.Mutex
 }
 
-func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver) *AppManager {
+func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.AppTunnelManager) *AppManager {
 	am := AppManager{
-		StateMachine:  sm,
-		StateObserver: so,
-		AppStore:      as,
-		crashLoops:    make(map[*CrashLoop]struct{}),
+		StateMachine:     sm,
+		StateObserver:    so,
+		AppStore:         as,
+		AppTunnelManager: tm,
+		crashLoops:       make(map[*CrashLoop]struct{}),
 	}
 
 	am.StateObserver.AppManager = &am
@@ -107,6 +110,33 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	select {
 	case err := <-errC:
 		app.UnlockTransition()
+
+		app.StateLock.Lock()
+		curAppState := app.CurrentState
+		app.StateLock.Unlock()
+
+		// handle app tunnels
+		fmt.Println("Current App State", curAppState)
+		if curAppState == common.RUNNING {
+			appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
+			if appTunnel != nil && !appTunnel.Running {
+				log.Debug().Msgf("Activating app tunnel for app: %d", app.AppKey)
+				err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
+				if err != nil {
+					log.Error().Err(err).Msgf("failed to activate app tunnel for %d", app.AppKey)
+				}
+			}
+		} else {
+			appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
+			if appTunnel != nil && appTunnel.Running {
+				log.Debug().Msgf("Deactivating app tunnel for app: %d", app.AppKey)
+
+				err = am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
+				if err != nil {
+					log.Error().Err(err).Msgf("failed to deactivate app tunnel for %d", app.AppKey)
+				}
+			}
+		}
 
 		if errdefs.IsNoActionTransition(err) {
 			log.Debug().Msg("A no action transition was executed, nothing to do. Will also not verify")
@@ -345,6 +375,35 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
+
+		portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
+		if err != nil {
+			return err
+		}
+
+		if payload.Stage == common.PROD {
+			app, err := am.AppStore.GetApp(payload.AppKey, common.PROD)
+			if err != nil {
+				return err
+			}
+
+			for _, portRule := range portRules {
+				if !portRule.Public {
+					continue
+				}
+
+				// if the app is currently running, spawn a tunnel, else just register it for later spawnage
+				if app.CurrentState == common.RUNNING {
+					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+					if err != nil {
+						return err
+					}
+				} else {
+					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+				}
+
+			}
+		}
 
 		// currentAppState := payload.CurrentState
 		// containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)

@@ -39,7 +39,7 @@ type Agent struct {
 	External        *api.External
 	LogManager      *logging.LogManager
 	TerminalManager *terminal.TerminalManager
-	TunnelManager   tunnel.TunnelManager
+	TunnelManager   tunnel.AppTunnelManager
 	Filesystem      *filesystem.Filesystem
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
@@ -170,12 +170,13 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	filesystem := filesystem.New()
-	tunnelManager := tunnel.NewPgrokTunnel(generalConfig.CommandLineArguments.TunnelAuthToken, "")
+	tunnelManager := tunnel.NewPgrokTunnel(generalConfig)
+	appTunnelManager := tunnel.NewPgrokAppTunnelManager(&tunnelManager, dummyMessenger)
 	appStore := store.NewAppStore(database, dummyMessenger)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateObserver := apps.NewObserver(container, &appStore, &logManager)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
-	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
+	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, &appTunnelManager)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
 	var networkInstance network.Network
@@ -230,30 +231,28 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	fmt.Println("Connected!")
 
-	// try to establish the log session
-	// logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})
-
 	// established a connection, replace the dummy messenger
 	appStore.SetMessenger(mainSession)
 	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
+	appTunnelManager.SetMessenger(mainSession)
 	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{
-		Container:       container,
-		Messenger:       mainSession,
-		LogMessenger:    mainSession,
-		Database:        database,
-		Network:         networkInstance,
-		Privilege:       &privilege,
-		Filesystem:      &filesystem,
-		TunnelManager:   &tunnelManager,
-		System:          &systemAPI,
-		AppManager:      appManager,
-		TerminalManager: &terminalManager,
-		LogManager:      &logManager,
-		Config:          generalConfig,
+		Container:        container,
+		Messenger:        mainSession,
+		LogMessenger:     mainSession,
+		Database:         database,
+		Network:          networkInstance,
+		Privilege:        &privilege,
+		Filesystem:       &filesystem,
+		AppTunnelManager: &appTunnelManager,
+		System:           &systemAPI,
+		AppManager:       appManager,
+		TerminalManager:  &terminalManager,
+		LogManager:       &logManager,
+		Config:           generalConfig,
 	}
 
 	return &Agent{
@@ -263,7 +262,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogManager:      &logManager,
 		Network:         networkInstance,
 		TerminalManager: &terminalManager,
-		TunnelManager:   &tunnelManager,
+		TunnelManager:   &appTunnelManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,

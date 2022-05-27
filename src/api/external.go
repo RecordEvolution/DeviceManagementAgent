@@ -26,19 +26,19 @@ import (
 // External is the API that is meant to be used by the externally exposed WAMP topics.
 // It contains all the functionality available in the reagent.
 type External struct {
-	Container       container.Container
-	Messenger       messenger.Messenger
-	LogMessenger    messenger.Messenger
-	Database        persistence.Database
-	TunnelManager   tunnel.TunnelManager
-	Network         network.Network
-	Privilege       *privilege.Privilege
-	Filesystem      *filesystem.Filesystem
-	System          *system.System
-	AppManager      *apps.AppManager
-	TerminalManager *terminal.TerminalManager
-	LogManager      *logging.LogManager
-	Config          *config.Config
+	Container        container.Container
+	Messenger        messenger.Messenger
+	LogMessenger     messenger.Messenger
+	Database         persistence.Database
+	AppTunnelManager tunnel.AppTunnelManager
+	Network          network.Network
+	Privilege        *privilege.Privilege
+	Filesystem       *filesystem.Filesystem
+	System           *system.System
+	AppManager       *apps.AppManager
+	TerminalManager  *terminal.TerminalManager
+	LogManager       *logging.LogManager
+	Config           *config.Config
 }
 
 // RegistrationHandler is the handler that gets executed whenever a registered topic gets called.
@@ -77,7 +77,11 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.DownloadOSUpdate: ex.downloadOSUpdateHandler,
 		topics.InstallOSUpdate:  ex.installOSUpdateHandler,
 
-		topics.ExecuteCommand: ex.codeExecutionHandler,
+		topics.ExecuteCommand:   ex.codeExecutionHandler,
+		topics.GetIPv4Addresses: ex.getCurrentIPAddresses,
+		topics.GetAppTunnel:     ex.getAppTunnel,
+		topics.CreateAppTunnel:  ex.createAppTunnel,
+		topics.KillAppTunnel:    ex.killAppTunnel,
 	}
 }
 

@@ -238,6 +238,7 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 		payload.Version = deviceSyncState.PresentVersion
 		payload.NewestVersion = deviceSyncState.NewestVersion
 		payload.EnvironmentVariables = deviceSyncState.Environment
+		payload.Ports = deviceSyncState.Ports
 
 		appPayloads = append(appPayloads, payload)
 	}
