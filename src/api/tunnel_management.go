@@ -59,11 +59,6 @@ func (ex *External) createAppTunnel(ctx context.Context, response messenger.Resu
 		return nil, errors.New("failed to parse port")
 	}
 
-	device_key, ok := options["device_key"].(uint64)
-	if !ok {
-		return nil, errors.New("failed to parse device_key")
-	}
-
 	app_key, ok := options["app_key"].(uint64)
 	if !ok {
 		return nil, errors.New("failed to parse app_key")
@@ -101,15 +96,16 @@ func (ex *External) createAppTunnel(ctx context.Context, response messenger.Resu
 		return nil, err
 	}
 
-	subdomain := fmt.Sprintf("%d-%s-%d", device_key, app_name, port)
+	deviceKey := ex.Config.ReswarmConfig.DeviceKey
+	subdomain := fmt.Sprintf("%d-%s-%d", deviceKey, app_name, port)
 	var tunnel *tunnel.AppTunnel
 	if app.CurrentState == common.RUNNING {
-		tunnel, err = ex.AppTunnelManager.CreateAppTunnel(app_key, device_key, port, protocol, subdomain)
+		tunnel, err = ex.AppTunnelManager.CreateAppTunnel(app_key, uint64(deviceKey), port, protocol, subdomain)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		tunnel = ex.AppTunnelManager.RegisterAppTunnel(app_key, device_key, port, protocol, subdomain)
+		tunnel = ex.AppTunnelManager.RegisterAppTunnel(app_key, uint64(deviceKey), port, protocol, subdomain)
 		if err != nil {
 			return nil, err
 		}
