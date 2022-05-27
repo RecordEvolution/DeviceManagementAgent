@@ -436,6 +436,8 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	auth := fmt.Sprintf("%d:%s", deviceKey, deviceSecret)
 	args = append(args, "-log", "stdout", "-auth", auth, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
 	pgrokTunnelCmd := cmd.NewCmd(pm.binaryPath, args...)
+
+	log.Debug().Msgf("Attempting to create tunnel with %s as credentials\n", auth)
 	cmdStatusChan := pgrokTunnelCmd.Start()
 
 	var httpURL string
