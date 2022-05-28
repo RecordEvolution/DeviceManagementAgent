@@ -329,9 +329,15 @@ func getPgrokBinaryPath(config *config.Config) string {
 
 func NewPgrokTunnel(config *config.Config) PgrokManager {
 	env := system.GetEnvironment(config)
-	serverAddr := "app.datapods.io:4443"
-	if env == "production" {
+
+	var serverAddr string
+	switch env {
+	case "production":
 		serverAddr = "app.record-evolution.com:4443"
+	case "test":
+		serverAddr = "app.datapods.io:4443"
+	case "local":
+		serverAddr = "app.local:4443"
 	}
 
 	binaryPath := getPgrokBinaryPath(config)
@@ -411,7 +417,6 @@ func (pm *PgrokManager) Kill(port uint64) error {
 }
 
 func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*Tunnel, error) {
-
 	pm.tunnelsLock.Lock()
 	tunnel := pm.tunnels[port]
 	if tunnel != nil {
@@ -422,6 +427,11 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	pm.tunnelsLock.Unlock()
 
 	var args = make([]string, 0)
+	// always use test domain for debugging locally
+	if pm.Config.CommandLineArguments.Environment == string(common.LOCAL) {
+		subdomain = "test"
+	}
+
 	if subdomain != "" {
 		args = append(args, fmt.Sprintf("-subdomain=%s", subdomain))
 	}
