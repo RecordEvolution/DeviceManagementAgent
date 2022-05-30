@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"reagent/benchmark"
+	"reagent/common"
 	"reagent/config"
 	"reagent/filesystem"
 	"reagent/logging"
@@ -34,7 +35,7 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
 	}
 
-	if release.BuildArch == "" {
+	if release.BuildArch == "" && cliArgs.Environment != string(common.LOCAL) {
 		fmt.Println("The 'reagent/release.BuildArch' build flag was not included during the build of this version.")
 		os.Exit(1)
 	}
@@ -124,13 +125,13 @@ func main() {
 	benchmark.TimeTillOnConnectAfterConnection = time.Since(benchmark.OnConnectInitAfterConnection)
 	benchmark.TimeTillOnConnect = time.Since(benchmark.OnConnectInit)
 
-	benchmark.LogBenchmarkResultsWhenFinished()
+	benchmark.LogBenchmarkResultsWhenFinished(&generalConfig)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 	select {
 	case <-sigChan:
-		agent.TunnelManager.KillAll()
+		agent.TunnelManager.GetTunnelManager().KillAll()
 		return
 	}
 }

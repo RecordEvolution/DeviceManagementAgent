@@ -2,6 +2,7 @@ package benchmark
 
 import (
 	"fmt"
+	"reagent/config"
 	"reagent/safe"
 	"time"
 
@@ -22,7 +23,7 @@ var TimeTillOnConnectAfterConnection time.Duration
 var TimeTillSocketConnectionFromLaunch time.Duration
 var TimeTillGreen time.Duration
 
-func LogBenchmarkResultsWhenFinished() {
+func LogBenchmarkResultsWhenFinished(config *config.Config) {
 	timers := []*time.Duration{&TimeTillPreConnectInit, &TimeTillSocketConnectionFromLaunch, &TimeTillSocketConnection, &TimeTillOnConnect, &TimeTillOnConnectAfterConnection, &TimeTillGreen}
 
 	safe.Go(func() {
@@ -35,7 +36,7 @@ func LogBenchmarkResultsWhenFinished() {
 			}
 
 			if finished {
-				LogResults()
+				LogResults(config)
 				break
 			} else {
 				time.Sleep(time.Millisecond * 500)
@@ -46,28 +47,29 @@ func LogBenchmarkResultsWhenFinished() {
 	})
 }
 
-func LogResults() {
+func LogResults(config *config.Config) {
 	initCompletionTimestamp := fmt.Sprintf("Time until pre connection initialization completion (from agent launch): %s", TimeTillPreConnectInit)
 	connectionCompletionTimestamp := fmt.Sprintf("Time until socket connection established (from agent launch): %s", TimeTillSocketConnectionFromLaunch)
 	connectionCompletionFromLaunchTimestamp := fmt.Sprintf("Time until socket connection established (from connection start): %s", TimeTillSocketConnection)
 	onConnectCompletionTimestamp := fmt.Sprintf("Time until Onconnect handler finished (from agent launch): %s", TimeTillOnConnect)
 	onConnectAfterSocketCompletionTimestamp := fmt.Sprintf("Time until Onconnect handler finished (from socket connection): %s", TimeTillOnConnectAfterConnection)
-
 	greenTimestamp := fmt.Sprintf("Time until 'green': %s", TimeTillGreen)
 
-	// print to stdout
-	fmt.Println("Benchmarks:")
-	fmt.Println("----------------------------------")
-	fmt.Println(initCompletionTimestamp)
-	fmt.Println()
-	fmt.Println(connectionCompletionTimestamp)
-	fmt.Println(connectionCompletionFromLaunchTimestamp)
-	fmt.Println()
-	fmt.Println(onConnectCompletionTimestamp)
-	fmt.Println(onConnectAfterSocketCompletionTimestamp)
-	fmt.Println()
-	fmt.Println(greenTimestamp)
-	fmt.Println("----------------------------------")
+	if !config.CommandLineArguments.PrettyLogging {
+		// print to stdout
+		fmt.Println("Benchmarks:")
+		fmt.Println("----------------------------------")
+		fmt.Println(initCompletionTimestamp)
+		fmt.Println()
+		fmt.Println(connectionCompletionTimestamp)
+		fmt.Println(connectionCompletionFromLaunchTimestamp)
+		fmt.Println()
+		fmt.Println(onConnectCompletionTimestamp)
+		fmt.Println(onConnectAfterSocketCompletionTimestamp)
+		fmt.Println()
+		fmt.Println(greenTimestamp)
+		fmt.Println("----------------------------------")
+	}
 
 	// log to file
 	log.Info().Msg(initCompletionTimestamp)
@@ -75,4 +77,5 @@ func LogResults() {
 	log.Info().Msg(connectionCompletionFromLaunchTimestamp)
 	log.Info().Msg(onConnectCompletionTimestamp)
 	log.Info().Msg(onConnectAfterSocketCompletionTimestamp)
+	log.Info().Msg(greenTimestamp)
 }

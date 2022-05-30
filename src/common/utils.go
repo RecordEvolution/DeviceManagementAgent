@@ -200,6 +200,42 @@ func Min(a int64, b int64) int64 {
 	return b
 }
 
+func Log(format string, stdout bool, logLevel string, val ...interface{}) {
+	levelMsg := strings.ToUpper(logLevel)
+
+	if stdout {
+		args := make([]interface{}, 0)
+		args = append(args, fmt.Sprintf("%s:", levelMsg))
+		args = append(args, val...)
+
+		if format == "" {
+			fmt.Println(args)
+			return
+		} else {
+			fmt.Printf(format, args)
+			return
+		}
+	}
+
+	event := log.Debug()
+	switch logLevel {
+	case "error":
+		event = log.Error()
+	case "info":
+		event = log.Info()
+	case "warning":
+		event = log.Warn()
+	}
+
+	if format == "" {
+		event.Msg(fmt.Sprint(val...))
+		return
+	} else {
+		event.Msgf(format, val...)
+		return
+	}
+}
+
 func PrettyFormat(data interface{}) (string, error) {
 	var p []byte
 	//    var err := error

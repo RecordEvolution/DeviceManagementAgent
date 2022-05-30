@@ -37,7 +37,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"serialNumber": serialNumber,
 	}
 
-	latestVersion, err := ex.System.GetLatestVersion()
+	latestVersion, err := ex.System.GetLatestVersion("re-agent")
 	if err == nil {
 		dict["latestVersion"] = latestVersion
 		dict["hasLatest"] = latestVersion == currentVersion

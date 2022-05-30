@@ -37,6 +37,7 @@ type DeviceStatus string
 const (
 	CONNECTED    DeviceStatus = "CONNECTED"
 	DISCONNECTED DeviceStatus = "DISCONNECTED"
+	CONFIGURING  DeviceStatus = "CONFIGURING"
 )
 
 var ErrNotConnected = errors.New("not connected")

@@ -23,6 +23,7 @@ import (
 	"reagent/terminal"
 	"reagent/tunnel"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -47,24 +48,27 @@ type Agent struct {
 }
 
 func (agent *Agent) OnConnect() error {
-	if agent.Config.CommandLineArguments.ShouldUpdate {
-		safe.Go(func() {
-			updateResult, err := agent.System.UpdateIfRequired(nil)
-			if err != nil {
-				log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
-			}
+	var wg sync.WaitGroup
 
-			if updateResult.DidUpdate {
-				log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.LatestVersion)
+	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
+	if agent.Config.CommandLineArguments.ShouldUpdate {
+		wg.Add(1)
+
+		safe.Go(func() {
+			defer wg.Done()
+
+			_, err := agent.System.UpdateSystem(nil)
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to update system")
 			}
 		})
 	}
 
-	if agent.Config.CommandLineArguments.ForceUpdate {
-		agent.System.Update(nil)
-	}
-
-	err := agent.updateRemoteDevice()
+	err = agent.updateRemoteDevice()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
@@ -90,7 +94,10 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
+	wg.Add(1)
 	safe.Go(func() {
+		defer wg.Done()
+
 		err = agent.LogManager.ReviveDeadLogs()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
@@ -102,19 +109,24 @@ func (agent *Agent) OnConnect() error {
 		}
 	})
 
+	wg.Add(1)
 	safe.Go(func() {
+		defer wg.Done()
+
 		err = agent.External.RegisterAll()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
 		}
-
-		err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-		}
-
-		benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
 	})
+
+	wg.Wait()
+
+	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
+	benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
 
 	return err
 }

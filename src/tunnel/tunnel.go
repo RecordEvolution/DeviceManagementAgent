@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reagent/common"
 	"reagent/config"
+	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/system"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -319,14 +318,6 @@ func (pm *PgrokAppTunnelManager) SetMessenger(m messenger.Messenger) {
 	pm.messenger = m
 }
 
-func getPgrokBinaryPath(config *config.Config) string {
-	binaryName := "pgrok"
-	if runtime.GOOS == "windows" {
-		binaryName += ".exe"
-	}
-	return filepath.Join(config.CommandLineArguments.AgentDir, binaryName)
-}
-
 func NewPgrokTunnel(config *config.Config) PgrokManager {
 	env := system.GetEnvironment(config)
 
@@ -340,7 +331,7 @@ func NewPgrokTunnel(config *config.Config) PgrokManager {
 		serverAddr = "app.local:4443"
 	}
 
-	binaryPath := getPgrokBinaryPath(config)
+	binaryPath := filesystem.GetPgrokBinaryPath(config)
 	return PgrokManager{
 		Config:     config,
 		binaryPath: binaryPath,

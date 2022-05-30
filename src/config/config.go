@@ -42,7 +42,7 @@ type CommandLineArguments struct {
 	AppsBuildDir               string
 	AppsSharedDir              string
 	AgentDir                   string
-	AgentDownloadDir           string
+	DownloadDir                string
 	CompressedBuildExtension   string
 	RemoteUpdateURL            string
 	TunnelAuthToken            string
@@ -55,7 +55,6 @@ type CommandLineArguments struct {
 	Profiling                  bool
 	ProfilingPort              uint
 	ShouldUpdate               bool
-	ForceUpdate                bool
 	PrettyLogging              bool
 	UseNetworkManager          bool
 	LogFileLocation            string
@@ -104,7 +103,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 
 	logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
 	debug := flag.Bool("debug", true, "sets the log level to debug")
-	forceUpdate := flag.Bool("forceUpdate", false, "forces the agent to download the latest version")
 	shouldUpdate := flag.Bool("update", true, "determines if the agent should update on start")
 	offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging")
 	env := flag.String("env", "production", "determines in which environment the agent will operate. Possible values: (production, test, local)")
@@ -113,7 +111,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port")
 	profilingPort := flag.Uint("profilingPort", 80, "port of the profiling service")
 	prettyLogging := flag.Bool("prettyLogging", false, "enables the pretty console writing, intended for debugging")
-	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com/re-agent", "used to download new versions of the agent and check for updates")
+	remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com", "bucket to be used to download updates")
 	agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
 	appsDir := flag.String("appsDir", defaultAppsDir, "default path for apps and app-data")
 	databaseFileName := flag.String("dbFileName", defaultDatabaseFileName, "defines the name used to persist the database file")
@@ -131,7 +129,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		AppsDirectory:              *appsDir,
 		AppsBuildDir:               (*appsDir) + "/build",
 		AppsSharedDir:              (*appsDir) + "/shared",
-		AgentDownloadDir:           (*agentDir) + "/downloads",
+		DownloadDir:                (*agentDir) + "/downloads",
 		AgentDir:                   *agentDir,
 		RemoteUpdateURL:            *remoteUpdateURL,
 		CompressedBuildExtension:   *compressedBuildExtension,
@@ -147,7 +145,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		Profiling:                  *profiling,
 		ProfilingPort:              *profilingPort,
 		ShouldUpdate:               *shouldUpdate,
-		ForceUpdate:                *forceUpdate,
 		DatabaseFileName:           *databaseFileName,
 		PingPongTimeout:            *pingPongTimeout,
 		ResponseTimeout:            *responseTimeout,
