@@ -219,7 +219,7 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
 	errorC := make(chan error, 1)
-	pollingRate := time.Millisecond * 500
+	pollingRate := time.Second * 1
 
 	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
