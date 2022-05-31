@@ -157,7 +157,6 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancelFunc()
 
-	fmt.Printf("%+v\n", payload)
 	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
 	if err != nil {
 		return err

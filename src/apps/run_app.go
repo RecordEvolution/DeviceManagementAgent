@@ -65,10 +65,11 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		Resources: container.Resources{
 			// DeviceRequests: []container.DeviceRequest{
 			// 	{
-			// 		Count: -1,
+			// 		Driver: "nvidia",
+			// 		Count:  -1,
 			// 		Capabilities: [][]string{
 			// 			{
-			// 				"gpu",
+			// 				"compute", "compat32", "graphics", "utility", "video", "display",
 			// 			},
 			// 		},
 			// 	},

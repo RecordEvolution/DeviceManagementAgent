@@ -34,6 +34,67 @@ func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm t
 	return &am
 }
 
+func (am *AppManager) syncPortState(payload common.TransitionPayload, app *common.App) error {
+	app.StateLock.Lock()
+	curAppState := app.CurrentState
+	app.StateLock.Unlock()
+
+	// handle app tunnels
+	portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
+	if err != nil {
+		return err
+	}
+
+	for _, portRule := range portRules {
+		appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
+
+		// port creation
+		if portRule.Public {
+			// if the app is currently running, spawn a tunnel, else just register it for later spawnage
+			if curAppState == common.RUNNING {
+				if appTunnel == nil {
+					log.Debug().Msgf("Creating app tunnel for app: %d", app.AppKey)
+					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+					if err != nil {
+						return err
+					}
+				} else {
+					if !appTunnel.Running {
+						log.Debug().Msgf("Activating app tunnel for app: %d", app.AppKey)
+						err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
+						if err != nil {
+							log.Error().Err(err).Msgf("failed to activate app tunnel for %d", app.AppKey)
+						}
+					}
+				}
+			} else {
+				if appTunnel == nil {
+					log.Debug().Msgf("Registering app tunnel for app: %d", app.AppKey)
+					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+				} else {
+					if appTunnel.Running {
+						log.Debug().Msgf("Deactivating app tunnel for app: %d", app.AppKey)
+						am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
+					}
+				}
+			}
+
+			// port deletion
+		} else {
+			if appTunnel != nil {
+				log.Debug().Msgf("Killing app tunnel for app: %d", app.AppKey)
+				err = am.AppTunnelManager.KillAppTunnel(portRule.AppKey)
+				if err != nil {
+					log.Error().Err(err).Msgf("failed to kill app tunnel for %d", app.AppKey)
+				}
+			}
+		}
+
+	}
+
+	return nil
+}
+
 func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
 	if err != nil {
@@ -60,6 +121,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	builtState := curAppState == common.BUILT && requestedAppState == common.BUILT
 	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
+
+		// sync ports even when app is already in the same state
+		err = am.syncPortState(payload, app)
+		if err != nil {
+			log.Error().Err(err).Msgf("failed to sync port state")
+			return err
+		}
+
 		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
 		return nil
 	}
@@ -110,33 +179,6 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	select {
 	case err := <-errC:
 		app.UnlockTransition()
-
-		app.StateLock.Lock()
-		curAppState := app.CurrentState
-		app.StateLock.Unlock()
-
-		// handle app tunnels
-		fmt.Println("Current App State", curAppState)
-		if curAppState == common.RUNNING {
-			appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
-			if appTunnel != nil && !appTunnel.Running {
-				log.Debug().Msgf("Activating app tunnel for app: %d", app.AppKey)
-				err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
-				if err != nil {
-					log.Error().Err(err).Msgf("failed to activate app tunnel for %d", app.AppKey)
-				}
-			}
-		} else {
-			appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
-			if appTunnel != nil && appTunnel.Running {
-				log.Debug().Msgf("Deactivating app tunnel for app: %d", app.AppKey)
-
-				err = am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
-				if err != nil {
-					log.Error().Err(err).Msgf("failed to deactivate app tunnel for %d", app.AppKey)
-				}
-			}
-		}
 
 		if errdefs.IsNoActionTransition(err) {
 			log.Debug().Msg("A no action transition was executed, nothing to do. Will also not verify")
@@ -271,6 +313,12 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 			_ = am.RequestAppState(requestedStatePayload)
 		})
+	} else {
+		err = am.syncPortState(requestedStatePayload, app)
+		if err != nil {
+			log.Error().Err(err).Msgf("failed to sync port state")
+			return err
+		}
 	}
 
 	return nil
@@ -408,79 +456,79 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 			}
 		}
 
-		// currentAppState := payload.CurrentState
-		// containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)
-
-		// ctx := context.Background()
-		// container, err := am.StateMachine.Container.GetContainerState(ctx, containerName)
-		// if err != nil {
-		// 	if !errdefs.IsContainerNotFound(err) {
-		// 		return err
-		// 	}
-
-		// 	// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
-		// 	var fullImageName string
-		// 	if payload.Stage == common.DEV {
-		// 		fullImageName = payload.RegistryImageName.Dev
-		// 	} else if payload.Stage == common.PROD {
-		// 		fullImageName = payload.RegistryImageName.Prod
-		// 	}
-
-		// 	images, err := am.StateMachine.Container.GetImages(ctx, fullImageName)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-
-		// 	var correctedAppState common.AppState
-		// 	// no images were found (and no container) for this guy, so this guy is REMOVED
-		// 	if len(images) == 0 {
-		// 		if currentAppState == common.UNINSTALLED {
-		// 			correctedAppState = common.UNINSTALLED
-		// 		} else {
-		// 			correctedAppState = common.REMOVED
-		// 		}
-		// 	} else {
-		// 		// images were found for this guy, but no container, this means --> PRESENT
-		// 		correctedAppState = common.PRESENT
-		// 	}
-
-		// 	if err != nil {
-		// 		log.Error().Err(err).Msg("failed to notify app state")
-		// 	}
-
-		// 	payload.CurrentState = correctedAppState
-
-		// } else {
-
-		// 	appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
-		// 	if err != nil {
-		// 		return err
-		// 	}
-
-		// 	var correctedAppState common.AppState
-		// 	switch currentAppState {
-		// 	case common.DOWNLOADING,
-		// 		common.TRANSFERING,
-		// 		common.BUILDING,
-		// 		common.PUBLISHING:
-		// 		correctedAppState = common.REMOVED
-		// 	case common.UPDATING:
-		// 		correctedAppState = common.PRESENT
-		// 	case common.STOPPING,
-		// 		common.STARTING:
-		// 		correctedAppState = appStateDeterminedByContainer
-		// 	default:
-		// 		correctedAppState = appStateDeterminedByContainer
-		// 	}
-
-		// 	payload.CurrentState = correctedAppState
-		// }
-
 		err = am.CreateOrUpdateApp(payload)
 		if err != nil {
 			return err
 		}
 	}
+
+	// currentAppState := payload.CurrentState
+	// containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)
+
+	// ctx := context.Background()
+	// container, err := am.StateMachine.Container.GetContainerState(ctx, containerName)
+	// if err != nil {
+	// 	if !errdefs.IsContainerNotFound(err) {
+	// 		return err
+	// 	}
+
+	// 	// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
+	// 	var fullImageName string
+	// 	if payload.Stage == common.DEV {
+	// 		fullImageName = payload.RegistryImageName.Dev
+	// 	} else if payload.Stage == common.PROD {
+	// 		fullImageName = payload.RegistryImageName.Prod
+	// 	}
+
+	// 	images, err := am.StateMachine.Container.GetImages(ctx, fullImageName)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	var correctedAppState common.AppState
+	// 	// no images were found (and no container) for this guy, so this guy is REMOVED
+	// 	if len(images) == 0 {
+	// 		if currentAppState == common.UNINSTALLED {
+	// 			correctedAppState = common.UNINSTALLED
+	// 		} else {
+	// 			correctedAppState = common.REMOVED
+	// 		}
+	// 	} else {
+	// 		// images were found for this guy, but no container, this means --> PRESENT
+	// 		correctedAppState = common.PRESENT
+	// 	}
+
+	// 	if err != nil {
+	// 		log.Error().Err(err).Msg("failed to notify app state")
+	// 	}
+
+	// 	payload.CurrentState = correctedAppState
+
+	// } else {
+
+	// 	appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	var correctedAppState common.AppState
+	// 	switch currentAppState {
+	// 	case common.DOWNLOADING,
+	// 		common.TRANSFERING,
+	// 		common.BUILDING,
+	// 		common.PUBLISHING:
+	// 		correctedAppState = common.REMOVED
+	// 	case common.UPDATING:
+	// 		correctedAppState = common.PRESENT
+	// 	case common.STOPPING,
+	// 		common.STARTING:
+	// 		correctedAppState = appStateDeterminedByContainer
+	// 	default:
+	// 		correctedAppState = appStateDeterminedByContainer
+	// 	}
+
+	// 	payload.CurrentState = correctedAppState
+	// }
 
 	return nil
 }

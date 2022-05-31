@@ -79,9 +79,6 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 
 		topics.ExecuteCommand:   ex.codeExecutionHandler,
 		topics.GetIPv4Addresses: ex.getCurrentIPAddresses,
-		topics.GetAppTunnel:     ex.getAppTunnel,
-		topics.CreateAppTunnel:  ex.createAppTunnel,
-		topics.KillAppTunnel:    ex.killAppTunnel,
 	}
 }
 

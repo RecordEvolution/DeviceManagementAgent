@@ -42,7 +42,3 @@ const InstallOSUpdate Topic = "install_os_update"
 const InstallOSUpdateProgress Topic = "install_os_update_progress"
 const PerformOSUpdate Topic = "perform_os_update"
 const PerformOSUpdateProgress Topic = "perform_os_update_progress"
-
-const GetAppTunnel Topic = "get_all_app_tunnels"
-const CreateAppTunnel Topic = "create_app_tunnel"
-const KillAppTunnel Topic = "kill_app_tunnel"
