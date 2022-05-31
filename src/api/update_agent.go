@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/system"
@@ -30,11 +31,11 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		return nil, errors.New("cannot update the agent on a not ReswarmOS system")
 	}
 
-	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {
+	progressCallback := func(downloadProgress filesystem.DownloadProgress) {
 		progress := common.Dict{
-			"increment":    increment,
-			"currentBytes": currentBytes,
-			"fileSize":     fileSize,
+			"increment":    downloadProgress.Increment,
+			"currentBytes": downloadProgress.CurrentBytes,
+			"fileSize":     downloadProgress.TotalFileSize,
 		}
 
 		serialNumber := ex.Config.ReswarmConfig.SerialNumber
@@ -42,7 +43,7 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		ex.LogMessenger.Publish(topics.Topic(topic), []interface{}{progress}, nil, nil)
 	}
 
-	updateResult, err := ex.System.UpdateIfRequired(progressCallback)
+	updateResult, err := ex.System.UpdateSystem(progressCallback)
 	if err != nil {
 		if !errdefs.IsInProgress(err) {
 			return nil, err

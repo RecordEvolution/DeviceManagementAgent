@@ -3,14 +3,30 @@ package filesystem
 import (
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"reagent/config"
+	"reagent/errdefs"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/semaphore"
 )
+
+type DownloadProgress struct {
+	FilePath      string
+	Increment     uint64
+	CurrentBytes  uint64
+	TotalFileSize uint64
+}
+
+var DownloadLocks = make(map[string]*semaphore.Weighted)
 
 func FileExists(filename string) (bool, error) {
 	info, err := os.Stat(filename)
@@ -37,32 +53,62 @@ func OverwriteFile(filePath string, value string) error {
 }
 
 type WriteCounter struct {
-	callback func(increment uint64, currentBytes uint64, totalFileSize uint64)
+	callback func(DownloadProgress)
 	Size     uint64
 	Total    uint64
+	FilePath string
 }
 
 func (wc *WriteCounter) Write(p []byte) (int, error) {
 	n := len(p)
 	wc.Total += uint64(n)
 
-	printCallBack(uint64(n), wc.Total)
+	progress := DownloadProgress{
+		Increment:     uint64(n),
+		FilePath:      wc.FilePath,
+		CurrentBytes:  wc.Total,
+		TotalFileSize: wc.Size,
+	}
 
-	// custom download callback
 	if wc.callback != nil {
-		wc.callback(uint64(n), wc.Total, wc.Size)
+		wc.callback(progress)
 	}
 	return n, nil
 }
 
-func printCallBack(increment uint64, totalBytes uint64) {
-	megabytes := float64(totalBytes) * math.Pow(10, -6)
+func GetPgrokBinaryPath(config *config.Config) string {
+	binaryName := "pgrok"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	return filepath.Join(config.CommandLineArguments.AgentDir, binaryName)
+}
+
+func printCallBack(dp DownloadProgress) {
 	fmt.Printf("\r%s", strings.Repeat(" ", 35))
-	fmt.Printf("\rDownloading... %.3f MB", megabytes)
+	fmt.Printf("\rDownloading... %+v", dp)
 }
 
 // Downloads any data from a given URL to a given filePath. Progress is logged to CLI
-func DownloadURL(filePath string, url string, callback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
+func DownloadURL(filePath string, url string, callback func(DownloadProgress)) error {
+	var currentLock *semaphore.Weighted
+	if DownloadLocks[filePath] == nil {
+		currentLock = semaphore.NewWeighted(1)
+		DownloadLocks[filePath] = currentLock
+	} else {
+		currentLock = DownloadLocks[filePath]
+	}
+
+	log.Debug().Msgf("Trying to acquire download lock for %s\n", filePath)
+	if !currentLock.TryAcquire(1) {
+		return errdefs.InProgress(errors.New("download already in progress"))
+	}
+
+	defer func() {
+		currentLock.Release(1)
+		delete(DownloadLocks, filePath)
+	}()
+
 	// open the required file
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -95,12 +141,10 @@ func DownloadURL(filePath string, url string, callback func(increment uint64, cu
 	}
 
 	// copy the http body into the file
-	counter := &WriteCounter{callback: callback, Size: uint64(size)}
+	counter := &WriteCounter{callback: callback, Size: uint64(size), FilePath: filePath}
 	if _, err = io.Copy(out, io.TeeReader(resp.Body, counter)); err != nil {
 		return err
 	}
-
-	fmt.Print(" OK!\n")
 
 	return nil
 }

@@ -20,6 +20,7 @@ const RemoveWiFiConfiguration Topic = "remove_wifi_configuration"
 const ScanWifiNetworks Topic = "scan_wifi_networks"
 const SelectWiFiNetwork Topic = "select_wifi_network"
 const RestartWifi Topic = "restart_wifi"
+const GetIPv4Addresses Topic = "get_ipv4_addresses"
 
 const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"

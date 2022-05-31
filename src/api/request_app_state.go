@@ -72,6 +72,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	requestorAccountKeyKw2 := kwargs["account_id"]
 	environmentKw := kwargs["environment"]
+	portsKw := kwargs["ports"]
 	// dtaKeyKw := kwargs["device_to_app_key"]
 	versionKw := kwargs["version"]
 	presentVersionKw := kwargs["present_version"]
@@ -96,6 +97,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var requestUpdate bool
 	var cancelTransition bool
 	var ok bool
+	var ports []interface{}
 	var environment map[string]interface{}
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -256,6 +258,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if portsKw != nil {
+		ports, ok = portsKw.([]interface{})
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("%w ports", errdefs.ErrFailedToParse)
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -295,6 +304,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	payload.PresentVersion = presentVersion
 
 	payload.EnvironmentVariables = environment
+
+	payload.Ports = ports
 
 	payload.CancelTransition = cancelTransition
 

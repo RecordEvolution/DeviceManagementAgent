@@ -34,5 +34,8 @@ func GetVersion() string {
 }
 
 func GetBuildArch() string {
+	if BuildArch == "" {
+		return "amd64"
+	}
 	return BuildArch
 }

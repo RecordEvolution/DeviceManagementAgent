@@ -53,6 +53,15 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 	}, nil
 }
 
+func (ex *External) getCurrentIPAddresses(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	ipv4Addresses, err := network.GetIPv4Addresses()
+	if err != nil {
+		return nil, err
+	}
+
+	return &messenger.InvokeResult{Arguments: []interface{}{ipv4Addresses}}, nil
+}
+
 func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
 	if err != nil {

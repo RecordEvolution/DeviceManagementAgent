@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/release"
+	"reagent/safe"
 	"runtime"
 	"strings"
 	"time"
@@ -20,17 +19,16 @@ import (
 
 	"github.com/Masterminds/semver"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/semaphore"
 )
 
 type System struct {
-	config     *config.Config
-	updateLock *semaphore.Weighted
+	config *config.Config
 }
 
 type UpdateResult struct {
 	CurrentVersion string
 	LatestVersion  string
+	Message        string
 	DidUpdate      bool
 	InProgress     bool
 	TotalFileSize  uint64
@@ -38,8 +36,7 @@ type UpdateResult struct {
 
 func New(config *config.Config) System {
 	return System{
-		config:     config,
-		updateLock: semaphore.NewWeighted(1),
+		config: config,
 	}
 }
 
@@ -57,20 +54,28 @@ func (sys *System) Poweroff() error {
 
 // ------------------------------------------------------------------------- //
 
-func (sys *System) updateAgent(versionString string, progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
-	agentDir := sys.config.CommandLineArguments.AgentDir
-	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL
-	agentURL := fmt.Sprintf("%s/%s/%s/%s/reagent", remoteUpdateURL, runtime.GOOS, release.GetBuildArch(), versionString)
-	newAgentDestination := fmt.Sprintf("%s/reagent-v%s", agentDir, versionString)
-	tmpFilePath := sys.config.CommandLineArguments.AgentDownloadDir + "/reagent-v" + versionString
-
-	if !sys.updateLock.TryAcquire(1) {
-		return errdefs.InProgress(errors.New("update already in progress"))
+func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, progressCallback func(filesystem.DownloadProgress)) error {
+	isWindows := runtime.GOOS == "windows"
+	agentHomedir := sys.config.CommandLineArguments.AgentDir
+	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
+	agentURL := fmt.Sprintf("%s/%s/%s/%s/%s", remoteUpdateURL, runtime.GOOS, release.GetBuildArch(), versionString, fileName)
+	if isWindows {
+		agentURL += ".exe"
 	}
 
-	defer sys.updateLock.Release(1)
+	var actualFileDestination string
+	if includeVersionString {
+		actualFileDestination = fmt.Sprintf("%s/%s-v%s", agentHomedir, fileName, versionString)
+	} else {
+		actualFileDestination = fmt.Sprintf("%s/%s", agentHomedir, fileName)
+	}
 
-	log.Debug().Msgf("Attempting to download latest REagent at %s", agentURL)
+	if isWindows {
+		actualFileDestination += ".exe"
+	}
+
+	tmpFilePath := sys.config.CommandLineArguments.DownloadDir + "/" + fileName + "-v" + versionString
+	log.Debug().Msgf("Attempting to download latest %s binary at %s", fileName, agentURL)
 	err := filesystem.DownloadURL(tmpFilePath, agentURL, progressCallback)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to download from URL: %s", agentURL)
@@ -79,18 +84,15 @@ func (sys *System) updateAgent(versionString string, progressCallback func(incre
 
 	err = os.Chmod(tmpFilePath, 0755)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to set permissions for agent binary")
+		log.Error().Err(err).Msgf("Failed to set permissions for %s binary", fileName)
 		return err
 	}
 
-	// move it to the actual agent dir
-	err = os.Rename(tmpFilePath, newAgentDestination)
+	err = os.Rename(tmpFilePath, actualFileDestination)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to move agent to AgentDir")
+		log.Error().Err(err).Msgf("Failed to move %s binary to AgentDir", fileName)
 		return err
 	}
-
-	log.Debug().Msg("Reagent update finished...")
 
 	return nil
 }
@@ -185,7 +187,7 @@ func getOSUpdateTags() (string, string, error) {
 // ------------------------------------------------------------------------- //
 
 // GetOSUpdate downloads the actual update-bundle to the device
-func GetOSUpdate(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) error {
+func GetOSUpdate(progressCallback func(filesystem.DownloadProgress)) error {
 
 	// find release tags from update file regularly updated by the system
 	updateURL, updateFile, err := getOSUpdateTags()
@@ -227,49 +229,33 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 	return nil
 }
 
-func (system *System) GetEnvironment() string {
-	env := system.config.ReswarmConfig.Environment
+func GetEnvironment(config *config.Config) string {
+	env := config.ReswarmConfig.Environment
 	if env != "" {
 		return env
 	}
 
-	endpoint := system.config.ReswarmConfig.DeviceEndpointURL
+	endpoint := config.ReswarmConfig.DeviceEndpointURL
 	if strings.Contains(endpoint, "datapods") {
 		return "test"
 	} else if strings.Contains(endpoint, "record-evolution") {
 		return "production"
 	}
+
 	return "local"
 }
 
-func (system *System) GetLatestVersion() (string, error) {
-	reagentBucketURL := system.config.CommandLineArguments.RemoteUpdateURL
-	client := http.Client{
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout: 5 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   5 * time.Second,
-			ExpectContinueTimeout: 5 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Second,
-		},
-		Timeout: 10 * time.Second, // timeout for the entire request, i.e. the download itself
-	}
-
-	resp, err := client.Get(reagentBucketURL + "/availableVersions.json")
+func (system *System) GetLatestVersion(bucketName string) (string, error) {
+	pgrokBucket := system.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
+	resp, err := filesystem.GetRemoteFile(pgrokBucket + "/availableVersions.json")
 	if err != nil {
-		// happens when time setup (ReswarmOS) is not setup yet
-		if strings.Contains(err.Error(), "certificate has expired or is not yet valid") {
-			time.Sleep(time.Second * 1)
-			return system.GetLatestVersion()
-		}
 		return "", err
 	}
 
 	var environmentVersionMap map[string]string
-	json.NewDecoder(resp.Body).Decode(&environmentVersionMap)
+	json.NewDecoder(resp).Decode(&environmentVersionMap)
 
-	versionString := environmentVersionMap[system.GetEnvironment()]
+	versionString := environmentVersionMap[GetEnvironment(system.config)]
 	if versionString == "" {
 		versionString = environmentVersionMap["all"]
 	}
@@ -277,15 +263,58 @@ func (system *System) GetLatestVersion() (string, error) {
 	return versionString, nil
 }
 
-func (system *System) Update(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
-	latestVersion, err := system.GetLatestVersion()
+func (system *System) compareVersion(currentVersion string, latestVersion string) (bool, []error, error) {
+	constraint, err := semver.NewConstraint(fmt.Sprintf("> %s", currentVersion))
+	if err != nil {
+		return false, nil, err
+	}
+
+	newVersion, err := semver.NewVersion(latestVersion)
+	if err != nil {
+		return false, nil, err
+	}
+
+	shouldUpdate, errors := constraint.Validate(newVersion)
+	return shouldUpdate, errors, nil
+}
+
+func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+	latestVersion, err := system.GetLatestVersion("pgrok")
 	if err != nil {
 		return UpdateResult{}, err
 	}
 
-	currentVersion := release.GetVersion()
-	log.Info().Msgf("Latest version: %s, Current version: %s", latestVersion, currentVersion)
-	err = system.updateAgent(latestVersion, progressCallback)
+	exists := true
+	var shouldUpdate bool
+	var errorsArr []error
+
+	currentVersion, err := system.getPgrokCurrentVersion()
+	if err != nil {
+		if errors.Is(err, errdefs.ErrNotFound) {
+			exists = false
+			shouldUpdate = true
+		} else {
+			return UpdateResult{}, err
+		}
+	}
+
+	if exists {
+		shouldUpdate, errorsArr, err = system.compareVersion(currentVersion, latestVersion)
+		if err != nil {
+			return UpdateResult{}, err
+		}
+	}
+
+	if !shouldUpdate {
+		return UpdateResult{
+			CurrentVersion: currentVersion,
+			LatestVersion:  latestVersion,
+			Message:        fmt.Sprintf("%+v\n", errorsArr),
+			DidUpdate:      false,
+		}, nil
+	}
+
+	err = system.downloadBinary("pgrok", "pgrok", latestVersion, false, progressCallback)
 	if err != nil {
 		if errdefs.IsInProgress(err) {
 			return UpdateResult{
@@ -305,8 +334,111 @@ func (system *System) Update(progressCallback func(increment uint64, currentByte
 	}, nil
 }
 
-func (system *System) UpdateIfRequired(progressCallback func(increment uint64, currentBytes uint64, totalFileSize uint64)) (UpdateResult, error) {
-	latestVersion, err := system.GetLatestVersion()
+func (system *System) getPgrokCurrentVersion() (string, error) {
+	pgrokPath := filesystem.GetPgrokBinaryPath(system.config)
+
+	exists, err := filesystem.FileExists(pgrokPath)
+	if err != nil {
+		return "", err
+	}
+
+	if !exists {
+		return "", errdefs.ErrNotFound
+	}
+
+	cmd := exec.Command(pgrokPath, "version")
+	stdout, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(stdout)), nil
+}
+
+func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+	progressChan := make(chan filesystem.DownloadProgress)
+	progressFunction := func(dp filesystem.DownloadProgress) {
+		progressChan <- dp
+	}
+
+	startUpdate := time.Now()
+	safe.Go(func() {
+		updateResult, err := system.updatePgrokIfRequired(progressFunction)
+		if err != nil {
+			log.Error().Stack().Err(err).Msgf("Failed to update pgrok.. continuing...")
+		}
+
+		if !updateResult.DidUpdate {
+			log.Debug().Msgf("Not downloading Pgrok because: %s", updateResult.Message)
+		}
+	})
+
+	safe.Go(func() {
+		updateResult, err := system.updateAgentIfRequired(progressFunction)
+		if err != nil {
+			log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+		}
+
+		if !updateResult.DidUpdate {
+			log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
+		}
+	})
+
+	bufferProgress := &filesystem.DownloadProgress{
+		Increment:     0,
+		CurrentBytes:  0,
+		TotalFileSize: 0,
+	}
+
+	progressMap := make(map[string]*filesystem.DownloadProgress)
+	for progress := range progressChan {
+		currentProgress := &filesystem.DownloadProgress{}
+		if progressMap[progress.FilePath] == nil {
+			progressMap[progress.FilePath] = &filesystem.DownloadProgress{
+				Increment:     progress.Increment,
+				CurrentBytes:  progress.CurrentBytes,
+				FilePath:      progress.FilePath,
+				TotalFileSize: progress.TotalFileSize,
+			}
+		} else {
+			currentProgress = progressMap[progress.FilePath]
+		}
+
+		currentProgress.Increment = progress.Increment
+		currentProgress.CurrentBytes = progress.CurrentBytes
+
+		for _, storedProgress := range progressMap {
+			bufferProgress.Increment = storedProgress.Increment
+			bufferProgress.CurrentBytes += storedProgress.CurrentBytes
+			bufferProgress.TotalFileSize += storedProgress.TotalFileSize
+		}
+
+		if progressCallback != nil {
+			progressCallback(*bufferProgress)
+		}
+
+		if bufferProgress.CurrentBytes == bufferProgress.TotalFileSize {
+			close(progressChan)
+			continue
+		}
+
+		bufferProgress.Increment = 0
+		bufferProgress.CurrentBytes = 0
+		bufferProgress.TotalFileSize = 0
+	}
+
+	updateTime := time.Since(startUpdate)
+
+	log.Debug().Msgf("Time it took to update system: %s\n", updateTime)
+
+	return UpdateResult{
+		DidUpdate:  true,
+		InProgress: false,
+	}, nil
+}
+
+func (system *System) updateAgentIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+	latestVersion, err := system.GetLatestVersion("re-agent")
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -315,45 +447,22 @@ func (system *System) UpdateIfRequired(progressCallback func(increment uint64, c
 
 	log.Info().Msgf("Should update? Latest: %s, Current: %s", latestVersion, currentVersion)
 
-	constraint, err := semver.NewConstraint(fmt.Sprintf("> %s", currentVersion))
+	shouldUpdate, errorsArr, err := system.compareVersion(currentVersion, latestVersion)
 	if err != nil {
-		return UpdateResult{
-			CurrentVersion: currentVersion,
-			LatestVersion:  latestVersion,
-			DidUpdate:      false,
-		}, err
-	}
-
-	newVersion, err := semver.NewVersion(latestVersion)
-	if err != nil {
-		return UpdateResult{
-			CurrentVersion: currentVersion,
-			LatestVersion:  latestVersion,
-			DidUpdate:      false,
-		}, err
-	}
-
-	shouldUpdate, errors := constraint.Validate(newVersion)
-	if err != nil {
-		return UpdateResult{
-			CurrentVersion: currentVersion,
-			LatestVersion:  latestVersion,
-			DidUpdate:      false,
-		}, nil
+		return UpdateResult{}, err
 	}
 
 	if !shouldUpdate {
-		log.Debug().Msgf("Not updating because: %+v\n", errors)
-
 		return UpdateResult{
 			CurrentVersion: currentVersion,
 			LatestVersion:  latestVersion,
+			Message:        fmt.Sprintf("%+v\n", errorsArr),
 			DidUpdate:      false,
 		}, nil
 	}
 
 	log.Info().Msgf("Agent not up to date, downloading: %s", latestVersion)
-	err = system.updateAgent(latestVersion, progressCallback)
+	err = system.downloadBinary("reagent", "re-agent", latestVersion, true, progressCallback)
 	if err != nil {
 		if errdefs.IsInProgress(err) {
 			return UpdateResult{

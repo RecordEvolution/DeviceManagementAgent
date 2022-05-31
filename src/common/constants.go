@@ -8,6 +8,7 @@ import (
 type AppState string
 type Stage string
 type UpdateStatus string
+type Environment string
 
 func IsCancelableState(appState AppState) bool {
 	switch appState {
@@ -125,6 +126,12 @@ const (
 	UPDATING    AppState = "UPDATING"
 	DELETING    AppState = "DELETING"
 	RUNNING     AppState = "RUNNING"
+)
+
+const (
+	PRODUCTION Environment = "production"
+	TEST       Environment = "test"
+	LOCAL      Environment = "local"
 )
 
 const (

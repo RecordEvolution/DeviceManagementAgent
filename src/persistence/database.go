@@ -81,10 +81,18 @@ func (sqlite *AppStateDatabase) Init() error {
 	for _, file := range scriptFiles {
 		fileName := file.Name()
 		log.Debug().Msgf("Executing Database script: %s", fileName)
-		err := sqlite.execute(scriptsDir + "/" + fileName)
-		if err != nil {
-			return err
+
+		filePath := scriptsDir + "/" + fileName
+		if strings.Contains(fileName, "single-") {
+			err := sqlite.execute(filePath) // ignore error for single run scripts
+			log.Error().Err(err).Msgf("failed to execute %s database script", fileName)
+		} else {
+			err := sqlite.execute(filePath)
+			if err != nil {
+				return err
+			}
 		}
+
 	}
 
 	safe.Go(func() {
@@ -359,10 +367,11 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var presentVersion string
 		var newestVersion string
 		var environmentVariablesString string
+		var portsString *string
 		var currentState common.AppState
 		var requestedState common.AppState
 
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &portsString)
 		if err != nil {
 			return nil, err
 		}
@@ -381,6 +390,16 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 			}
 
 			payload.EnvironmentVariables = environmentVariables
+		}
+
+		var ports []interface{}
+		if portsString != nil && *portsString != "" {
+			err := json.Unmarshal([]byte(*portsString), &ports)
+			if err != nil {
+				return nil, err
+			}
+
+			payload.Ports = ports
 		}
 
 		payloads = append(payloads, payload)
@@ -423,8 +442,9 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var currentState common.AppState
 	var requestedState common.AppState
 	var environmentVariablesString string
+	var portsString *string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &portsString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -448,6 +468,16 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 		}
 
 		payload.EnvironmentVariables = environmentVariables
+	}
+
+	ports := make([]interface{}, 0)
+	if portsString != nil && *portsString != "" {
+		err := json.Unmarshal([]byte(*portsString), &ports)
+		if err != nil {
+			return common.TransitionPayload{}, err
+		}
+
+		payload.Ports = ports
 	}
 
 	if err != nil {
@@ -478,8 +508,16 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 
 		environmentsJSONString := string(environmentsJSONBytes)
 
+		portsJSONBytes, err := json.Marshal(payload.Ports)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		portsJSONString := string(portsJSONBytes)
+
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, portsJSONString,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -518,8 +556,15 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 
 	environmentsJSONString := string(environmentsJSONBytes)
 
+	portsJSONBytes, err := json.Marshal(payload.Ports)
+	if err != nil {
+		return err
+	}
+
+	portsJSONString := string(portsJSONBytes)
+
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, portsJSONString,
 		time.Now().Format(time.RFC3339),
 	)
 

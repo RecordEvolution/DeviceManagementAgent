@@ -21,7 +21,9 @@ import (
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"reagent/tunnel"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -38,6 +40,7 @@ type Agent struct {
 	External        *api.External
 	LogManager      *logging.LogManager
 	TerminalManager *terminal.TerminalManager
+	TunnelManager   tunnel.AppTunnelManager
 	Filesystem      *filesystem.Filesystem
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
@@ -45,24 +48,32 @@ type Agent struct {
 }
 
 func (agent *Agent) OnConnect() error {
+	var wg sync.WaitGroup
+
+	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
+
 	if agent.Config.CommandLineArguments.ShouldUpdate {
+		wg.Add(1)
+
 		safe.Go(func() {
-			updateResult, err := agent.System.UpdateIfRequired(nil)
+			defer wg.Done()
+
+			_, err := agent.System.UpdateSystem(nil)
 			if err != nil {
-				log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+				log.Error().Err(err).Msgf("Failed to update system")
 			}
 
-			if updateResult.DidUpdate {
-				log.Debug().Msgf("Successfully downloaded new Reagent (v%s)", updateResult.LatestVersion)
+			err = agent.External.RegisterAll()
+			if err != nil {
+				log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
 			}
 		})
 	}
 
-	if agent.Config.CommandLineArguments.ForceUpdate {
-		agent.System.Update(nil)
-	}
-
-	err := agent.updateRemoteDevice()
+	err = agent.updateRemoteDevice()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
@@ -88,7 +99,10 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
+	wg.Add(1)
 	safe.Go(func() {
+		defer wg.Done()
+
 		err = agent.LogManager.ReviveDeadLogs()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
@@ -100,19 +114,14 @@ func (agent *Agent) OnConnect() error {
 		}
 	})
 
-	safe.Go(func() {
-		err = agent.External.RegisterAll()
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
-		}
+	wg.Wait()
 
-		err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-		}
+	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
 
-		benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
-	})
+	benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
 
 	return err
 }
@@ -168,11 +177,13 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	filesystem := filesystem.New()
+	tunnelManager := tunnel.NewPgrokTunnel(generalConfig)
+	appTunnelManager := tunnel.NewPgrokAppTunnelManager(&tunnelManager, dummyMessenger)
 	appStore := store.NewAppStore(database, dummyMessenger)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateObserver := apps.NewObserver(container, &appStore, &logManager)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
-	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver)
+	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, &appTunnelManager)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
 	var networkInstance network.Network
@@ -227,29 +238,28 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	fmt.Println("Connected!")
 
-	// try to establish the log session
-	// logSession, _ := messenger.NewWamp(generalConfig, &messenger.SocketConfig{})
-
 	// established a connection, replace the dummy messenger
 	appStore.SetMessenger(mainSession)
 	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
+	appTunnelManager.SetMessenger(mainSession)
 	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{
-		Container:       container,
-		Messenger:       mainSession,
-		LogMessenger:    mainSession,
-		Database:        database,
-		Network:         networkInstance,
-		Privilege:       &privilege,
-		Filesystem:      &filesystem,
-		System:          &systemAPI,
-		AppManager:      appManager,
-		TerminalManager: &terminalManager,
-		LogManager:      &logManager,
-		Config:          generalConfig,
+		Container:        container,
+		Messenger:        mainSession,
+		LogMessenger:     mainSession,
+		Database:         database,
+		Network:          networkInstance,
+		Privilege:        &privilege,
+		Filesystem:       &filesystem,
+		AppTunnelManager: &appTunnelManager,
+		System:           &systemAPI,
+		AppManager:       appManager,
+		TerminalManager:  &terminalManager,
+		LogManager:       &logManager,
+		Config:           generalConfig,
 	}
 
 	return &Agent{
@@ -259,6 +269,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogManager:      &logManager,
 		Network:         networkInstance,
 		TerminalManager: &terminalManager,
+		TunnelManager:   &appTunnelManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,
