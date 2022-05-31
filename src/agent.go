@@ -65,6 +65,11 @@ func (agent *Agent) OnConnect() error {
 			if err != nil {
 				log.Error().Err(err).Msgf("Failed to update system")
 			}
+
+			err = agent.External.RegisterAll()
+			if err != nil {
+				log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+			}
 		})
 	}
 
@@ -106,16 +111,6 @@ func (agent *Agent) OnConnect() error {
 		err := agent.LogManager.SetupEndpoints()
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
-		}
-	})
-
-	wg.Add(1)
-	safe.Go(func() {
-		defer wg.Done()
-
-		err = agent.External.RegisterAll()
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
 		}
 	})
 
