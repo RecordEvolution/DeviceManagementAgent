@@ -367,8 +367,9 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	startUpdate := time.Now()
 
 	didUpdate := false
+
+	wg.Add(1)
 	safe.Go(func() {
-		wg.Add(1)
 
 		defer wg.Done()
 
@@ -384,8 +385,8 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 		didUpdate = updateResult.DidUpdate
 	})
 
+	wg.Add(1)
 	safe.Go(func() {
-		wg.Add(1)
 
 		defer wg.Done()
 
@@ -442,8 +443,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 		}
 
 		if bufferProgress.CurrentBytes == bufferProgress.TotalFileSize {
-			close(progressChan)
-			continue
+			break
 		}
 
 		bufferProgress.Increment = 0
