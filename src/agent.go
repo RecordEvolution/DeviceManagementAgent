@@ -50,10 +50,10 @@ type Agent struct {
 func (agent *Agent) OnConnect() error {
 	var wg sync.WaitGroup
 
-	// err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
-	// if err != nil {
-	// 	log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
-	// }
+	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+	}
 
 	if agent.Config.CommandLineArguments.ShouldUpdate {
 		wg.Add(1)
@@ -73,7 +73,7 @@ func (agent *Agent) OnConnect() error {
 		})
 	}
 
-	err := agent.updateRemoteDevice()
+	err = agent.updateRemoteDevice()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
