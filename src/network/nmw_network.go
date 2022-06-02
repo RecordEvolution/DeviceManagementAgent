@@ -985,10 +985,7 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 				continue
 			}
 
-			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
-			if err != nil {
-				return nil, err
-			}
+			connection, _ := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
 
 			if connection != nil {
 				settings, err := connection.GetSettings()
