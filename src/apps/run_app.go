@@ -7,7 +7,6 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
-	"reagent/system"
 	"strings"
 	"time"
 
@@ -244,17 +243,6 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
 	ctx := context.Background()
-	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, app.Version)
-	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
-	if err != nil {
-		if errdefs.IsImageNotFound(err) {
-			log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
-			pullErr := sm.pullApp(payload, app)
-			if pullErr != nil {
-				return nil, nil, pullErr
-			}
-		}
-	}
 
 	config := sm.Container.GetConfig()
 	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
@@ -275,6 +263,18 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			Tty:          true,
 		}
 	} else {
+		fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, app.Version)
+		_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
+		if err != nil {
+			if errdefs.IsImageNotFound(err) {
+				log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
+				pullErr := sm.pullApp(payload, app)
+				if pullErr != nil {
+					return nil, nil, pullErr
+				}
+			}
+		}
+
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,
 			Env:    environmentVariables,
@@ -307,7 +307,8 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		CapAdd:      []string{"ALL"},
 	}
 
-	if system.HasNvidiaGPU() {
+	if true {
+		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
 		hostConfig.DeviceRequests = []container.DeviceRequest{
 			{
 				Driver: "nvidia",
@@ -328,17 +329,25 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 	ctx := context.Background()
 
 	var containerID string
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+	var containerName string
+
+	if app.Stage == common.PROD {
+		containerName = payload.ContainerName.Prod
+	} else {
+		containerName = payload.ContainerName.Dev
+	}
+
+	cont, err := sm.Container.GetContainer(ctx, containerName)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return "", err
 		}
 
-		containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, payload.ContainerName.Prod)
+		containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
 		if err != nil {
 			if errdefs.IsImageNotFound(err) && app.Stage == common.DEV {
 				imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
-				sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
+				sm.LogManager.Write(containerName, imageNotFoundMessage)
 			}
 			return "", err
 		}
@@ -366,12 +375,14 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 	err = sm.Container.StartContainer(ctx, containerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "nvidia") {
+			log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without...\n")
+
 			sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
 
 			// remove nvidia device request
 			hostConfig.DeviceRequests = []container.DeviceRequest{}
 
-			containerID, err := sm.createContainer(payload, app, containerConfig, hostConfig)
+			containerID, err = sm.createContainer(payload, app, containerConfig, hostConfig)
 			if err != nil {
 				return "", err
 			}
@@ -382,8 +393,6 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 			}
 
 		}
-
-		return "", err
 	}
 
 	return containerID, nil
