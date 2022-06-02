@@ -460,7 +460,9 @@ func (n NWMNetwork) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
 		return nil, err
 	}
 
-	log.Debug().Msgf("%+v\n", devices)
+	for _, p := range devices {
+		log.Debug().Msgf("%+v\n", p)
+	}
 
 	var wiredDevices []networkmanager.DeviceWired
 	for _, device := range devices {
@@ -875,7 +877,9 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 		return nil, err
 	}
 
-	log.Debug().Msgf("%+v\n", devices)
+	for _, p := range devices {
+		log.Debug().Msgf("%+v\n", p)
+	}
 
 	var ethernetDevices []EthernetDevice
 	for _, device := range devices {
