@@ -13,6 +13,7 @@ import (
 	"reagent/safe"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	_ "embed"
@@ -337,7 +338,7 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 func (system *System) getPgrokCurrentVersion() (string, error) {
 	pgrokPath := filesystem.GetPgrokBinaryPath(system.config)
 
-	exists, err := filesystem.FileExists(pgrokPath)
+	exists, err := filesystem.PathExists(pgrokPath)
 	if err != nil {
 		return "", err
 	}
@@ -356,13 +357,21 @@ func (system *System) getPgrokCurrentVersion() (string, error) {
 }
 
 func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+	var wg sync.WaitGroup
+
 	progressChan := make(chan filesystem.DownloadProgress)
 	progressFunction := func(dp filesystem.DownloadProgress) {
 		progressChan <- dp
 	}
 
 	startUpdate := time.Now()
+
+	didUpdate := false
 	safe.Go(func() {
+		wg.Add(1)
+
+		defer wg.Done()
+
 		updateResult, err := system.updatePgrokIfRequired(progressFunction)
 		if err != nil {
 			log.Error().Stack().Err(err).Msgf("Failed to update pgrok.. continuing...")
@@ -371,9 +380,15 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 		if !updateResult.DidUpdate {
 			log.Debug().Msgf("Not downloading Pgrok because: %s", updateResult.Message)
 		}
+
+		didUpdate = updateResult.DidUpdate
 	})
 
 	safe.Go(func() {
+		wg.Add(1)
+
+		defer wg.Done()
+
 		updateResult, err := system.updateAgentIfRequired(progressFunction)
 		if err != nil {
 			log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
@@ -382,6 +397,15 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 		if !updateResult.DidUpdate {
 			log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
 		}
+
+		didUpdate = updateResult.DidUpdate
+	})
+
+	safe.Go(func() {
+		wg.Wait()
+
+		// if all download processes end, make sure to close the channel so we don't wait
+		close(progressChan)
 	})
 
 	bufferProgress := &filesystem.DownloadProgress{
@@ -432,7 +456,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	log.Debug().Msgf("Time it took to update system: %s\n", updateTime)
 
 	return UpdateResult{
-		DidUpdate:  true,
+		DidUpdate:  didUpdate,
 		InProgress: false,
 	}, nil
 }
