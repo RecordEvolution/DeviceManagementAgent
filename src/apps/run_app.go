@@ -209,12 +209,21 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 		},
 	}
 
-	// path to this exists
 	if _, err := os.Stat("/sys/bus/w1/devices"); !os.IsNotExist(err) {
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   "/sys/bus/w1/devices",
 			Target:   "/sys/bus/w1/devices",
+			ReadOnly: false,
+		})
+	}
+
+	// for nvidia
+	if _, err := os.Stat("/usr/local/cuda"); !os.IsNotExist(err) {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   "/usr/local/cuda",
+			Target:   "/usr/local/cuda",
 			ReadOnly: false,
 		})
 	}
