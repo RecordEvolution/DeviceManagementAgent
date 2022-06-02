@@ -350,9 +350,23 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 				imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
 				sm.LogManager.Write(containerName, imageNotFoundMessage)
 			}
-			return "", err
-		}
+			if strings.Contains(err.Error(), "nvidia") {
+				log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without...\n")
 
+				sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+
+				// remove NVIDIA host configuration
+				hConfig.Runtime = ""
+				hConfig.DeviceRequests = []container.DeviceRequest{}
+
+				containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
+				if err != nil {
+					return "", err
+				}
+			} else {
+				return "", err
+			}
+		}
 	} else {
 		containerID = cont.ID
 	}
