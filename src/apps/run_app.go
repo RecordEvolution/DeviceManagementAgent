@@ -310,7 +310,6 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 	if system.HasNvidiaGPU() {
 		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
-		hostConfig.Runtime = "nvidia"
 		hostConfig.DeviceRequests = []container.DeviceRequest{
 			{
 				Driver: "nvidia",
