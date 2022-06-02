@@ -310,6 +310,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 	if system.HasNvidiaGPU() {
 		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
+		hostConfig.Runtime = "nvidia"
 		hostConfig.DeviceRequests = []container.DeviceRequest{
 			{
 				Driver: "nvidia",
@@ -351,7 +352,7 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 				sm.LogManager.Write(containerName, imageNotFoundMessage)
 			}
 			if strings.Contains(err.Error(), "nvidia") {
-				log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without...\n")
+				log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
 
 				sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
 
@@ -390,7 +391,7 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 	err = sm.Container.StartContainer(ctx, containerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "nvidia") {
-			log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without...\n")
+			log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
 
 			sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
 
