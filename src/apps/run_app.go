@@ -7,6 +7,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
+	"reagent/system"
 	"strings"
 	"time"
 
@@ -307,7 +308,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		CapAdd:      []string{"ALL"},
 	}
 
-	if true {
+	if system.HasNvidiaGPU() {
 		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
 		hostConfig.DeviceRequests = []container.DeviceRequest{
 			{
