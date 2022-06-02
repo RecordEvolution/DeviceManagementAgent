@@ -477,10 +477,6 @@ func (n NWMNetwork) getEthernetDevices() ([]networkmanager.DeviceWired, error) {
 		}
 	}
 
-	for _, p := range wiredDevices {
-		log.Debug().Msgf("%+v\n", p)
-	}
-
 	return wiredDevices, nil
 }
 
@@ -912,10 +908,7 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 
 			ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
 		} else {
-			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
-			if err != nil {
-				return nil, err
-			}
+			connection, _ := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
 
 			if connection != nil {
 				settings, err := connection.GetSettings()
