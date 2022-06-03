@@ -908,10 +908,7 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 
 			ethernetDevice.IPv4AddressData = parsedIPv4AddressDatas
 		} else {
-			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
-			if err != nil {
-				return nil, err
-			}
+			connection, _ := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
 
 			if connection != nil {
 				settings, err := connection.GetSettings()
@@ -988,10 +985,7 @@ func (n NWMNetwork) ListEthernetDevices() ([]EthernetDevice, error) {
 				continue
 			}
 
-			connection, err := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
-			if err != nil {
-				return nil, err
-			}
+			connection, _ := n.getConnectionByInterfaceName(ethernetDevice.InterfaceName)
 
 			if connection != nil {
 				settings, err := connection.GetSettings()

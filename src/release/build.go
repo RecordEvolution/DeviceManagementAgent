@@ -15,7 +15,7 @@ func GetSystemInfo() (string, string, string) {
 	variant := ""
 
 	if arch == "" {
-		arch = "amd64"
+		arch = runtime.GOARCH
 	}
 
 	if strings.Contains(arch, "arm") {
@@ -35,7 +35,8 @@ func GetVersion() string {
 
 func GetBuildArch() string {
 	if BuildArch == "" {
-		return "amd64"
+		_, arch, variant := GetSystemInfo()
+		BuildArch = arch + variant
 	}
 	return BuildArch
 }

@@ -7,6 +7,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
+	"reagent/system"
 	"strings"
 	"time"
 
@@ -28,65 +29,7 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, app.Version)
-	_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
-	if err != nil {
-		if errdefs.IsImageNotFound(err) {
-			log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
-			pullErr := sm.pullApp(payload, app)
-			if pullErr != nil {
-				return pullErr
-			}
-		}
-	}
-
-	config := sm.Container.GetConfig()
-	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
-	environmentVariables := buildProdEnvironmentVariables(defaultEnvironmentVariables, payload.EnvironmentVariables)
-
-	containerConfig := container.Config{
-		Image:  fullImageNameWithTag,
-		Env:    environmentVariables,
-		Labels: map[string]string{"real": "True"},
-		Tty:    true,
-	}
-
-	mounts, err := computeMounts(app.Stage, app.AppName, config)
-	if err != nil {
-		return err
-	}
-
-	hostConfig := container.HostConfig{
-		// CapDrop: []string{"NET_ADMIN"},
-		RestartPolicy: container.RestartPolicy{
-			Name: "no",
-		},
-		Mounts: mounts,
-		Resources: container.Resources{
-			// DeviceRequests: []container.DeviceRequest{
-			// 	{
-			// 		Driver: "nvidia",
-			// 		Count:  -1,
-			// 		Capabilities: [][]string{
-			// 			{
-			// 				"compute", "compat32", "graphics", "utility", "video", "display",
-			// 			},
-			// 		},
-			// 	},
-			// },
-			Devices: []container.DeviceMapping{
-				{
-					PathOnHost:      "/dev",
-					PathInContainer: "/dev",
-				},
-			},
-		},
-		Privileged:  true,
-		NetworkMode: "host",
-		CapAdd:      []string{"ALL"},
-	}
-
-	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -101,21 +44,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	var containerID string
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
-	if err != nil {
-		if !errdefs.IsContainerNotFound(err) {
-			return err
-		}
-		containerID, err = sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Prod)
-		if err != nil {
-			return err
-		}
-	} else {
-		containerID = cont.ID
-	}
-
-	err = sm.Container.StartContainer(ctx, containerID)
+	containerID, err := sm.startContainer(payload, app)
 	if err != nil {
 		return err
 	}
@@ -160,38 +89,7 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
 
-	config := sm.Container.GetConfig()
-	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
-
-	containerConfig := container.Config{
-		Image:        payload.RegistryImageName.Dev,
-		Env:          defaultEnvironmentVariables,
-		Labels:       map[string]string{"real": "True"},
-		Volumes:      map[string]struct{}{},
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		OpenStdin:    true,
-		Tty:          true,
-	}
-
-	mounts, err := computeMounts(app.Stage, app.AppName, config)
-	if err != nil {
-		return err
-	}
-
-	hostConfig := container.HostConfig{
-		// CapDrop: []string{"NET_ADMIN"},
-		RestartPolicy: container.RestartPolicy{
-			Name: "no",
-		},
-		Privileged:  true,
-		NetworkMode: "host",
-		Mounts:      mounts,
-		Resources:   computeResources(),
-		CapAdd:      []string{"ALL"},
-	}
-
+	// remove old container first, if it exists
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
@@ -234,16 +132,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	newContainerID, err := sm.Container.CreateContainer(ctx, containerConfig, hostConfig, network.NetworkingConfig{}, payload.ContainerName.Dev)
-	if err != nil {
-		if errdefs.IsImageNotFound(err) {
-			imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
-			sm.LogManager.Write(payload.ContainerName.Dev, imageNotFoundMessage)
-		}
-		return err
-	}
-
-	err = sm.Container.StartContainer(ctx, newContainerID)
+	newContainerID, err := sm.startContainer(payload, app)
 	if err != nil {
 		return err
 	}
@@ -320,7 +209,6 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 		},
 	}
 
-	// path to this exists
 	if _, err := os.Stat("/sys/bus/w1/devices"); !os.IsNotExist(err) {
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
@@ -330,18 +218,17 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 		})
 	}
 
-	return mounts, nil
-}
-
-func computeResources() container.Resources {
-	return container.Resources{
-		Devices: []container.DeviceMapping{
-			{
-				PathOnHost:      "/dev",
-				PathInContainer: "/dev",
-			},
-		},
+	// for nvidia
+	if _, err := os.Stat("/usr/local/cuda"); !os.IsNotExist(err) {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   "/usr/local/cuda",
+			Target:   "/usr/local/cuda",
+			ReadOnly: false,
+		})
 	}
+
+	return mounts, nil
 }
 
 func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage) []string {
@@ -362,4 +249,176 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 	}
 
 	return environmentVariables
+}
+
+func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
+	ctx := context.Background()
+
+	config := sm.Container.GetConfig()
+	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
+	environmentVariables := buildProdEnvironmentVariables(defaultEnvironmentVariables, payload.EnvironmentVariables)
+
+	var containerConfig container.Config
+
+	if app.Stage == common.DEV {
+		containerConfig = container.Config{
+			Image:        payload.RegistryImageName.Dev,
+			Env:          defaultEnvironmentVariables,
+			Labels:       map[string]string{"real": "True"},
+			Volumes:      map[string]struct{}{},
+			AttachStdin:  true,
+			AttachStdout: true,
+			AttachStderr: true,
+			OpenStdin:    true,
+			Tty:          true,
+		}
+	} else {
+		fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, app.Version)
+		_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
+		if err != nil {
+			if errdefs.IsImageNotFound(err) {
+				log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
+				pullErr := sm.pullApp(payload, app)
+				if pullErr != nil {
+					return nil, nil, pullErr
+				}
+			}
+		}
+
+		containerConfig = container.Config{
+			Image:  fullImageNameWithTag,
+			Env:    environmentVariables,
+			Labels: map[string]string{"real": "True"},
+			Tty:    true,
+		}
+	}
+
+	mounts, err := computeMounts(app.Stage, app.AppName, config)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	hostConfig := container.HostConfig{
+		// CapDrop: []string{"NET_ADMIN"},
+		RestartPolicy: container.RestartPolicy{
+			Name: "no",
+		},
+		Mounts: mounts,
+		Resources: container.Resources{
+			Devices: []container.DeviceMapping{
+				{
+					PathOnHost:      "/dev",
+					PathInContainer: "/dev",
+				},
+			},
+		},
+		Privileged:  true,
+		NetworkMode: "host",
+		CapAdd:      []string{"ALL"},
+	}
+
+	if system.HasNvidiaGPU() {
+		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
+		hostConfig.Runtime = "nvidia"
+		hostConfig.DeviceRequests = []container.DeviceRequest{
+			{
+				Driver: "nvidia",
+				Count:  -1,
+				Capabilities: [][]string{
+					{
+						"compute", "compat32", "graphics", "utility", "video", "display",
+					},
+				},
+			},
+		}
+	}
+
+	return &containerConfig, &hostConfig, nil
+}
+
+func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *common.App, cConfig *container.Config, hConfig *container.HostConfig) (string, error) {
+	ctx := context.Background()
+
+	var containerID string
+	var containerName string
+
+	if app.Stage == common.PROD {
+		containerName = payload.ContainerName.Prod
+	} else {
+		containerName = payload.ContainerName.Dev
+	}
+
+	cont, err := sm.Container.GetContainer(ctx, containerName)
+	if err != nil {
+		if !errdefs.IsContainerNotFound(err) {
+			return "", err
+		}
+
+		containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
+		if err != nil {
+			if errdefs.IsImageNotFound(err) && app.Stage == common.DEV {
+				imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
+				sm.LogManager.Write(containerName, imageNotFoundMessage)
+			}
+			if strings.Contains(err.Error(), "nvidia") {
+				log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
+
+				sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+
+				// remove NVIDIA host configuration
+				hConfig.Runtime = ""
+				hConfig.DeviceRequests = []container.DeviceRequest{}
+
+				containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
+				if err != nil {
+					return "", err
+				}
+			} else {
+				return "", err
+			}
+		}
+	} else {
+		containerID = cont.ID
+	}
+
+	return containerID, nil
+}
+
+func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *common.App) (string, error) {
+	ctx := context.Background()
+
+	containerConfig, hostConfig, err := sm.computeContainerConfigs(payload, app)
+	if err != nil {
+		return "", err
+	}
+
+	containerID, err := sm.createContainer(payload, app, containerConfig, hostConfig)
+	if err != nil {
+		return "", err
+	}
+
+	err = sm.Container.StartContainer(ctx, containerID)
+	if err != nil {
+		if strings.Contains(err.Error(), "nvidia") {
+			log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
+
+			sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+
+			// remove nvidia device request
+			hostConfig.DeviceRequests = []container.DeviceRequest{}
+
+			containerID, err = sm.createContainer(payload, app, containerConfig, hostConfig)
+			if err != nil {
+				return "", err
+			}
+
+			err = sm.Container.StartContainer(ctx, containerID)
+			if err != nil {
+				return "", err
+			}
+
+		}
+	}
+
+	return containerID, nil
 }

@@ -28,14 +28,14 @@ type DownloadProgress struct {
 
 var DownloadLocks = make(map[string]*semaphore.Weighted)
 
-func FileExists(filename string) (bool, error) {
-	info, err := os.Stat(filename)
+func PathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
-	return !info.IsDir(), nil
+	return true, nil
 }
 
 func OverwriteFile(filePath string, value string) error {
