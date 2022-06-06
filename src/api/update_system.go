@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/system"
@@ -82,11 +83,11 @@ func (ex *External) downloadOSUpdateHandler(ctx context.Context, response messen
 	}
 
 	// prepare callback monitoring progress of download
-	progressCallback := func(increment uint64, currentBytes uint64, fileSize uint64) {
+	progressCallback := func(dp filesystem.DownloadProgress) {
 		progress := common.Dict{
-			"increment":    increment,
-			"currentBytes": currentBytes,
-			"fileSize":     fileSize,
+			"increment":    dp.Increment,
+			"currentBytes": dp.CurrentBytes,
+			"fileSize":     dp.TotalFileSize,
 		}
 
 		serialNumber := ex.Config.ReswarmConfig.SerialNumber

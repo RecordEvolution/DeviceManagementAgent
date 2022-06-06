@@ -70,6 +70,7 @@ type TransitionPayload struct {
 	RegistryImageName    StageBasedResult
 	ContainerName        StageBasedResult
 	EnvironmentVariables map[string]interface{}
+	Ports                []interface{}
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string
@@ -117,6 +118,7 @@ type DeviceSyncResponse struct {
 	NewReleaseKey          int                    `json:"new_release_key"`
 	DeviceToAppKey         int                    `json:"device_to_app_key"`
 	Environment            map[string]interface{} `json:"environment"`
+	Ports                  []interface{}          `json:"ports"`
 	CurrentState           string                 `json:"current_state"`
 	Stage                  string                 `json:"stage"`
 	ContainerName          string                 `json:"container_name"`

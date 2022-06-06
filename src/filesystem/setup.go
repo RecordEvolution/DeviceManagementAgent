@@ -25,7 +25,7 @@ func InitDirectories(cliArgs *config.CommandLineArguments) error {
 		}
 	}
 
-	err = os.MkdirAll(cliArgs.AgentDownloadDir, os.ModePerm)
+	err = os.MkdirAll(cliArgs.DownloadDir, os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {
 			return err
