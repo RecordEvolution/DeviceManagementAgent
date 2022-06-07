@@ -79,6 +79,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	newestVersionKw := kwargs["newest_version"]
 	requestUpdateKw := kwargs["request_update"]
 	cancelTransitionKw := kwargs["cancel_transition"]
+	environmentTemplateKw := kwargs["environment_template"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -98,6 +99,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var cancelTransition bool
 	var ok bool
 	var ports []interface{}
+	var environmentTemplate map[string]interface{}
 	var environment map[string]interface{}
 
 	// TODO: can be simplified with parser function, but unneccessary
@@ -258,6 +260,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if environmentTemplateKw != nil {
+		environmentTemplate, ok = environmentTemplateKw.(map[string]interface{})
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("%w environment template", errdefs.ErrFailedToParse)
+		}
+	}
+
 	if portsKw != nil {
 		ports, ok = portsKw.([]interface{})
 		if !ok {
@@ -304,6 +313,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	payload.PresentVersion = presentVersion
 
 	payload.EnvironmentVariables = environment
+	payload.EnvironmentTemplate = environmentTemplate
 
 	payload.Ports = ports
 

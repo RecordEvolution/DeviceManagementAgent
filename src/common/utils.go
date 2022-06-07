@@ -67,6 +67,19 @@ func BuildDockerPushID(appKey uint64, appName string) string {
 	return fmt.Sprintf("push_%d_%s", appKey, appName)
 }
 
+func EnvironmentTemplateToStringArray(environmentsTemplateMap map[string]interface{}) []string {
+	stringArray := make([]string, 0)
+
+	for key, entry := range environmentsTemplateMap {
+		value := entry.(map[string]interface{})["defaultValue"]
+		if value != nil {
+			stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, fmt.Sprint(value)))
+		}
+	}
+
+	return stringArray
+}
+
 func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string {
 	stringArray := make([]string, 0)
 
