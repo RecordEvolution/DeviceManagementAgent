@@ -81,7 +81,24 @@ The `config` parameter needs to be populated with the path to a local `.reswarm`
 
 Read more on `.reswarm` files and how they work here: https://docs.record-evolution.de/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
 
+### Example
+build/reagent-darwin-amd64 -config ${HOME}/Downloads/demo_demo_swarm_test_cb.reswarm -prettyLogging
+
 ## Build
+
+```shell
+make rollout
+```
+
+
+On Macos building images locally (don't do that):
+```bash
+brew install coreutils
+cd src
+go mod tidy
+cd ..
+make build-all-docker
+```
 
 ## Implementation
 
