@@ -438,22 +438,25 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 				return err
 			}
 
-			for _, portRule := range portRules {
-				if !portRule.Public {
-					continue
-				}
-
-				// if the app is currently running, spawn a tunnel, else just register it for later spawnage
-				if app.CurrentState == common.RUNNING {
-					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
-					if err != nil {
-						return err
+			if app != nil {
+				for _, portRule := range portRules {
+					if !portRule.Public {
+						continue
 					}
-				} else {
-					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
-				}
 
+					// if the app is currently running, spawn a tunnel, else just register it for later spawnage
+					if app.CurrentState == common.RUNNING {
+						_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+						if err != nil {
+							return err
+						}
+					} else {
+						am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+					}
+
+				}
 			}
+
 		}
 
 		err = am.CreateOrUpdateApp(payload)
