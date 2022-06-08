@@ -85,7 +85,7 @@ func (sqlite *AppStateDatabase) Init() error {
 		filePath := scriptsDir + "/" + fileName
 		if strings.Contains(fileName, "single-") {
 			err := sqlite.execute(filePath) // ignore error for single run scripts
-			log.Error().Err(err).Msgf("failed to execute %s database script", fileName)
+			log.Warn().Err(err).Msgf("Failed to execute %s database script, script probably already has been executed", fileName)
 		} else {
 			err := sqlite.execute(filePath)
 			if err != nil {
@@ -367,11 +367,12 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var presentVersion string
 		var newestVersion string
 		var environmentVariablesString string
+		var environmentTemplateString *string
 		var portsString *string
 		var currentState common.AppState
 		var requestedState common.AppState
 
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &portsString)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString)
 		if err != nil {
 			return nil, err
 		}
@@ -390,6 +391,16 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 			}
 
 			payload.EnvironmentVariables = environmentVariables
+		}
+
+		environmentTemplate := make(map[string]interface{})
+		if environmentTemplateString != nil && *environmentTemplateString != "" {
+			err := json.Unmarshal([]byte(*environmentTemplateString), &environmentTemplate)
+			if err != nil {
+				return nil, err
+			}
+
+			payload.EnvironmentTemplate = environmentTemplate
 		}
 
 		var ports []interface{}
@@ -442,9 +453,10 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var currentState common.AppState
 	var requestedState common.AppState
 	var environmentVariablesString string
+	var environmentTemplateString *string
 	var portsString *string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &portsString)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -468,6 +480,16 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 		}
 
 		payload.EnvironmentVariables = environmentVariables
+	}
+
+	environmentTemplate := make(map[string]interface{})
+	if environmentTemplateString != nil && *environmentTemplateString != "" {
+		err := json.Unmarshal([]byte(*environmentTemplateString), &environmentTemplate)
+		if err != nil {
+			return common.TransitionPayload{}, err
+		}
+
+		payload.EnvironmentTemplate = environmentTemplate
 	}
 
 	ports := make([]interface{}, 0)
@@ -508,6 +530,14 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 
 		environmentsJSONString := string(environmentsJSONBytes)
 
+		environmentTemplateJSONBytes, err := json.Marshal(payload.EnvironmentTemplate)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		environmentTemplateJSONString := string(environmentTemplateJSONBytes)
+
 		portsJSONBytes, err := json.Marshal(payload.Ports)
 		if err != nil {
 			tx.Rollback()
@@ -517,7 +547,7 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 		portsJSONString := string(portsJSONBytes)
 
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, portsJSONString,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -556,6 +586,13 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 
 	environmentsJSONString := string(environmentsJSONBytes)
 
+	environmentTemplateJSONBytes, err := json.Marshal(payload.EnvironmentTemplate)
+	if err != nil {
+		return err
+	}
+
+	environmentTemplateJSONString := string(environmentTemplateJSONBytes)
+
 	portsJSONBytes, err := json.Marshal(payload.Ports)
 	if err != nil {
 		return err
@@ -564,7 +601,7 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 	portsJSONString := string(portsJSONBytes)
 
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, portsJSONString,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString,
 		time.Now().Format(time.RFC3339),
 	)
 

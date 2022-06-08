@@ -255,15 +255,16 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	ctx := context.Background()
 
 	config := sm.Container.GetConfig()
-	defaultEnvironmentVariables := buildDefaultEnvironmentVariables(config, app.Stage)
-	environmentVariables := buildProdEnvironmentVariables(defaultEnvironmentVariables, payload.EnvironmentVariables)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage)
+	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
+	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
 	var containerConfig container.Config
 
 	if app.Stage == common.DEV {
 		containerConfig = container.Config{
 			Image:        payload.RegistryImageName.Dev,
-			Env:          defaultEnvironmentVariables,
+			Env:          append(systemDefaultVariables, environmentTemplateDefaults...),
 			Labels:       map[string]string{"real": "True"},
 			Volumes:      map[string]struct{}{},
 			AttachStdin:  true,
@@ -285,9 +286,26 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			}
 		}
 
+		var missingDefaultEnvs []string
+		for _, templateEnvString := range environmentTemplateDefaults {
+			envStringSplit := strings.Split(templateEnvString, "=")
+			environmentName := envStringSplit[0]
+
+			found := false
+			for _, envVariableString := range environmentVariables {
+				if strings.Contains(envVariableString, environmentName) {
+					found = true
+				}
+			}
+
+			if !found {
+				missingDefaultEnvs = append(missingDefaultEnvs, templateEnvString)
+			}
+		}
+
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,
-			Env:    environmentVariables,
+			Env:    append(environmentVariables, missingDefaultEnvs...),
 			Labels: map[string]string{"real": "True"},
 			Tty:    true,
 		}

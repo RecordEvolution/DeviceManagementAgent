@@ -128,7 +128,7 @@ func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 	registryToken, ok := registryTokenArg.(string)
 
 	if !ok {
-		return "", fmt.Errorf("Invalid registry_token payload")
+		return "", fmt.Errorf("invalid registry_token payload")
 	}
 
 	return registryToken, nil
@@ -238,6 +238,7 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 		payload.Version = deviceSyncState.PresentVersion
 		payload.NewestVersion = deviceSyncState.NewestVersion
 		payload.EnvironmentVariables = deviceSyncState.Environment
+		payload.EnvironmentTemplate = deviceSyncState.EnvironmentTemplate
 		payload.Ports = deviceSyncState.Ports
 
 		appPayloads = append(appPayloads, payload)
