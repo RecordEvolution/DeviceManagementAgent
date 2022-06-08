@@ -286,13 +286,26 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			}
 		}
 
-		if len(environmentVariables) == 0 {
-			environmentVariables = append(environmentVariables, environmentTemplateDefaults...)
+		var missingDefaultEnvs []string
+		for _, templateEnvString := range environmentTemplateDefaults {
+			envStringSplit := strings.Split(templateEnvString, "=")
+			environmentName := envStringSplit[0]
+
+			found := false
+			for _, envVariableString := range environmentVariables {
+				if strings.Contains(envVariableString, environmentName) {
+					found = true
+				}
+			}
+
+			if !found {
+				missingDefaultEnvs = append(missingDefaultEnvs, templateEnvString)
+			}
 		}
 
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,
-			Env:    environmentVariables,
+			Env:    append(environmentVariables, missingDefaultEnvs...),
 			Labels: map[string]string{"real": "True"},
 			Tty:    true,
 		}
