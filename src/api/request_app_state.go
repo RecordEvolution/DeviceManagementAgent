@@ -37,13 +37,12 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to request app state"))
 	}
 
-	safe.Go(func() {
-		err = ex.AppManager.CreateOrUpdateApp(payload)
-		if err != nil {
-			log.Error().Err(err).Msgf("failed to create or update app")
-			return
-		}
+	err = ex.AppManager.CreateOrUpdateApp(payload)
+	if err != nil {
+		return nil, err
+	}
 
+	safe.Go(func() {
 		err = ex.AppManager.RequestAppState(payload)
 		if err != nil {
 			log.Error().Err(err).Msgf("failed to request app state")
