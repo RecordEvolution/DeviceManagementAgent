@@ -366,6 +366,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 
 	startUpdate := time.Now()
 
+	var didUpdateLock sync.Mutex
 	didUpdate := false
 
 	wg.Add(1)
@@ -382,7 +383,9 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 			log.Debug().Msgf("Not downloading Pgrok because: %s", updateResult.Message)
 		}
 
+		didUpdateLock.Lock()
 		didUpdate = updateResult.DidUpdate
+		didUpdateLock.Unlock()
 	})
 
 	wg.Add(1)
@@ -399,7 +402,9 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 			log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
 		}
 
+		didUpdateLock.Lock()
 		didUpdate = updateResult.DidUpdate
+		didUpdateLock.Unlock()
 	})
 
 	safe.Go(func() {

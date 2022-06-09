@@ -72,9 +72,13 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					log.Debug().Msgf("Registering app tunnel for app: %d", app.AppKey)
 					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
 				} else {
+					appTunnel.Mutex.Lock()
 					if appTunnel.Running {
+						appTunnel.Mutex.Unlock()
 						log.Debug().Msgf("Deactivating app tunnel for app: %d", app.AppKey)
 						am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
+					} else {
+						appTunnel.Mutex.Unlock()
 					}
 				}
 			}
@@ -228,7 +232,9 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 }
 
 func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayload) bool {
+	app.StateLock.Lock()
 	notInstalled := app.CurrentState == common.REMOVED || app.CurrentState == common.UNINSTALLED
+	app.StateLock.Unlock()
 	removalRequest := payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED
 
 	// if the app is not on the device and we do any transition that would require internet we return true

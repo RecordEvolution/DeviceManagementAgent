@@ -50,6 +50,7 @@ type Tunnel struct {
 
 type AppTunnel struct {
 	Tunnel    *Tunnel
+	Mutex     sync.Mutex
 	Name      string
 	DeviceKey uint64
 	AppKey    uint64
@@ -131,9 +132,12 @@ type PgrokAppTunnelManager struct {
 }
 
 func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error {
+	appTunnel.Mutex.Lock()
 	if !appTunnel.Running {
+		appTunnel.Mutex.Unlock()
 		return errors.New("tunnel is not running")
 	}
+	appTunnel.Mutex.Unlock()
 
 	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey)
 	if foundAppTunnel == nil {
@@ -152,7 +156,9 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 		log.Error().Err(err).Msgf("failed to kill tunnel on app tunnel")
 	}
 
+	appTunnel.Mutex.Lock()
 	appTunnel.Running = false
+	appTunnel.Mutex.Unlock()
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancelFunc()
@@ -166,9 +172,12 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 }
 
 func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
+	appTunnel.Mutex.Lock()
 	if appTunnel.Running {
+		appTunnel.Mutex.Unlock()
 		return errors.New("tunnel is already running")
 	}
+	appTunnel.Mutex.Unlock()
 
 	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey)
 	if foundAppTunnel == nil {
@@ -180,8 +189,10 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 		return err
 	}
 
+	appTunnel.Mutex.Lock()
 	appTunnel.Tunnel = tunnel
 	appTunnel.Running = true
+	appTunnel.Mutex.Unlock()
 
 	url := tunnel.FullURL.HttpsURL
 	if tunnel.Protocol == TCP {
