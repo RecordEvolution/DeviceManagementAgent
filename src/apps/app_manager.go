@@ -123,8 +123,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
 	}
 
+	// App can get stuck in BUILT or PUBLISHED state if the backend never updates it's state
+	// Therefore allow the state transition to be rerun
 	builtState := curAppState == common.BUILT && requestedAppState == common.BUILT
-	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState {
+	publishedState := curAppState == common.PUBLISHED && requestedAppState == common.PUBLISHED
+	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState && !publishedState {
 
 		// sync ports even when app is already in the same state
 		err = am.syncPortState(payload, app)

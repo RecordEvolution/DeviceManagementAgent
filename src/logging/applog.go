@@ -404,7 +404,7 @@ func (lm *LogManager) getNonAgentLogs(containerName string) ([]string, error) {
 		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
 		reader, err := lm.Container.Logs(ctx, containerName, options)
 		if err != nil {
-			log.Error().Err(err).Msg("Error occurred while trying to get log history when none were found")
+			log.Warn().Err(err).Msgf("No log history found for: %s\n", containerName)
 			return []string{}, nil
 		}
 
@@ -522,7 +522,7 @@ func (lm *LogManager) SetupEndpoints() error {
 				lm.activeLogs[containerName] = &newActiveLog
 				lm.activeLogsMutex.Unlock()
 
-				log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream...", newActiveLog.ContainerName)
+				log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream... %s\n", newActiveLog.ContainerName)
 			}
 		})
 
