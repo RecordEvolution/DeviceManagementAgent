@@ -2,9 +2,11 @@ package messenger
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -82,6 +84,23 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 		},
 		Debug:  config.CommandLineArguments.DebugMessaging,
 		Logger: wrapZeroLogger(log.Logger),
+	}
+
+	isLegacyEndpoint, err := regexp.Match(`devices.*\.(com|io):8080`, []byte(reswarmConfig.DeviceEndpointURL))
+	if err != nil {
+		return nil, err
+	}
+
+	if isLegacyEndpoint {
+		tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
+		if err != nil {
+			return nil, err
+		}
+
+		cfg.TlsCfg = &tls.Config{
+			Certificates:       []tls.Certificate{tlscert},
+			InsecureSkipVerify: true,
+		}
 	}
 
 	if socketConfig.PingPongTimeout != 0 {
