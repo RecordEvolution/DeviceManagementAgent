@@ -1,5 +1,7 @@
 .PHONY: build
 
+ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 help: ## This help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -10,7 +12,7 @@ build-all:
 
 build-all-docker: clean ## Builds all docker images for all targets in targets files
 	docker build . -t agent-builder
-	docker run --name agent_builder -v ${PWD}/build:/app/reagent/build agent-builder
+	docker run --name agent_builder -v ${ROOT_DIR}/build:/app/reagent/build agent-builder
 
 rollout: build-all-docker publish publish-version publish-latestVersions ## Do everythin in one step
 
