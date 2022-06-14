@@ -9,7 +9,6 @@ build-all:
 	scripts/build-all.sh
 
 build-all-docker: clean ## Builds all docker images for all targets in targets files
-	cd src && go mod tidy
 	docker build . -t agent-builder
 	docker run --name agent_builder -v ${PWD}/build:/app/reagent/build agent-builder
 
