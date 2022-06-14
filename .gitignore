@@ -12,7 +12,6 @@ goat*
 client-*
 deviceagent-*
 deviceagent-linux-amd64
-go.sum
 target/
 reagent-*
 src/reagent
