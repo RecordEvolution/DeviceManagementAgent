@@ -54,7 +54,8 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 			if curAppState == common.RUNNING {
 				if appTunnel == nil {
 					log.Debug().Msgf("Creating app tunnel for app: %d", app.AppKey)
-					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+					subdomain := fmt.Sprintf("%d-%s-%d", portRule.DeviceKey, portRule.Name, portRule.Port)
+					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, subdomain)
 					if err != nil {
 						return err
 					}
@@ -70,7 +71,8 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 			} else {
 				if appTunnel == nil {
 					log.Debug().Msgf("Registering app tunnel for app: %d", app.AppKey)
-					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+					subdomain := fmt.Sprintf("%d-%s-%d", portRule.DeviceKey, portRule.Name, portRule.Port)
+					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, subdomain)
 				} else {
 					appTunnel.Mutex.Lock()
 					if appTunnel.Running {
@@ -453,14 +455,15 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 						continue
 					}
 
+					subdomain := fmt.Sprintf("%d-%s-%d", portRule.DeviceKey, portRule.Name, portRule.Port)
 					// if the app is currently running, spawn a tunnel, else just register it for later spawnage
 					if app.CurrentState == common.RUNNING {
-						_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+						_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, subdomain)
 						if err != nil {
 							return err
 						}
 					} else {
-						am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, "")
+						am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.DeviceKey, portRule.Port, portRule.Protocol, subdomain)
 					}
 
 				}
