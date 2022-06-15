@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/release"
 	"reagent/system"
@@ -28,6 +29,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
+	reswarmModeEnabled, _ := filesystem.PathExists("/opt/reagent/reswarm-mode")
 	os, arch, variant := release.GetSystemInfo()
 	dict := common.Dict{
 		"os":           os,
@@ -35,6 +37,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"variant":      variant,
 		"version":      currentVersion,
 		"serialNumber": serialNumber,
+		"canUpdate":    reswarmModeEnabled,
 	}
 
 	latestVersion, err := ex.System.GetLatestVersion("re-agent")
