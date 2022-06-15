@@ -247,8 +247,8 @@ func GetEnvironment(config *config.Config) string {
 }
 
 func (system *System) GetLatestVersion(bucketName string) (string, error) {
-	pgrokBucket := system.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
-	resp, err := filesystem.GetRemoteFile(pgrokBucket + "/availableVersions.json")
+	fullBucketName := system.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
+	resp, err := filesystem.GetRemoteFile(fullBucketName + "/availableVersions.json")
 	if err != nil {
 		return "", err
 	}
