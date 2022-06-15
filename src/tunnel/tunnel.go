@@ -448,7 +448,7 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	args = append(args, "-log", "stdout", "-auth", auth, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
 	pgrokTunnelCmd := cmd.NewCmd(pm.binaryPath, args...)
 
-	log.Debug().Msgf("Attempting to create tunnel with %s as credentials\n", auth)
+	log.Debug().Msgf("Attempting to create tunnel with { port: %s, protocol: %s, subdomain: %s, auth: %s}\n", port, protocol, subdomain, auth)
 	cmdStatusChan := pgrokTunnelCmd.Start()
 
 	var httpURL string
@@ -503,7 +503,7 @@ outerLoop:
 		}
 	}
 
-	log.Debug().Msgf("Started Pgrok tunnel on port %d. (https: %s, http: %s, tcp: %s)", port, httpsURL, httpURL, tcpURL)
+	log.Debug().Msgf("Started tunnel with { port: %s, protocol: %s, subdomain: %s, auth: %s}\n", port, protocol, subdomain, auth)
 
 	go func() {
 		<-cmdStatusChan
