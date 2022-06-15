@@ -30,7 +30,7 @@ func GetSystemInfo() (string, string, string) {
 }
 
 func GetVersion() string {
-	return version
+	return strings.TrimSpace(version)
 }
 
 func GetBuildArch() string {
