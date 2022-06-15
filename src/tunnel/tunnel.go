@@ -62,7 +62,8 @@ type AppTunnel struct {
 
 type PortForwardRule struct {
 	Main      bool   `json:"main"`
-	Name      string `json:"name"`
+	RuleName  string `json:"name"`
+	AppName   string `json:"app_name"`
 	Port      uint64 `json:"port"`
 	Protocol  string `json:"protocol"`
 	DeviceKey uint64 `json:"device_key"`
