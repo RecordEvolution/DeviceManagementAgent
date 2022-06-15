@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-cmd/cmd"
+	"github.com/mrz1836/go-sanitize"
 	"github.com/rs/zerolog/log"
 )
 
@@ -434,7 +435,8 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	}
 
 	if subdomain != "" {
-		args = append(args, fmt.Sprintf("-subdomain=%s", subdomain))
+		sanitizedSubomain := sanitize.Custom(subdomain, `[^a-zA-Z0-9-]`)
+		args = append(args, fmt.Sprintf("-subdomain=%s", sanitizedSubomain))
 	}
 
 	if protocol != TCP {
