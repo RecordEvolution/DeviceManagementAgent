@@ -37,7 +37,7 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		ex.LogMessenger.Publish(topics.Topic(topic), []interface{}{progress}, nil, nil)
 	}
 
-	updateResult, err := ex.System.UpdateSystem(progressCallback)
+	updateResult, err := ex.System.UpdateSystem(progressCallback, true)
 	if err != nil {
 		if !errdefs.IsInProgress(err) {
 			return nil, err

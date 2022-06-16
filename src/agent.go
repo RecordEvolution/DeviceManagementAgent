@@ -55,23 +55,15 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
-	if agent.Config.CommandLineArguments.ShouldUpdate {
-		wg.Add(1)
+	wg.Add(1)
+	safe.Go(func() {
+		defer wg.Done()
 
-		safe.Go(func() {
-			defer wg.Done()
-
-			_, err := agent.System.UpdateSystem(nil)
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to update system")
-			}
-
-			err = agent.External.RegisterAll()
-			if err != nil {
-				log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
-			}
-		})
-	}
+		_, err := agent.System.UpdateSystem(nil, agent.Config.CommandLineArguments.ShouldUpdateAgent)
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to update system")
+		}
+	})
 
 	err = agent.updateRemoteDevice()
 	if err != nil {
@@ -114,8 +106,16 @@ func (agent *Agent) OnConnect() error {
 		}
 	})
 
+	log.Debug().Msg("Waiting for startup setup to finish...")
 	wg.Wait()
 
+	log.Debug().Msg("Registering all endpoints...")
+	err = agent.External.RegisterAll()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+	}
+
+	log.Debug().Msg("Startup setup finished!")
 	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")

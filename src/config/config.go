@@ -54,7 +54,7 @@ type CommandLineArguments struct {
 	Offline                    bool
 	Profiling                  bool
 	ProfilingPort              uint
-	ShouldUpdate               bool
+	ShouldUpdateAgent          bool
 	PrettyLogging              bool
 	UseNetworkManager          bool
 	LogFileLocation            string
@@ -144,7 +144,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		TunnelAuthToken:            *tunnelAuthToken,
 		Profiling:                  *profiling,
 		ProfilingPort:              *profilingPort,
-		ShouldUpdate:               *shouldUpdate,
+		ShouldUpdateAgent:          *shouldUpdate,
 		DatabaseFileName:           *databaseFileName,
 		PingPongTimeout:            *pingPongTimeout,
 		ResponseTimeout:            *responseTimeout,

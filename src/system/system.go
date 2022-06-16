@@ -358,7 +358,7 @@ func (system *System) getPgrokCurrentVersion() (string, error) {
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress), updateAgent bool) (UpdateResult, error) {
 	var wg sync.WaitGroup
 
 	progressChan := make(chan filesystem.DownloadProgress)
@@ -388,22 +388,24 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 		didTunnelUpdate = updateResult.DidUpdate
 	})
 
-	wg.Add(1)
-	safe.Go(func() {
+	if updateAgent {
+		wg.Add(1)
+		safe.Go(func() {
 
-		defer wg.Done()
+			defer wg.Done()
 
-		updateResult, err := system.updateAgentIfRequired(progressFunction)
-		if err != nil {
-			log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
-		}
+			updateResult, err := system.updateAgentIfRequired(progressFunction)
+			if err != nil {
+				log.Error().Stack().Err(err).Msgf("Failed to update.. continuing...")
+			}
 
-		if !updateResult.DidUpdate {
-			log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
-		}
+			if !updateResult.DidUpdate {
+				log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
+			}
 
-		didAgentUpdate = updateResult.DidUpdate
-	})
+			didAgentUpdate = updateResult.DidUpdate
+		})
+	}
 
 	safe.Go(func() {
 		wg.Wait()
