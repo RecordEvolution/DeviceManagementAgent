@@ -8,8 +8,6 @@ import (
 	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
-	"reagent/system"
-	"strings"
 )
 
 func (ex *External) updateReagent(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -22,13 +20,9 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reagent"))
 	}
 
-	osVersion, err := system.GetOSVersion()
-	if err != nil {
-		return nil, err
-	}
-
-	if !strings.Contains(osVersion, "ReswarmOS") {
-		return nil, errors.New("cannot update the agent on a not ReswarmOS system")
+	reswarmModeEnabled, _ := filesystem.PathExists("/opt/reagent/reswarm-mode")
+	if !reswarmModeEnabled {
+		return nil, errors.New("cannot update on non reswarm-mode enabled system")
 	}
 
 	progressCallback := func(downloadProgress filesystem.DownloadProgress) {

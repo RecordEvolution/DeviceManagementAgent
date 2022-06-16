@@ -27,12 +27,14 @@ type System struct {
 }
 
 type UpdateResult struct {
-	CurrentVersion string
-	LatestVersion  string
-	Message        string
-	DidUpdate      bool
-	InProgress     bool
-	TotalFileSize  uint64
+	CurrentVersion  string
+	LatestVersion   string
+	Message         string
+	DidAgentUpdate  bool
+	DidTunnelUpdate bool
+	DidUpdate       bool
+	InProgress      bool
+	TotalFileSize   uint64
 }
 
 func New(config *config.Config) System {
@@ -366,8 +368,8 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 
 	startUpdate := time.Now()
 
-	var didUpdateLock sync.Mutex
-	didUpdate := false
+	didTunnelUpdate := false
+	didAgentUpdate := false
 
 	wg.Add(1)
 	safe.Go(func() {
@@ -383,9 +385,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 			log.Debug().Msgf("Not downloading Pgrok because: %s", updateResult.Message)
 		}
 
-		didUpdateLock.Lock()
-		didUpdate = updateResult.DidUpdate
-		didUpdateLock.Unlock()
+		didTunnelUpdate = updateResult.DidUpdate
 	})
 
 	wg.Add(1)
@@ -402,9 +402,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 			log.Debug().Msgf("Not downloading Agent because: %s", updateResult.Message)
 		}
 
-		didUpdateLock.Lock()
-		didUpdate = updateResult.DidUpdate
-		didUpdateLock.Unlock()
+		didAgentUpdate = updateResult.DidUpdate
 	})
 
 	safe.Go(func() {
@@ -461,8 +459,10 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	log.Debug().Msgf("Time it took to update system: %s\n", updateTime)
 
 	return UpdateResult{
-		DidUpdate:  didUpdate,
-		InProgress: false,
+		DidAgentUpdate:  didAgentUpdate,
+		DidTunnelUpdate: didTunnelUpdate,
+		DidUpdate:       didTunnelUpdate || didAgentUpdate,
+		InProgress:      false,
 	}, nil
 }
 
