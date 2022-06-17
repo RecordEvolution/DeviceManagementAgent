@@ -291,7 +291,7 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 	var shouldUpdate bool
 	var errorsArr []error
 
-	currentVersion, err := system.getPgrokCurrentVersion()
+	currentVersion, err := system.GetPgrokCurrentVersion()
 	if err != nil {
 		if errors.Is(err, errdefs.ErrNotFound) {
 			exists = false
@@ -337,7 +337,7 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 	}, nil
 }
 
-func (system *System) getPgrokCurrentVersion() (string, error) {
+func (system *System) GetPgrokCurrentVersion() (string, error) {
 	pgrokPath := filesystem.GetPgrokBinaryPath(system.config)
 
 	exists, err := filesystem.PathExists(pgrokPath)

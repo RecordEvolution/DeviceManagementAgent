@@ -97,15 +97,14 @@ func (ex *External) createAppTunnel(ctx context.Context, response messenger.Resu
 	}
 
 	deviceKey := ex.Config.ReswarmConfig.DeviceKey
-	subdomain := fmt.Sprintf("%d-%s-%d", deviceKey, app_name, port)
 	var tunnel *tunnel.AppTunnel
 	if app.CurrentState == common.RUNNING {
-		tunnel, err = ex.AppTunnelManager.CreateAppTunnel(app_key, uint64(deviceKey), port, protocol, subdomain)
+		tunnel, err = ex.AppTunnelManager.CreateAppTunnel(app_key, app_name, uint64(deviceKey), port, protocol)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		tunnel = ex.AppTunnelManager.RegisterAppTunnel(app_key, uint64(deviceKey), port, protocol, subdomain)
+		tunnel = ex.AppTunnelManager.RegisterAppTunnel(app_key, app_name, uint64(deviceKey), port, protocol)
 		if err != nil {
 			return nil, err
 		}

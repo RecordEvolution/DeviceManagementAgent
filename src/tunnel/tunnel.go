@@ -106,8 +106,8 @@ type AppTunnelManager interface {
 	GetTunnelManager() TunnelManager
 	SetMessenger(m messenger.Messenger)
 	GetAppTunnel(appKey uint64) (*AppTunnel, error)
-	CreateAppTunnel(appKey uint64, deviceKey uint64, port uint64, protocol string, subdomain string) (*AppTunnel, error)
-	RegisterAppTunnel(appKey uint64, deviceKey uint64, port uint64, protocol string, subdomain string) *AppTunnel
+	CreateAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) (*AppTunnel, error)
+	RegisterAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) *AppTunnel
 	DeactivateAppTunnel(appTunnel *AppTunnel) error
 	ActivateAppTunnel(appTunnel *AppTunnel) error
 	KillAppTunnel(appKey uint64) error
@@ -219,7 +219,14 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 	return nil
 }
 
-func (pm *PgrokAppTunnelManager) RegisterAppTunnel(appKey uint64, deviceKey uint64, port uint64, protocol string, subdomain string) *AppTunnel {
+func (pm *PgrokAppTunnelManager) RegisterAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) *AppTunnel {
+	var subdomain string
+	if protocol == TCP {
+		subdomain = fmt.Sprintf("%d-%s", deviceKey, appName)
+	} else {
+		subdomain = fmt.Sprintf("%d-%s-%d", deviceKey, appName, port)
+	}
+
 	appTunnel := AppTunnel{
 		Tunnel: &Tunnel{
 			Port:      port,
@@ -238,7 +245,14 @@ func (pm *PgrokAppTunnelManager) RegisterAppTunnel(appKey uint64, deviceKey uint
 	return &appTunnel
 }
 
-func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, deviceKey uint64, port uint64, protocol string, subdomain string) (*AppTunnel, error) {
+func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) (*AppTunnel, error) {
+	var subdomain string
+	if protocol == TCP {
+		subdomain = fmt.Sprintf("%d-%s", deviceKey, appName)
+	} else {
+		subdomain = fmt.Sprintf("%d-%s-%d", deviceKey, appName, port)
+	}
+
 	tunnel, err := pm.TunnelManager.Spawn(port, protocol, subdomain)
 	if err != nil {
 		return nil, err
@@ -442,6 +456,10 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 
 	if protocol != TCP {
 		protocol = HTTP_HTTPS
+	}
+
+	if protocol == TCP {
+		args = append(args, fmt.Sprintf("-remoteport=%d", port))
 	}
 
 	deviceKey := pm.Config.ReswarmConfig.DeviceKey

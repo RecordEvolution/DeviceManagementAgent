@@ -21,7 +21,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get agent metadata"))
 	}
 
-	currentVersion := release.GetVersion()
+	currentAgentVersion := release.GetVersion()
 	OSVersion, err := system.GetOSVersion()
 	if err != nil {
 		return nil, err
@@ -35,15 +35,35 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"os":           os,
 		"arch":         arch,
 		"variant":      variant,
-		"version":      currentVersion,
+		"version":      currentAgentVersion,
 		"serialNumber": serialNumber,
 		"canUpdate":    reswarmModeEnabled,
 	}
 
-	latestVersion, err := ex.System.GetLatestVersion("re-agent")
+	pgrokIsLatest := true
+	pgrokCurrentVersion, err := ex.System.GetPgrokCurrentVersion()
+	if err != nil {
+		if errors.Is(err, errdefs.ErrNotFound) {
+			pgrokIsLatest = false
+		} else {
+			return nil, err
+		}
+	}
+
+	latestPgrokVersion, err := ex.System.GetLatestVersion("pgrok")
 	if err == nil {
-		dict["latestVersion"] = latestVersion
-		dict["hasLatest"] = latestVersion == currentVersion
+		if pgrokIsLatest {
+			pgrokIsLatest = pgrokCurrentVersion == latestPgrokVersion
+		}
+	}
+
+	lastAgentVersion, err := ex.System.GetLatestVersion("re-agent")
+	agentIsLatest := lastAgentVersion == currentAgentVersion
+	if err == nil {
+		dict["latestVersion"] = lastAgentVersion
+		dict["latestTunnelVersion"] = latestPgrokVersion
+		dict["latestAgentVersion"] = lastAgentVersion
+		dict["hasLatest"] = agentIsLatest && pgrokIsLatest
 	}
 
 	if OSVersion != "" {
