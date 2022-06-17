@@ -3,8 +3,11 @@ package apps
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/filesystem"
+	"reagent/release"
 
 	"github.com/docker/docker/api/types"
 	"github.com/rs/zerolog/log"
@@ -34,16 +37,22 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	config := sm.Container.GetConfig()
 	buildsDir := config.CommandLineArguments.AppsBuildDir
 	fileName := payload.AppName + "." + config.CommandLineArguments.CompressedBuildExtension
-	filePath := buildsDir + "/" + fileName
+	appFilesTar := buildsDir + "/" + fileName
+
+	dockerFileName := "Dockerfile"
+	archSpecificDockerfile := fmt.Sprintf("Dockerfile.%s", release.GetBuildArch())
+	_, err = filesystem.ReadFileInTgz(appFilesTar, archSpecificDockerfile)
+	if err == nil {
+		dockerFileName = archSpecificDockerfile
+	}
 
 	// need to specify that this is a release build on remote update
 	// this ensures that the dev release will be set to exists = true
 	// prod ready builds will not be set to exists until after they are pushed
 	app.ReleaseBuild = releaseBuild
-
 	buildOptions := types.ImageBuildOptions{
 		Tags:       []string{payload.RegistryImageName.Dev},
-		Dockerfile: "Dockerfile",
+		Dockerfile: dockerFileName,
 		BuildID:    common.BuildDockerBuildID(app.AppKey, app.AppName),
 	}
 
@@ -62,7 +71,7 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	reader, err := sm.Container.Build(ctx, filePath, buildOptions)
+	reader, err := sm.Container.Build(ctx, appFilesTar, buildOptions)
 	if err != nil {
 		errorMessage := err.Error()
 		if errdefs.IsDockerfileCannotBeEmpty(err) {

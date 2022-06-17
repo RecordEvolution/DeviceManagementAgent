@@ -1,11 +1,14 @@
 package filesystem
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"reagent/config"
 	"reagent/errdefs"
@@ -50,6 +53,44 @@ func OverwriteFile(filePath string, value string) error {
 	}
 
 	return err
+}
+
+func ReadFileInTgz(tarPath string, fileToFind string) (*tar.Reader, error) {
+	f, err := os.Open(tarPath)
+	if err != nil {
+		return nil, err
+	}
+
+	defer f.Close()
+
+	gzf, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+
+	tarReader := tar.NewReader(gzf)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			continue
+		case tar.TypeReg:
+			if path.Base(header.Name) == fileToFind {
+				return tarReader, nil
+			}
+		}
+	}
+
+	return nil, errdefs.ErrNotFound
 }
 
 type WriteCounter struct {
