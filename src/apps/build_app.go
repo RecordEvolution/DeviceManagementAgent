@@ -40,7 +40,8 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 	appFilesTar := buildsDir + "/" + fileName
 
 	dockerFileName := "Dockerfile"
-	archSpecificDockerfile := fmt.Sprintf("Dockerfile.%s", release.GetBuildArch())
+	buildArch := release.GetBuildArch()
+	archSpecificDockerfile := fmt.Sprintf("Dockerfile.%s", buildArch)
 	_, err = filesystem.ReadFileInTgz(appFilesTar, archSpecificDockerfile)
 	if err == nil {
 		dockerFileName = archSpecificDockerfile
