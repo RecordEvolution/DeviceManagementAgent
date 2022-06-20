@@ -140,7 +140,12 @@ func (ex *External) killAppTunnel(ctx context.Context, response messenger.Result
 		return nil, errors.New("failed to parse app_key")
 	}
 
-	err = ex.AppTunnelManager.KillAppTunnel(appKey)
+	port, ok := options["port"].(uint64)
+	if !ok {
+		return nil, errors.New("failed to parse port")
+	}
+
+	err = ex.AppTunnelManager.KillAppTunnel(appKey, port)
 	if err != nil {
 		return nil, err
 	}

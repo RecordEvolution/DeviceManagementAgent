@@ -106,19 +106,19 @@ type TunnelManager interface {
 type AppTunnelManager interface {
 	GetTunnelManager() TunnelManager
 	SetMessenger(m messenger.Messenger)
-	GetAppTunnel(appKey uint64) (*AppTunnel, error)
+	GetAppTunnel(appKey uint64, port uint64) (*AppTunnel, error)
 	CreateAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) (*AppTunnel, error)
 	RegisterAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) *AppTunnel
 	DeactivateAppTunnel(appTunnel *AppTunnel) error
 	ActivateAppTunnel(appTunnel *AppTunnel) error
-	KillAppTunnel(appKey uint64) error
+	KillAppTunnel(appKey uint64, port uint64) error
 }
 
 func NewPgrokAppTunnelManager(tm TunnelManager, m messenger.Messenger) PgrokAppTunnelManager {
 	return PgrokAppTunnelManager{
 		TunnelManager: tm,
 		messenger:     m,
-		appTunnels:    make(map[uint64]*AppTunnel),
+		appTunnels:    make(map[string]*AppTunnel),
 	}
 }
 
@@ -130,7 +130,7 @@ type PgrokAppTunnelManager struct {
 	AppTunnelManager
 	messenger      messenger.Messenger
 	TunnelManager  TunnelManager
-	appTunnels     map[uint64]*AppTunnel
+	appTunnels     map[string]*AppTunnel
 	appTunnelsLock sync.Mutex
 }
 
@@ -142,7 +142,7 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 	}
 	appTunnel.Mutex.Unlock()
 
-	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey)
+	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey, appTunnel.Tunnel.Port)
 	if foundAppTunnel == nil {
 		return errors.New("tunnel does not exist")
 	}
@@ -184,9 +184,9 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 	}
 	appTunnel.Mutex.Unlock()
 
-	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey)
+	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey, appTunnel.Tunnel.Port)
 	if foundAppTunnel == nil {
-		pm.appTunnels[appTunnel.AppKey] = appTunnel
+		pm.appTunnels[fmt.Sprintf("%d-%d", appTunnel.AppKey, appTunnel.Tunnel.Port)] = appTunnel
 	}
 
 	tunnel, err := pm.TunnelManager.Spawn(appTunnel.Tunnel.Port, appTunnel.Tunnel.Protocol, appTunnel.Tunnel.Subdomain)
@@ -263,7 +263,7 @@ func (pm *PgrokAppTunnelManager) RegisterAppTunnel(appKey uint64, appName string
 	}
 
 	pm.appTunnelsLock.Lock()
-	pm.appTunnels[appKey] = &appTunnel
+	pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)] = &appTunnel
 	pm.appTunnelsLock.Unlock()
 
 	return &appTunnel
@@ -309,7 +309,7 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 	}
 
 	pm.appTunnelsLock.Lock()
-	pm.appTunnels[appKey] = &appTunnel
+	pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)] = &appTunnel
 	pm.appTunnelsLock.Unlock()
 
 	url := tunnel.FullURL.HttpsURL
@@ -337,9 +337,9 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 	return &appTunnel, nil
 }
 
-func (pm *PgrokAppTunnelManager) GetAppTunnel(appKey uint64) (*AppTunnel, error) {
+func (pm *PgrokAppTunnelManager) GetAppTunnel(appKey uint64, port uint64) (*AppTunnel, error) {
 	pm.appTunnelsLock.Lock()
-	appTunnel := pm.appTunnels[appKey]
+	appTunnel := pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)]
 	pm.appTunnelsLock.Unlock()
 
 	if appTunnel == nil {
@@ -349,9 +349,9 @@ func (pm *PgrokAppTunnelManager) GetAppTunnel(appKey uint64) (*AppTunnel, error)
 	return appTunnel, nil
 }
 
-func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64) error {
+func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64, port uint64) error {
 	pm.appTunnelsLock.Lock()
-	appTunnel := pm.appTunnels[appKey]
+	appTunnel := pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)]
 	pm.appTunnelsLock.Unlock()
 
 	if appTunnel == nil {
@@ -381,7 +381,7 @@ func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64) error {
 	}
 
 	pm.appTunnelsLock.Lock()
-	delete(pm.appTunnels, appKey)
+	delete(pm.appTunnels, fmt.Sprintf("%d-%d", appKey, port))
 	pm.appTunnelsLock.Unlock()
 
 	return nil

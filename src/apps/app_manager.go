@@ -46,7 +46,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	for _, portRule := range portRules {
-		appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey)
+		appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
 
 		// port creation
 		if portRule.Public {
@@ -87,7 +87,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		} else {
 			if appTunnel != nil {
 				log.Debug().Msgf("Killing app tunnel for app: %d", app.AppKey)
-				err = am.AppTunnelManager.KillAppTunnel(portRule.AppKey)
+				err = am.AppTunnelManager.KillAppTunnel(portRule.AppKey, portRule.Port)
 				if err != nil {
 					log.Error().Err(err).Msgf("failed to kill app tunnel for %d", app.AppKey)
 				}
