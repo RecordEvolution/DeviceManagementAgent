@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/config"
+	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
@@ -149,8 +150,10 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 	payload := common.Dict{
 		"device_key": appTunnel.DeviceKey,
 		"app_key":    appTunnel.AppKey,
+		"active":     false,
 		"url":        "", // remove url in database
 		"port":       appTunnel.Tunnel.Port,
+		"error":      common.Dict{"message": ""},
 	}
 
 	err := pm.TunnelManager.Kill(appTunnel.Tunnel.Port)
@@ -188,6 +191,25 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 
 	tunnel, err := pm.TunnelManager.Spawn(appTunnel.Tunnel.Port, appTunnel.Tunnel.Protocol, appTunnel.Tunnel.Subdomain)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrAlreadyExists) {
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+			defer cancelFunc()
+
+			payload := common.Dict{
+				"device_key": appTunnel.DeviceKey,
+				"app_key":    appTunnel.AppKey,
+				"port":       appTunnel.Tunnel.Port,
+				"public":     false,
+				"error": common.Dict{
+					"message": "errorTunnelAlreadyExists",
+				},
+			}
+
+			_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+			if err != nil {
+				return err
+			}
+		}
 		return err
 	}
 
@@ -206,6 +228,8 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 		"app_key":    appTunnel.AppKey,
 		"url":        url,
 		"port":       tunnel.Port,
+		"active":     true,
+		"error":      common.Dict{"message": ""},
 	}
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
@@ -255,6 +279,27 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 
 	tunnel, err := pm.TunnelManager.Spawn(port, protocol, subdomain)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrAlreadyExists) {
+
+			fmt.Print("already exist error bois")
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+			defer cancelFunc()
+
+			payload := common.Dict{
+				"device_key": deviceKey,
+				"app_key":    appKey,
+				"port":       port,
+				"public":     false,
+				"error": common.Dict{
+					"message": "errorTunnelAlreadyExists",
+				},
+			}
+
+			_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
 		return nil, err
 	}
 
@@ -279,6 +324,8 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 		"app_key":    appKey,
 		"url":        url,
 		"port":       port,
+		"active":     true,
+		"error":      common.Dict{"message": ""},
 	}
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
@@ -317,7 +364,9 @@ func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64) error {
 		"device_key": appTunnel.DeviceKey,
 		"app_key":    appTunnel.AppKey,
 		"url":        "", // remove url in database
+		"active":     false,
 		"port":       appTunnel.Tunnel.Port,
+		"error":      common.Dict{"message": ""},
 	}
 
 	err := pm.TunnelManager.Kill(appTunnel.Tunnel.Port)
@@ -438,9 +487,8 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	tunnel := pm.tunnels[port]
 	if tunnel != nil {
 		pm.tunnelsLock.Unlock()
-		return nil, fmt.Errorf("a tunnel already exists for port %d", port)
+		return nil, fmt.Errorf("a tunnel already exists for port %d, %w", port, errdefs.ErrAlreadyExists)
 	}
-
 	pm.tunnelsLock.Unlock()
 
 	var args = make([]string, 0)
@@ -469,7 +517,7 @@ func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*
 	args = append(args, "-log", "stdout", "-auth", auth, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
 	pgrokTunnelCmd := cmd.NewCmd(pm.binaryPath, args...)
 
-	log.Debug().Msgf("Attempting to create tunnel with { port: %s, protocol: %s, subdomain: %s, auth: %s}\n", port, protocol, subdomain, auth)
+	log.Debug().Msgf("Attempting to create tunnel with following arguments: %s\n", strings.Join(args, " "))
 	cmdStatusChan := pgrokTunnelCmd.Start()
 
 	var httpURL string
