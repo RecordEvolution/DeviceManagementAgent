@@ -280,8 +280,6 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 	tunnel, err := pm.TunnelManager.Spawn(port, protocol, subdomain)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrAlreadyExists) {
-
-			fmt.Print("already exist error bois")
 			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
 			defer cancelFunc()
 
@@ -529,11 +527,15 @@ outerLoop:
 		status := pgrokTunnelCmd.Status()
 		for _, val := range status.Stdout {
 			if strings.Contains(val, "control recovering from failure dial") {
-				return &Tunnel{}, errors.New("failed to establish connection")
+				return nil, errors.New("failed to establish connection")
+			}
+
+			if strings.Contains(val, "address already in use") {
+				return nil, fmt.Errorf("a tunnel already exists for port %d, %w", port, errdefs.ErrAlreadyExists)
 			}
 
 			if strings.Contains(val, "is already registered") {
-				return &Tunnel{}, errors.New("subdomain already exists")
+				return nil, errors.New("subdomain already exists")
 			}
 
 			if strings.Contains(val, "Tunnel established at") {
