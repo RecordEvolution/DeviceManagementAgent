@@ -56,26 +56,25 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					log.Debug().Msgf("Creating app tunnel for app: %d", app.AppKey)
 					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
 					if err != nil {
-						return err
+						log.Error().Err(err).Msgf("failed to create app tunnel for %d\n", app.AppKey)
 					}
 				} else {
 					if !appTunnel.Running {
-						log.Debug().Msgf("Activating app tunnel for app: %d", app.AppKey)
 						err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
 						if err != nil {
-							log.Error().Err(err).Msgf("failed to activate app tunnel for %d", app.AppKey)
+							log.Error().Err(err).Msgf("failed to activate app tunnel for %d\n", app.AppKey)
 						}
 					}
 				}
 			} else {
 				if appTunnel == nil {
-					log.Debug().Msgf("Registering app tunnel for app: %d", app.AppKey)
+					log.Debug().Msgf("Registering app tunnel for app: %d\n", app.AppKey)
 					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
 				} else {
 					appTunnel.Mutex.Lock()
 					if appTunnel.Running {
 						appTunnel.Mutex.Unlock()
-						log.Debug().Msgf("Deactivating app tunnel for app: %d", app.AppKey)
+						log.Debug().Msgf("Deactivating app tunnel for app: %d\n", app.AppKey)
 						am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
 					} else {
 						appTunnel.Mutex.Unlock()

@@ -44,7 +44,7 @@ func (p *Privilege) Check(privilege string, details common.Dict) (bool, error) {
 		"swarm_key":             swarmKey,
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
 	res, err := p.messenger.Call(ctx, topics.CheckPrivilege, []interface{}{payload}, nil, nil, nil)

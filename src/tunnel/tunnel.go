@@ -165,7 +165,7 @@ func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error
 	appTunnel.Running = false
 	appTunnel.Mutex.Unlock()
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
 	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
@@ -192,7 +192,7 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 	tunnel, err := pm.TunnelManager.Spawn(appTunnel.Tunnel.Port, appTunnel.Tunnel.Protocol, appTunnel.Tunnel.Subdomain)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrAlreadyExists) {
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 			defer cancelFunc()
 
 			payload := common.Dict{
@@ -205,10 +205,7 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 				},
 			}
 
-			_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-			if err != nil {
-				return err
-			}
+			pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
 		}
 		return err
 	}
@@ -232,7 +229,7 @@ func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
 		"error":      common.Dict{"message": ""},
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
 	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
@@ -280,7 +277,7 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 	tunnel, err := pm.TunnelManager.Spawn(port, protocol, subdomain)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrAlreadyExists) {
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 			defer cancelFunc()
 
 			payload := common.Dict{
@@ -293,11 +290,9 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 				},
 			}
 
-			_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-			if err != nil {
-				return nil, err
-			}
+			pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
 		}
+
 		return nil, err
 	}
 
@@ -326,7 +321,7 @@ func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, 
 		"error":      common.Dict{"message": ""},
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
 	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
@@ -372,7 +367,7 @@ func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64, port uint64) error
 		log.Error().Err(err).Msg("Failed to kill tunnel of app tunnel")
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
 	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
