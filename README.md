@@ -143,7 +143,7 @@ darwin/amd64
 
 Run `go tool dist list` to see all possible combinations supported by `go` in case you wish to add your own.
 
-**NOTE: The Reagent only supports a limited amount of target systems and architectures, please read more [here](#limitations)**
+**NOTE: The Reagent only supports a limited amount of target systems and architectures, please read more [here](#target-platform-and-architecture-limitations)**
 
 ### Target platform and architecture limitations
 
