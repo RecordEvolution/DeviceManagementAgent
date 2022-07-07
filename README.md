@@ -20,10 +20,22 @@ running in containers on the device and retrieve their result and logs.
 
 ## Overview
 
-* [Introduction](#introduction)
-* [Usage](#usage)
-* [Build](#build)
-* [Implementation](#implementation)
+- [REswarm Device Management AGENT](#reswarm-device-management-agent)
+  - [Overview](#overview)
+  - [Introduction](#introduction)
+  - [Usage](#usage)
+  - [Development](#development)
+  - [Build, Publishing and Release](#build-publishing-and-release)
+    - [Build (with Docker)](#build-with-docker)
+    - [Targets](#targets)
+    - [Target platform and architecture limitations](#target-platform-and-architecture-limitations)
+    - [Publishing](#publishing)
+    - [Release](#release)
+    - [Rollout](#rollout)
+  - [Implementation](#implementation)
+    - [WAMP](#wamp)
+      - [References](#references)
+    - [Docker](#docker)
 
 ## Introduction
 
@@ -36,7 +48,7 @@ it accepts apply the help parameter `./reagent -help`
 ```Shell
 Usage of ./reagent:
   -agentDir string
-       default location of the agent binary (default "/opt/reagent" (linux), "/Users/<user>/reagent" (darwin))
+    	default location of the agent binary (default "/opt/reagent", (linux), "$HOME/reagent", (other))
   -appsDir string
        default path for apps and app-data (default (default agentDir) + "/apps")
   -arch
@@ -52,11 +64,13 @@ Usage of ./reagent:
   -debug
        sets the log level to debug (default true)
   -debugMessaging
-       enables debug logs for messenging layer
-  -forceUpdate
-       forces the agent to download the latest version
+    	enables debug logs for messenging layer
+  -env string
+    	determines in which environment the agent will operate. Possible values: (production, test, local) (default "production")
   -logFile string
-       log file used by the reagent (default "/var/log/reagent.log" (linux), "/Users/<user>/reagent/reagent.log" (darwin))
+       log file used by the reagent (default "/var/log/reagent.log" (linux), "$HOME/reagent/reagent.log" (other))
+  -nmw
+    	enables the agent to use the NetworkManager API on Linux machines (default true)
   -offline
        starts the agent without establishing a socket connection. meant for debugging (default=false)
   -ppTimeout uint
@@ -64,11 +78,11 @@ Usage of ./reagent:
   -prettyLogging
        enables the pretty console writing, intended for debugging
   -profiling
-       spins up a pprof webserver on the defined port
+       sets up a pprof webserver on the defined port
   -profilingPort uint
        port of the profiling service (default 80)
   -remoteUpdateURL string
-       used to download new versions of the agent and check for updates (default "https://storage.googleapis.com/re-agent")
+    	bucket to be used to download updates (default "https://storage.googleapis.com")
   -respTimeout uint
        Sets the response timeout of the client in milliseconds (default 5000)
   -update
@@ -81,24 +95,101 @@ The `config` parameter needs to be populated with the path to a local `.reswarm`
 
 Read more on `.reswarm` files and how they work here: https://docs.record-evolution.de/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
 
-### Example
-build/reagent-darwin-amd64 -config ${HOME}/Downloads/demo_demo_swarm_test_cb.reswarm -prettyLogging
-
-## Build
-
-```shell
-make rollout
+**Example Usage**
+```
+./reagent -config path/to/config.reswarm -prettyLogging
 ```
 
 
-On Macos building images locally (don't do that):
-```bash
-brew install coreutils
-cd src
-go mod tidy
-cd ..
-make build-all-docker
+## Development
+
+Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command in the the `src/` directory:
+
 ```
+go run . -config path/to/config.reswarm -prettyLogging
+```
+
+If you encounter any privilege issues, please try removing the agent home directory beforehand (by default found in `${HOME}/reagent`) or try running `go` as root.
+
+## Build, Publishing and Release
+
+Using `go`'s built-in (cross-)compilation and some _shell_ scripts we can easily build, publish and release a binary for a lot of different architectures and operating systems.
+
+### Build (with Docker)
+
+It is recommended to build the agent within Docker, to do so you can run the `make build-all-docker` in the root of this project.
+
+While **not recommended** users can also build the Reagent on the host machine using the `make build-all` command.
+
+Both commands make use of the [_targets_](#targets) file in the root of this project to determine the target platform(s) and architecture(s).
+
+Once building has completed, the resulting binaries can be found within the `build/` directory at the root of this project.
+
+### Targets
+
+The build scripts make use of the `targets` file found in the root of this project. The `targets` file determines which platforms and architectures the binary should be (cross-)compiled into.
+
+The following platforms are set by default:
+```
+linux/amd64
+linux/arm64
+linux/arm/7
+linux/arm/6
+linux/arm/5
+windows/amd64
+darwin/amd64
+```
+
+Run `go tool dist list` to see all possible combinations supported by `go` in case you wish to add your own.
+
+**NOTE: The Reagent only supports a limited amount of target systems and architectures, please read more [here](#limitations)**
+
+### Target platform and architecture limitations
+
+Due to this project using a [CGo-free port of SQLite/SQLite3](https://gitlab.com/cznic/sqlite), the Reagent can only be built into a [limited amount of target platforms and architectures](https://pkg.go.dev/modernc.org/sqlite?utm_source=godoc#hdr-Supported_platforms_and_architectures):
+
+```
+linux/386
+linux/amd64
+linux/arm
+linux/arm64
+linux/riscv64
+windows/amd64
+windows/arm64
+darwin/amd64
+darwin/arm64
+freebsd/amd64
+```
+
+### Versioning
+
+The version that is baked into the binary on build is determined by the string provided in the `src/release/version.txt` file. Adjust this file accordingly **before** making a build.
+
+Once built the version of a binary can be verified with:
+```
+./reagent -version
+```
+
+### Publishing
+
+Once the Reagent has been built into the platform(s) and architecture(s) of your needs the binaries can then be published into our remote bucket.
+
+The `make publish` command will publish all binaries that are found within the `build/` folder to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) gcloud bucket.
+
+### Release
+
+Once the new binaries have been published they need to be made public for the each _Reswarm_ environment (local, production and test cloud).
+
+To update the latest available Reagent binary, the `availableVersions.json` must be updated and published.
+
+Once updated, the changes can be published using the `make publish-latestVersions` command.
+
+### Rollout
+
+**USE WITH CAUTION**
+
+The `make rollout` command can be used to build, publish the binary and publish the version files in one step. Before doing so make sure the version files (`availableVersions.json`, `src/release/version.txt`) have been updated properly as explained in the [version](#versioning) and [release](#release) section.
+
 
 ## Implementation
 
@@ -128,22 +219,3 @@ have to launch the daemon with root permissions, since the docker daemon is
 accessed via the socket `///var/run/docker.sock` which is only readable with
 root permissions by default.
 
-#### References
-
-- https://godoc.org/
-- https://stackoverflow.com/questions/38804313/build-docker-image-from-go-code
-
-- https://docs.docker.com/engine/api/sdk/
-- https://docs.docker.com/engine/api/sdk/examples/
-
-- https://godoc.org/github.com/docker/docker/client
-- https://github.com/docker/go-docker
-- https://docs.docker.com/engine/api/
-
-
-- https://github.com/moby/moby
-- https://github.com/moby/moby/tree/master/client
-
-##### Definition of types used in API
-
-- https://godoc.org/github.com/docker/docker/api/types#Container
