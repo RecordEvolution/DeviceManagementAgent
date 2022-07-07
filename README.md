@@ -122,13 +122,13 @@ It is recommended to build the agent within Docker, to do so you can run `make b
 
 While **not recommended** users can also build the Reagent on the host machine using the `make build-all` command.
 
-Both commands make use of the [_targets_](#targets) file in the root of this project to determine the target platform(s) and architecture(s).
+Both commands make use of the [_targets_](#targets) file to determine the target platform(s) and architecture(s).
 
 Once building has completed, the resulting binaries can be found within the `build/` directory at the root of this project.
 
 ### Targets
 
-The `targets` file determines which platforms and architectures the binary should be (cross-)compiled into.
+The `targets` file, which can be found in the root of this project, determines which platforms and architectures the binary should be (cross-)compiled into.
 
 The following platforms are set by default:
 ```
