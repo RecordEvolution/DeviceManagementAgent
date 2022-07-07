@@ -128,7 +128,7 @@ Once building has completed, the resulting binaries can be found within the `bui
 
 ### Targets
 
-The build scripts make use of the `targets` file found in the root of this project. The `targets` file determines which platforms and architectures the binary should be (cross-)compiled into.
+The `targets` file determines which platforms and architectures the binary should be (cross-)compiled into.
 
 The following platforms are set by default:
 ```
