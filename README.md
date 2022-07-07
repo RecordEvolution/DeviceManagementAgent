@@ -118,7 +118,7 @@ Using `go`'s built-in (cross-)compilation and some _shell_ scripts we can easily
 
 ### Build (with Docker)
 
-It is recommended to build the agent within Docker, to do so you can run the `make build-all-docker` in the root of this project.
+It is recommended to build the agent within Docker, to do so you can run `make build-all-docker` in the root of this project.
 
 While **not recommended** users can also build the Reagent on the host machine using the `make build-all` command.
 
