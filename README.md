@@ -175,7 +175,7 @@ Once built the version of a binary can be verified with:
 
 Once the Reagent has been built into the platform(s) and architecture(s) of your needs the binaries can then be published into our remote bucket.
 
-The `make publish` command will publish all binaries that are found within the `build/` folder to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) gcloud bucket.
+The `make publish` command will publish all binaries that are found within the `build/` folder to our [re-agent](https://console.cloud.google.com/storage/browser/re-agent) gcloud bucket.
 
 ### Release
 
@@ -183,7 +183,7 @@ Once the new binaries have been published they need to be made public for the ea
 
 To update the latest available Reagent binary, the `availableVersions.json` must be updated and published.
 
-Once updated, the changes can be published using the `make publish-latestVersions` command.
+Once updated, the file can be published using the `make publish-latestVersions` command.
 
 ### Rollout
 
