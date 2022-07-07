@@ -29,6 +29,7 @@ running in containers on the device and retrieve their result and logs.
     - [Build (with Docker)](#build-with-docker)
     - [Targets](#targets)
     - [Target platform and architecture limitations](#target-platform-and-architecture-limitations)
+    - [Versioning](#versioning)
     - [Publishing](#publishing)
     - [Release](#release)
     - [Rollout](#rollout)
@@ -161,7 +162,7 @@ darwin/arm64
 freebsd/amd64
 ```
 
-### Versioning
+### Versioning
 
 The version that is baked into the binary on build is determined by the string provided in the `src/release/version.txt` file. Adjust this file accordingly **before** making a build.
 
