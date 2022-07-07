@@ -25,7 +25,7 @@ running in containers on the device and retrieve their result and logs.
   - [Introduction](#introduction)
   - [Usage](#usage)
   - [Development](#development)
-  - [Build, Publishing and Release](#build-publishing-and-release)
+  - [Build, Publish and Release](#build-publish-and-release)
     - [Build (with Docker)](#build-with-docker)
     - [Targets](#targets)
     - [Target platform and architecture limitations](#target-platform-and-architecture-limitations)
@@ -112,7 +112,7 @@ go run . -config path/to/config.reswarm -prettyLogging
 
 If you encounter any privilege issues, please try removing the agent home directory beforehand (by default found in `${HOME}/reagent`) or try running `go` as root.
 
-## Build, Publishing and Release
+## Build, Publish and Release
 
 Using `go`'s built-in (cross-)compilation and some _shell_ scripts we can easily build, publish and release a binary for a lot of different architectures and operating systems.
 
