@@ -189,7 +189,7 @@ Once updated, the file can be published using the `make publish-latestVersions` 
 
 **!!!!! USE WITH CAUTION !!!!!**
 
-`make rollout` can be used to build, publish the binary and publish the version files in one step. 
+`make rollout` can be used to build, publish the binary and publish the version files in one step.
 
 Before doing so make sure the version files (`availableVersions.json`, `src/release/version.txt`) have been updated properly as explained in the [Versioning](#versioning) and [Release](#release) sections.
 
