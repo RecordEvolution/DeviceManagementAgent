@@ -45,7 +45,6 @@ type CommandLineArguments struct {
 	DownloadDir                string
 	CompressedBuildExtension   string
 	RemoteUpdateURL            string
-	TunnelAuthToken            string
 	Environment                string
 	Debug                      bool
 	DebugMessaging             bool
@@ -120,7 +119,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
 	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client in milliseconds (0 means no timeout)")
 	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds")
-	tunnelAuthToken := flag.String("tAuthToken", "", "Token used to create a public tunnel with Record Evolution")
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds. (0 means no timeout)")
 	cfgFile := flag.String("config", "", "reswarm configuration file")
 	flag.Parse()
@@ -141,7 +139,6 @@ func GetCliArguments() (*CommandLineArguments, error) {
 		DebugMessaging:             *debugMessaging,
 		LogFileLocation:            *logFile,
 		ConfigFileLocation:         *cfgFile,
-		TunnelAuthToken:            *tunnelAuthToken,
 		Profiling:                  *profiling,
 		ProfilingPort:              *profilingPort,
 		ShouldUpdateAgent:          *shouldUpdate,
