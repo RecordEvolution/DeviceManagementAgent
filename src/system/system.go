@@ -1,14 +1,18 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
+	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/release"
 	"reagent/safe"
 	"runtime"
@@ -23,7 +27,8 @@ import (
 )
 
 type System struct {
-	config *config.Config
+	config    *config.Config
+	messenger messenger.Messenger
 }
 
 type UpdateResult struct {
@@ -37,9 +42,10 @@ type UpdateResult struct {
 	TotalFileSize   uint64
 }
 
-func New(config *config.Config) System {
+func New(config *config.Config, messenger messenger.Messenger) System {
 	return System{
-		config: config,
+		config:    config,
+		messenger: messenger,
 	}
 }
 
@@ -356,6 +362,32 @@ func (system *System) GetPgrokCurrentVersion() (string, error) {
 	}
 
 	return strings.TrimSpace(string(stdout)), nil
+}
+
+func (system *System) UpdateDeviceMetadata() error {
+
+	if system.config.ReswarmConfig.OwnerAccountKey == 0 {
+		return errors.New("owner_account_key is not set in reswarm file")
+	}
+
+	ctx := context.Background()
+	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey, "requestor_account_key": system.config.ReswarmConfig.OwnerAccountKey}}
+	res, err := system.messenger.Call(ctx, topics.GetDeviceMetadata, args, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	resultPayload, ok := res.Arguments[0].(common.Dict)
+	if !ok {
+		return errors.New("invalid payload")
+	}
+
+	deviceName := fmt.Sprint(resultPayload["name"])
+	swarmKey := resultPayload["swarm_key"]
+
+	log.Info().Msgf("Device metadata: %+v\n", res)
+
+	return nil
 }
 
 func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress), updateAgent bool) (UpdateResult, error) {

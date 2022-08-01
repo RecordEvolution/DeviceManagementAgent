@@ -65,6 +65,16 @@ func (agent *Agent) OnConnect() error {
 		}
 	})
 
+	wg.Add(1)
+	safe.Go(func() {
+		defer wg.Done()
+
+		err := agent.System.UpdateDeviceMetadata()
+		if err != nil {
+			log.Error().Err(err).Msgf("update device metadata")
+		}
+	})
+
 	err = agent.updateRemoteDevice()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
@@ -157,8 +167,6 @@ func (agent *Agent) updateRemoteDevice() error {
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	cliArgs := generalConfig.CommandLineArguments
 
-	systemAPI := system.New(generalConfig)
-
 	database, err := persistence.NewSQLiteDb(generalConfig)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to create SQLite db instance")
@@ -237,6 +245,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	benchmark.TimeTillSocketConnectionFromLaunch = time.Since(benchmark.SocketConnectionInitFromLaunch)
 
 	fmt.Println("Connected!")
+
+	systemAPI := system.New(generalConfig, mainSession)
 
 	// established a connection, replace the dummy messenger
 	appStore.SetMessenger(mainSession)
