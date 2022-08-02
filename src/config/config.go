@@ -23,7 +23,7 @@ type ReswarmConfig struct {
 		Modelname    string      `json:"modelname"`
 		Reflasher    bool        `json:"reflasher"`
 		Architecture string      `json:"architecture"`
-	}
+	} `json:"board"`
 	Status          string      `json:"status"`
 	Password        string      `json:"password"`
 	Wlanssid        string      `json:"wlanssid"`
@@ -41,11 +41,11 @@ type ReswarmConfig struct {
 	SwarmOwnerName       string `json:"swarm_owner_name"`
 	ConfigPassphrase     string `json:"config_passphrase"`
 	DeviceEndpointURL    string `json:"device_endpoint_url"`
-	Environment          string `json:"environment"`
+	Environment          string `json:"environment,omitempty"`
 	DockerRegistryURL    string `json:"docker_registry_url"`
-	InsecureRegistries   string `json:"insecure-registries"`
+	InsecureRegistries   string `json:"insecure-registries,omitempty"`
 	DockerMainRepository string `json:"docker_main_repository"`
-	ReswarmBaseURL       string
+	ReswarmBaseURL       string `json:"-"`
 }
 
 type CommandLineArguments struct {
