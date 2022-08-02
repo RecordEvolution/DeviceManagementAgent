@@ -1,14 +1,18 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
+	"reagent/messenger"
+	"reagent/messenger/topics"
 	"reagent/release"
 	"reagent/safe"
 	"runtime"
@@ -23,7 +27,8 @@ import (
 )
 
 type System struct {
-	config *config.Config
+	config    *config.Config
+	messenger messenger.Messenger
 }
 
 type UpdateResult struct {
@@ -37,9 +42,10 @@ type UpdateResult struct {
 	TotalFileSize   uint64
 }
 
-func New(config *config.Config) System {
+func New(config *config.Config, messenger messenger.Messenger) System {
 	return System{
-		config: config,
+		config:    config,
+		messenger: messenger,
 	}
 }
 
@@ -356,6 +362,37 @@ func (system *System) GetPgrokCurrentVersion() (string, error) {
 	}
 
 	return strings.TrimSpace(string(stdout)), nil
+}
+
+func (system *System) UpdateDeviceMetadata() error {
+	ctx := context.Background()
+	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey}}
+	res, err := system.messenger.Call(ctx, topics.GetDeviceMetadata, args, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	resultPayload, ok := res.Arguments[0].(map[string]interface{})
+	if !ok {
+		return errors.New("invalid payload")
+	}
+
+	deviceName := fmt.Sprint(resultPayload["device_name"])
+	swarmName := fmt.Sprint(resultPayload["swarm_name"])
+	swarmOwnerName := fmt.Sprint(resultPayload["ownername"])
+	swarmKey, ok := resultPayload["swarm_key"].(uint64)
+	if !ok {
+		return errors.New("swarm_key has invalid type")
+	}
+
+	system.config.ReswarmConfig.Name = deviceName
+	system.config.ReswarmConfig.SwarmName = swarmName
+	system.config.ReswarmConfig.SwarmOwnerName = swarmOwnerName
+	system.config.ReswarmConfig.SwarmKey = int(swarmKey)
+
+	err = config.SaveReswarmConfig(system.config.CommandLineArguments.ConfigFileLocation, system.config.ReswarmConfig)
+
+	return err
 }
 
 func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress), updateAgent bool) (UpdateResult, error) {

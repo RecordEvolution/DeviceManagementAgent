@@ -8,6 +8,7 @@ const SetActualAppOnDeviceState Topic = "reswarm.containers.update_app_on_device
 const GetRequestedAppStates Topic = "reswarm.containers.get_requested_app_states"
 const GetRegistryToken Topic = "reswarm.containers.get_registry_token"
 const UpdateDeviceStatus Topic = "reswarm.devices.update_device_status"
+const GetDeviceMetadata Topic = "reswarm.devices.read_device_metadata"
 const UpdateDevice Topic = "reswarm.devices.update_device"
 const UpdateDeviceArchitecture Topic = "reswarm.devices.update_device_architecture"
 const CheckPrivilege Topic = "reswarm.devices.check_privilege"
