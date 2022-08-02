@@ -371,7 +371,7 @@ func (system *System) UpdateDeviceMetadata() error {
 	}
 
 	ctx := context.Background()
-	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey, "requestor_account_key": system.config.ReswarmConfig.OwnerAccountKey}}
+	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey}}
 	res, err := system.messenger.Call(ctx, topics.GetDeviceMetadata, args, nil, nil, nil)
 	if err != nil {
 		return err
