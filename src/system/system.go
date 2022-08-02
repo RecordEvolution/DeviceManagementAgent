@@ -365,11 +365,6 @@ func (system *System) GetPgrokCurrentVersion() (string, error) {
 }
 
 func (system *System) UpdateDeviceMetadata() error {
-
-	if system.config.ReswarmConfig.OwnerAccountKey == 0 {
-		return errors.New("owner_account_key is not set in reswarm file")
-	}
-
 	ctx := context.Background()
 	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey}}
 	res, err := system.messenger.Call(ctx, topics.GetDeviceMetadata, args, nil, nil, nil)

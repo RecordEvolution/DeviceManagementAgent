@@ -24,17 +24,16 @@ type ReswarmConfig struct {
 		Reflasher    bool        `json:"reflasher"`
 		Architecture string      `json:"architecture"`
 	} `json:"board"`
-	Status          string      `json:"status"`
-	Password        string      `json:"password"`
-	Wlanssid        string      `json:"wlanssid"`
-	SwarmKey        int         `json:"swarm_key"`
-	DeviceKey       int         `json:"device_key"`
-	SwarmName       string      `json:"swarm_name"`
-	OwnerAccountKey int         `json:"owner_account_key"`
-	Description     interface{} `json:"description"` // can be null --> interface{}
-	Architecture    string      `json:"architecture"`
-	SerialNumber    string      `json:"serial_number"`
-	Authentication  struct {
+	Status         string      `json:"status"`
+	Password       string      `json:"password"`
+	Wlanssid       string      `json:"wlanssid"`
+	SwarmKey       int         `json:"swarm_key"`
+	DeviceKey      int         `json:"device_key"`
+	SwarmName      string      `json:"swarm_name"`
+	Description    interface{} `json:"description"` // can be null --> interface{}
+	Architecture   string      `json:"architecture"`
+	SerialNumber   string      `json:"serial_number"`
+	Authentication struct {
 		Key         string `json:"key"`
 		Certificate string `json:"certificate"`
 	} `json:"authentication"`
