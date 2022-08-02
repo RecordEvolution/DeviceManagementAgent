@@ -12,8 +12,18 @@ import (
 
 // ReswarmConfig types for the .reswarm file
 type ReswarmConfig struct {
-	Name            string      `json:"name"`
-	Secret          string      `json:"secret"`
+	Name   string `json:"name"`
+	Secret string `json:"secret"`
+	Board  struct {
+		CPU          string      `json:"cpu"`
+		Docs         interface{} `json:"docs"`
+		Board        string      `json:"board"`
+		Model        string      `json:"model"`
+		Boardname    string      `json:"boardname"`
+		Modelname    string      `json:"modelname"`
+		Reflasher    bool        `json:"reflasher"`
+		Architecture string      `json:"architecture"`
+	}
 	Status          string      `json:"status"`
 	Password        string      `json:"password"`
 	Wlanssid        string      `json:"wlanssid"`
@@ -152,6 +162,15 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	}
 
 	return &cliArgs, nil
+}
+
+func SaveReswarmConfig(path string, reswarmConfig *ReswarmConfig) error {
+	file, err := json.MarshalIndent(reswarmConfig, "", " ")
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(path, file, 0644)
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path

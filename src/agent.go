@@ -65,15 +65,10 @@ func (agent *Agent) OnConnect() error {
 		}
 	})
 
-	wg.Add(1)
-	safe.Go(func() {
-		defer wg.Done()
-
-		err := agent.System.UpdateDeviceMetadata()
-		if err != nil {
-			log.Error().Err(err).Msgf("update device metadata")
-		}
-	})
+	err = agent.System.UpdateDeviceMetadata()
+	if err != nil {
+		log.Error().Err(err).Msgf("update device metadata")
+	}
 
 	err = agent.updateRemoteDevice()
 	if err != nil {

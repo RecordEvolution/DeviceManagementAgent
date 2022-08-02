@@ -377,17 +377,27 @@ func (system *System) UpdateDeviceMetadata() error {
 		return err
 	}
 
-	resultPayload, ok := res.Arguments[0].(common.Dict)
+	resultPayload, ok := res.Arguments[0].(map[string]interface{})
 	if !ok {
 		return errors.New("invalid payload")
 	}
 
-	deviceName := fmt.Sprint(resultPayload["name"])
-	swarmKey := resultPayload["swarm_key"]
+	deviceName := fmt.Sprint(resultPayload["device_name"])
+	swarmName := fmt.Sprint(resultPayload["swarm_name"])
+	swarmOwnerName := fmt.Sprint(resultPayload["ownername"])
+	swarmKey, ok := resultPayload["swarm_key"].(uint64)
+	if !ok {
+		return errors.New("swarm_key has invalid type")
+	}
 
-	log.Info().Msgf("Device metadata: %+v\n", res)
+	system.config.ReswarmConfig.Name = deviceName
+	system.config.ReswarmConfig.SwarmName = swarmName
+	system.config.ReswarmConfig.SwarmOwnerName = swarmOwnerName
+	system.config.ReswarmConfig.SwarmKey = int(swarmKey)
 
-	return nil
+	err = config.SaveReswarmConfig(system.config.CommandLineArguments.ConfigFileLocation, system.config.ReswarmConfig)
+
+	return err
 }
 
 func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress), updateAgent bool) (UpdateResult, error) {
