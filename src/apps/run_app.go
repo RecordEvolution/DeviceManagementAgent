@@ -201,12 +201,6 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 			Target:   "/data",
 			ReadOnly: false,
 		},
-		{
-			Type:     mount.TypeBind,
-			Source:   "/etc/resolv.conf",
-			Target:   "/etc/resolv.conf",
-			ReadOnly: false,
-		},
 	}
 
 	if _, err := os.Stat("/sys/bus/w1/devices"); !os.IsNotExist(err) {
