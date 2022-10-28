@@ -11,7 +11,7 @@ build-all:
 	scripts/build-all.sh
 
 build-all-docker: clean ## Builds all docker images for all targets in targets files
-	docker build . -t agent-builder
+	docker build --platform linux/amd64 . -t agent-builder
 	docker run --name agent_builder -v ${ROOT_DIR}/build:/app/reagent/build agent-builder
 
 rollout: build-all-docker publish publish-version publish-latestVersions ## Do everythin in one step
