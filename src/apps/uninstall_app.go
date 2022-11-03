@@ -1,8 +1,12 @@
 package apps
 
 import (
+	"fmt"
 	"os"
 	"reagent/common"
+	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 func (sm *StateMachine) uninstallApp(payload common.TransitionPayload, app *common.App) error {
@@ -16,12 +20,20 @@ func (sm *StateMachine) uninstallApp(payload common.TransitionPayload, app *comm
 		return err
 	}
 
+	config := sm.Container.GetConfig()
 	if payload.Stage == common.DEV {
-		config := sm.Container.GetConfig()
 		buildDir := config.CommandLineArguments.AppsBuildDir
 		fileName := payload.AppName + "." + config.CommandLineArguments.CompressedBuildExtension
-		os.Remove(buildDir + "/" + fileName) // removes the build zip if it exists
+		buildZipFile := buildDir + "/" + fileName
+		err = os.RemoveAll(buildZipFile) // removes the build zip if it exists
+		log.Debug().Msgf("Removed build zip file: %s, error: %v\n", buildZipFile, err)
+
 	}
 
-	return nil
+	appsDir := config.CommandLineArguments.AppsDirectory
+	dataFolderDir := fmt.Sprintf("%s/%s/%s", appsDir, strings.ToLower(string(payload.Stage)), payload.AppName)
+	err = os.RemoveAll(dataFolderDir) // remove the data directory for the app we just removed
+	log.Debug().Msgf("Removed data dir: %s, error: %v\n", dataFolderDir, err)
+
+	return err
 }
