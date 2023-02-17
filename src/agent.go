@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reagent/api"
 	"reagent/apps"
@@ -10,7 +9,6 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/container"
-	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
@@ -81,10 +79,8 @@ func (agent *Agent) OnConnect() error {
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
 	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
-		if errors.Is(err, errdefs.ErrAlreadyExists) {
-			if strings.Contains(err.Error(), "tunnel") {
-				log.Error().Stack().Err(err).Msg("failed to sync")
-			}
+		if strings.Contains(err.Error(), "tunnel") {
+			log.Error().Stack().Err(err).Msg("failed to sync")
 		} else {
 			log.Fatal().Stack().Err(err).Msg("failed to sync")
 		}
