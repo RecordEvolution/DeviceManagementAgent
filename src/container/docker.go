@@ -755,7 +755,14 @@ func (docker *Docker) WaitForRunning(ctx context.Context, containerID string, po
 			}
 
 			if state.Status == "exited" || state.Status == "dead" {
-				errC <- errors.New("container failed to start")
+				errC <- errors.New("the container has exited")
+				close(errC)
+				close(runningC)
+				return
+			}
+
+			if state.Error != "" {
+				errC <- errors.New(state.Error)
 				close(errC)
 				close(runningC)
 				return
