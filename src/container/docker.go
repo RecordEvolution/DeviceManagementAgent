@@ -318,7 +318,7 @@ func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) erro
 }
 
 func (docker *Docker) PruneSystem(ctx context.Context) (string, error) {
-	cmd := exec.Command("docker", "system", "prune", "-a", "-f")
+	cmd := exec.Command("docker", "system", "prune", "-af", "--volumes")
 	cmd.Stderr = cmd.Stdout
 	output, err := cmd.Output()
 	if err != nil {

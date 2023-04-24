@@ -12,6 +12,7 @@ import (
 
 	"reagent/common"
 	"reagent/config"
+	"reagent/container"
 	"reagent/messenger/topics"
 	"reagent/safe"
 
@@ -25,6 +26,7 @@ import (
 
 type WampSession struct {
 	client       *client.Client
+	container    container.Container
 	agentConfig  *config.Config
 	socketConfig *SocketConfig
 }
@@ -117,9 +119,9 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 }
 
 // New creates a new wamp session from a ReswarmConfig file
-func NewWamp(config *config.Config, socketConfig *SocketConfig) (*WampSession, error) {
-	session := &WampSession{agentConfig: config, socketConfig: socketConfig}
-	clientChannel := EstablishSocketConnection(config, socketConfig)
+func NewWamp(config *config.Config, socketConfig *SocketConfig, container container.Container) (*WampSession, error) {
+	session := &WampSession{agentConfig: config, socketConfig: socketConfig, container: container}
+	clientChannel := EstablishSocketConnection(config, socketConfig, container)
 
 	select {
 	case client := <-clientChannel:
@@ -139,7 +141,7 @@ func NewWamp(config *config.Config, socketConfig *SocketConfig) (*WampSession, e
 func (wampSession *WampSession) Reconnect() {
 	wampSession.Close()
 
-	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig)
+	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig, wampSession.container)
 	select {
 	case client := <-clientChannel:
 		wampSession.client = client
@@ -161,7 +163,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 }
 
-func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketConfig) chan *client.Client {
+func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketConfig, container container.Container) chan *client.Client {
 	resChan := make(chan *client.Client)
 
 	// never returns a established connection
@@ -199,6 +201,12 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 
 				duration = time.Since(requestStart)
 
+				if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") {
+					exitMessage := fmt.Sprintln("The RESWARM device no longer exists")
+					fmt.Println(exitMessage)
+					os.Exit(1)
+				}
+
 				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 100ms", duration.String())
 				time.Sleep(time.Millisecond * 100)
 				continue
@@ -220,6 +228,13 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 				fmt.Println(exitMessage)
 				os.Exit(1)
 			}
+
+			onDestroyListener := func(event *wamp.Event) {
+				container.PruneSystem(context.Background())
+				os.Exit(1)
+			}
+
+			wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
 
 			if wClient.Connected() {
 				duration = time.Since(requestStart)

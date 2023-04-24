@@ -236,7 +236,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	benchmark.OnConnectInitAfterConnection = time.Now()
 	benchmark.SocketConnectionInit = time.Now()
 
-	mainSession, err := messenger.NewWamp(generalConfig, &mainSocketConfig)
+	mainSession, err := messenger.NewWamp(generalConfig, &mainSocketConfig, container)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
