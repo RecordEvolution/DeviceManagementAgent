@@ -1,31 +1,34 @@
 package tunnel
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
-	"reagent/system"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-cmd/cmd"
-	"github.com/mrz1836/go-sanitize"
 	"github.com/rs/zerolog/log"
 )
 
-const HTTPS = "https"
-const HTTP = "http"
-const HTTP_HTTPS = "http+https"
-const TCP = "tcp"
+type Protocol string
+
+const (
+	TCP  Protocol = "tcp"
+	UDP  Protocol = "udp"
+	HTTP Protocol = "http"
+)
 
 type PgrokManager struct {
 	TunnelManager
@@ -36,6 +39,16 @@ type PgrokManager struct {
 	tunnelsLock sync.Mutex
 }
 
+type FrpTunnelManager struct {
+	TunnelManager
+	tunnelsLock         *sync.RWMutex
+	activeTunnelConfigs map[string]*Tunnel
+	clientProcess       *exec.Cmd
+	configBuilder       TunnelConfigBuilder
+	config              *config.Config
+	messenger           messenger.Messenger
+}
+
 type FullURL struct {
 	HttpURL  string `json:"httpURL"`
 	HttpsURL string `json:"httpsURL"`
@@ -43,11 +56,8 @@ type FullURL struct {
 }
 
 type Tunnel struct {
-	process   *cmd.Cmd
-	Port      uint64  `json:"port"`
-	Subdomain string  `json:"subdomain"`
-	Protocol  string  `json:"protocol"`
-	FullURL   FullURL `json:"fullURL"`
+	Error  string
+	Config TunnelConfig
 }
 
 type AppTunnel struct {
@@ -95,12 +105,313 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 }
 
 type TunnelManager interface {
-	Get(port uint64) (*Tunnel, error)
-	GetAll() ([]*Tunnel, error)
-	Kill(port uint64) error
-	KillAll() error
-	Spawn(port uint64, protocol string, subdomain string) (*Tunnel, error)
-	Restart(port uint64) (*Tunnel, error)
+	AddTunnel(portRule PortForwardRule) (TunnelConfig, error)
+	RemoveTunnel(conf TunnelConfig, portRule PortForwardRule) error
+	Get(tunnelID string) *Tunnel
+	Status(tunnelID string) (TunnelStatus, error)
+	Reload() error
+}
+
+type TunnelStatus struct {
+	Name       string
+	Status     string
+	LocalAddr  string
+	Plugin     string
+	RemoteAddr string
+	Error      string
+	Protocol   Protocol
+}
+
+func parseProxyStatus(text string) []TunnelStatus {
+	lines := strings.Split(text, "\n")
+	lines = lines[1:]
+	var proxyStatusList []TunnelStatus
+
+	var currentProtocol string
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+
+		if line == "TCP" || line == "HTTP" || line == "UDP" {
+			currentProtocol = line
+			i++
+			continue
+		}
+
+		fields := strings.Fields(line)
+		fieldCnt := len(fields)
+		if fieldCnt < 4 {
+			continue
+		}
+
+		proxyStatus := TunnelStatus{
+			Name:       fields[0],
+			Status:     fields[1],
+			LocalAddr:  fields[2],
+			RemoteAddr: fields[3],
+			Protocol:   Protocol(strings.ToLower(currentProtocol)),
+		}
+
+		if fieldCnt == 5 {
+			proxyStatus.Error = fields[4]
+		}
+
+		proxyStatusList = append(proxyStatusList, proxyStatus)
+	}
+
+	return proxyStatusList
+}
+
+func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
+	frpcPath := filesystem.GetTunnelBinaryPath(config, "frpc")
+
+	configBuilder := NewTunnelConfigBuilder(config)
+	frpCommand := exec.Command(frpcPath)
+	frpCommand.Dir = filepath.Dir(frpcPath)
+
+	stdout, err := frpCommand.StdoutPipe()
+	if err != nil {
+		return FrpTunnelManager{}, err
+	}
+
+	err = frpCommand.Start()
+	if err != nil {
+		return FrpTunnelManager{}, err
+	}
+
+	frpTunnelManager := FrpTunnelManager{
+		clientProcess:       frpCommand,
+		configBuilder:       configBuilder,
+		messenger:           messenger,
+		config:              config,
+		tunnelsLock:         &sync.RWMutex{},
+		activeTunnelConfigs: make(map[string]*Tunnel),
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Error was found
+			if strings.Contains(line, "[E]") {
+				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|tcp|udp)-(\d*))]`)
+				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
+				if len(tunnelIdMatch) > 1 {
+					tunnelID := tunnelIdMatch[1]
+
+					errMessageRegexp := regexp.MustCompile(`error: (.*)`)
+					errMatch := errMessageRegexp.FindStringSubmatch(line)
+					if len(errMatch) > 1 {
+						errMessage := errMatch[1]
+						frpTunnelManager.tunnelsLock.Lock()
+						activeTunnel := frpTunnelManager.activeTunnelConfigs[tunnelID]
+						activeTunnel.Error = errMessage
+						log.Debug().Msgf("%+v\n", activeTunnel)
+						frpTunnelManager.tunnelsLock.Unlock()
+					}
+
+				}
+
+				log.Error().Msgf("frp-err: %s\n", line)
+
+			} else {
+				log.Info().Msgf("frp-out: %s\n", line)
+			}
+		}
+	}()
+
+	return frpTunnelManager, nil
+}
+
+func (frpTm *FrpTunnelManager) closeRemotePort(remotePort uint16, protocol Protocol) error {
+	args := []interface{}{
+		common.Dict{
+			"remote_port": remotePort,
+			"protocol":    string(protocol),
+		},
+	}
+
+	_, err := frpTm.messenger.Call(context.Background(), topics.ClosePort, args, common.Dict{}, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (frpTm *FrpTunnelManager) SetMessenger(messenger messenger.Messenger) {
+	frpTm.messenger = messenger
+}
+
+func (frpTm *FrpTunnelManager) reserveRemotePort(protocol Protocol) (uint64, error) {
+	args := []interface{}{
+		common.Dict{
+			"protocol": string(protocol),
+		},
+	}
+
+	result, err := frpTm.messenger.Call(context.Background(), topics.ExposePort, args, common.Dict{}, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	payloadArg := result.Arguments[0]
+	payload, ok := payloadArg.(map[string]interface{})
+
+	if !ok {
+		return 0, errors.New("failed to parse payload")
+	}
+
+	remotePortKw := payload["remote_port"]
+	remotePort, ok := remotePortKw.(uint64)
+	if !ok {
+		return 0, errors.New("failed to parse port")
+	}
+
+	return remotePort, nil
+}
+
+func (frpTm *FrpTunnelManager) Reload() error {
+	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
+
+	reloadCmd := exec.Command(frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath)
+	err := reloadCmd.Start()
+	if err != nil {
+		return err
+	}
+
+	err = reloadCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (frpTm *FrpTunnelManager) Get(tunnelID string) *Tunnel {
+	frpTm.tunnelsLock.Lock()
+	tunnel := frpTm.activeTunnelConfigs[tunnelID]
+	frpTm.tunnelsLock.Unlock()
+
+	return tunnel
+}
+
+func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
+	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
+
+	out, err := exec.Command(frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
+	if err != nil {
+		return TunnelStatus{}, nil
+	}
+
+	tunnelStatuses := parseProxyStatus(string(out))
+	for _, tunnelStatus := range tunnelStatuses {
+		if tunnelStatus.Name == tunnelID {
+			return tunnelStatus, nil
+		}
+	}
+
+	return TunnelStatus{}, errdefs.ErrNotFound
+}
+
+// Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
+func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig, error) {
+	subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
+
+	protocol := Protocol(portRule.Protocol)
+	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port}
+
+	tunnelId := GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
+	frpTm.tunnelsLock.Lock()
+	if frpTm.activeTunnelConfigs[tunnelId] == nil {
+		frpTm.activeTunnelConfigs[tunnelId] = &Tunnel{Config: newTunnelConfig}
+		frpTm.tunnelsLock.Unlock()
+	} else {
+		frpTm.tunnelsLock.Unlock()
+		return TunnelConfig{}, errors.New("tunnel already exists")
+	}
+
+	// Don't need to reserve a port if the user starts an HTTP tunnel
+	if protocol != HTTP {
+		remotePort, err := frpTm.reserveRemotePort(protocol)
+		if err != nil {
+			return TunnelConfig{}, err
+		}
+		newTunnelConfig.RemotePort = remotePort
+	}
+
+	frpTm.configBuilder.AddTunnelConfig(newTunnelConfig)
+
+	err := frpTm.Reload()
+	if err != nil {
+		return TunnelConfig{}, err
+	}
+
+	var url string
+	if protocol == HTTP {
+		url = fmt.Sprintf("%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
+	} else {
+		url = fmt.Sprintf("%s:%s:%d", subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
+	}
+
+	payload := common.Dict{
+		"device_key": portRule.DeviceKey,
+		"app_key":    portRule.AppKey,
+		"url":        url,
+		"port":       newTunnelConfig.LocalPort,
+		"active":     true,
+		"error":      common.Dict{"message": ""},
+	}
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancelFunc()
+
+	_, err = frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+	if err != nil {
+		return TunnelConfig{}, nil
+	}
+
+	return newTunnelConfig, nil
+}
+
+func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForwardRule) error {
+	tunnelId := GetTunnelID(conf.Subdomain, string(conf.Protocol), conf.LocalPort)
+
+	frpTm.tunnelsLock.Lock()
+	if frpTm.activeTunnelConfigs[tunnelId] != nil {
+		delete(frpTm.activeTunnelConfigs, tunnelId)
+		frpTm.tunnelsLock.Unlock()
+	} else {
+		frpTm.tunnelsLock.Unlock()
+		return errors.New("tunnel does not exist")
+	}
+
+	err := frpTm.closeRemotePort(uint16(conf.RemotePort), conf.Protocol)
+	if err != nil {
+		return err
+	}
+
+	frpTm.configBuilder.RemoveTunnelConfig(conf)
+
+	frpTm.Reload()
+
+	payload := common.Dict{
+		"device_key": portRule.DeviceKey,
+		"app_key":    portRule.AppKey,
+		"active":     false,
+		"url":        "", // remove url in database
+		"port":       conf.RemotePort,
+		"error":      common.Dict{"message": ""},
+	}
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancelFunc()
+
+	_, err = frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type AppTunnelManager interface {
@@ -112,489 +423,4 @@ type AppTunnelManager interface {
 	DeactivateAppTunnel(appTunnel *AppTunnel) error
 	ActivateAppTunnel(appTunnel *AppTunnel) error
 	KillAppTunnel(appKey uint64, port uint64) error
-}
-
-func NewPgrokAppTunnelManager(tm TunnelManager, m messenger.Messenger) PgrokAppTunnelManager {
-	return PgrokAppTunnelManager{
-		TunnelManager: tm,
-		messenger:     m,
-		appTunnels:    make(map[string]*AppTunnel),
-	}
-}
-
-func (pm *PgrokAppTunnelManager) GetTunnelManager() TunnelManager {
-	return pm.TunnelManager
-}
-
-type PgrokAppTunnelManager struct {
-	AppTunnelManager
-	messenger      messenger.Messenger
-	TunnelManager  TunnelManager
-	appTunnels     map[string]*AppTunnel
-	appTunnelsLock sync.Mutex
-}
-
-func (pm *PgrokAppTunnelManager) DeactivateAppTunnel(appTunnel *AppTunnel) error {
-	appTunnel.Mutex.Lock()
-	if !appTunnel.Running {
-		appTunnel.Mutex.Unlock()
-		return errors.New("tunnel is not running")
-	}
-	appTunnel.Mutex.Unlock()
-
-	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey, appTunnel.Tunnel.Port)
-	if foundAppTunnel == nil {
-		return errors.New("tunnel does not exist")
-	}
-
-	payload := common.Dict{
-		"device_key": appTunnel.DeviceKey,
-		"app_key":    appTunnel.AppKey,
-		"active":     false,
-		"url":        "", // remove url in database
-		"port":       appTunnel.Tunnel.Port,
-		"error":      common.Dict{"message": ""},
-	}
-
-	err := pm.TunnelManager.Kill(appTunnel.Tunnel.Port)
-	if err != nil {
-		log.Error().Err(err).Msgf("failed to kill tunnel on app tunnel")
-	}
-
-	appTunnel.Mutex.Lock()
-	appTunnel.Running = false
-	appTunnel.Mutex.Unlock()
-
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancelFunc()
-
-	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (pm *PgrokAppTunnelManager) ActivateAppTunnel(appTunnel *AppTunnel) error {
-	appTunnel.Mutex.Lock()
-	if appTunnel.Running {
-		appTunnel.Mutex.Unlock()
-		return errors.New("tunnel is already running")
-	}
-	appTunnel.Mutex.Unlock()
-
-	foundAppTunnel, _ := pm.GetAppTunnel(appTunnel.AppKey, appTunnel.Tunnel.Port)
-	if foundAppTunnel == nil {
-		pm.appTunnels[fmt.Sprintf("%d-%d", appTunnel.AppKey, appTunnel.Tunnel.Port)] = appTunnel
-	}
-
-	tunnel, err := pm.TunnelManager.Spawn(appTunnel.Tunnel.Port, appTunnel.Tunnel.Protocol, appTunnel.Tunnel.Subdomain)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrAlreadyExists) {
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-			defer cancelFunc()
-
-			payload := common.Dict{
-				"device_key": appTunnel.DeviceKey,
-				"app_key":    appTunnel.AppKey,
-				"port":       appTunnel.Tunnel.Port,
-				"public":     false,
-				"error": common.Dict{
-					"message": "errorTunnelAlreadyExists",
-				},
-			}
-
-			pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-		}
-		return err
-	}
-
-	appTunnel.Mutex.Lock()
-	appTunnel.Tunnel = tunnel
-	appTunnel.Running = true
-	appTunnel.Mutex.Unlock()
-
-	url := tunnel.FullURL.HttpsURL
-	if tunnel.Protocol == TCP {
-		url = tunnel.FullURL.TcpURL
-	}
-
-	payload := common.Dict{
-		"device_key": appTunnel.DeviceKey,
-		"app_key":    appTunnel.AppKey,
-		"url":        url,
-		"port":       tunnel.Port,
-		"active":     true,
-		"error":      common.Dict{"message": ""},
-	}
-
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancelFunc()
-
-	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (pm *PgrokAppTunnelManager) RegisterAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) *AppTunnel {
-	var subdomain string
-	if protocol == TCP {
-		subdomain = fmt.Sprintf("%d-%s", deviceKey, appName)
-	} else {
-		subdomain = fmt.Sprintf("%d-%s-%d", deviceKey, appName, port)
-	}
-
-	appTunnel := AppTunnel{
-		Tunnel: &Tunnel{
-			Port:      port,
-			Subdomain: subdomain,
-			Protocol:  protocol,
-		},
-		DeviceKey: deviceKey,
-		AppKey:    appKey,
-		Running:   false,
-	}
-
-	pm.appTunnelsLock.Lock()
-	pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)] = &appTunnel
-	pm.appTunnelsLock.Unlock()
-
-	return &appTunnel
-}
-
-func (pm *PgrokAppTunnelManager) CreateAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) (*AppTunnel, error) {
-	var subdomain string
-	if protocol == TCP {
-		subdomain = fmt.Sprintf("%d-%s", deviceKey, appName)
-	} else {
-		subdomain = fmt.Sprintf("%d-%s-%d", deviceKey, appName, port)
-	}
-
-	tunnel, err := pm.TunnelManager.Spawn(port, protocol, subdomain)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrAlreadyExists) {
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-			defer cancelFunc()
-
-			payload := common.Dict{
-				"device_key": deviceKey,
-				"app_key":    appKey,
-				"port":       port,
-				"public":     false,
-				"error": common.Dict{
-					"message": "errorTunnelAlreadyExists",
-				},
-			}
-
-			pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-		}
-
-		return nil, err
-	}
-
-	appTunnel := AppTunnel{
-		Tunnel:    tunnel,
-		DeviceKey: deviceKey,
-		AppKey:    appKey,
-		Running:   true,
-	}
-
-	pm.appTunnelsLock.Lock()
-	pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)] = &appTunnel
-	pm.appTunnelsLock.Unlock()
-
-	url := tunnel.FullURL.HttpsURL
-	if tunnel.Protocol == TCP {
-		url = tunnel.FullURL.TcpURL
-	}
-
-	payload := common.Dict{
-		"device_key": deviceKey,
-		"app_key":    appKey,
-		"url":        url,
-		"port":       port,
-		"active":     true,
-		"error":      common.Dict{"message": ""},
-	}
-
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancelFunc()
-
-	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return &appTunnel, nil
-}
-
-func (pm *PgrokAppTunnelManager) GetAppTunnel(appKey uint64, port uint64) (*AppTunnel, error) {
-	pm.appTunnelsLock.Lock()
-	appTunnel := pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)]
-	pm.appTunnelsLock.Unlock()
-
-	if appTunnel == nil {
-		return nil, errors.New("app tunnel not found")
-	}
-
-	return appTunnel, nil
-}
-
-func (pm *PgrokAppTunnelManager) KillAppTunnel(appKey uint64, port uint64) error {
-	pm.appTunnelsLock.Lock()
-	appTunnel := pm.appTunnels[fmt.Sprintf("%d-%d", appKey, port)]
-	pm.appTunnelsLock.Unlock()
-
-	if appTunnel == nil {
-		return errors.New("app tunnel not found")
-	}
-
-	payload := common.Dict{
-		"device_key": appTunnel.DeviceKey,
-		"app_key":    appTunnel.AppKey,
-		"url":        "", // remove url in database
-		"active":     false,
-		"port":       appTunnel.Tunnel.Port,
-		"error":      common.Dict{"message": ""},
-	}
-
-	err := pm.TunnelManager.Kill(appTunnel.Tunnel.Port)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to kill tunnel of app tunnel")
-	}
-
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancelFunc()
-
-	_, err = pm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	pm.appTunnelsLock.Lock()
-	delete(pm.appTunnels, fmt.Sprintf("%d-%d", appKey, port))
-	pm.appTunnelsLock.Unlock()
-
-	return nil
-}
-
-func (pm *PgrokAppTunnelManager) SetMessenger(m messenger.Messenger) {
-	pm.messenger = m
-}
-
-func NewPgrokTunnel(config *config.Config) PgrokManager {
-	env := system.GetEnvironment(config)
-
-	var serverAddr string
-	switch env {
-	case "production":
-		serverAddr = "app.record-evolution.com:4443"
-	case "test":
-		serverAddr = "app.datapods.io:4443"
-	case "local":
-		serverAddr = "app.local:4443"
-	}
-
-	binaryPath := filesystem.GetPgrokBinaryPath(config)
-	return PgrokManager{
-		Config:     config,
-		binaryPath: binaryPath,
-		serverAddr: serverAddr,
-		tunnels:    make(map[uint64]*Tunnel),
-	}
-}
-
-func (pm *PgrokManager) Get(port uint64) (*Tunnel, error) {
-	pm.tunnelsLock.Lock()
-	tunnel := pm.tunnels[port]
-	if tunnel == nil {
-		pm.tunnelsLock.Unlock()
-		return nil, errors.New("tunnel not found")
-	}
-
-	pm.tunnelsLock.Unlock()
-
-	return tunnel, nil
-}
-
-func (pm *PgrokManager) GetAll() ([]*Tunnel, error) {
-	var tunnels []*Tunnel
-
-	pm.tunnelsLock.Lock()
-	for _, tunnel := range pm.tunnels {
-		tunnels = append(tunnels, tunnel)
-	}
-
-	pm.tunnelsLock.Unlock()
-
-	return tunnels, nil
-}
-
-func (pm *PgrokManager) Restart(port uint64) (*Tunnel, error) {
-	tunnel, err := pm.Get(port)
-	if err != nil {
-		return nil, err
-	}
-
-	err = pm.Kill(port)
-	if err != nil {
-		return nil, err
-	}
-
-	return pm.Spawn(port, tunnel.Subdomain, tunnel.Protocol)
-}
-
-func (pm *PgrokManager) KillAll() error {
-	for port := range pm.tunnels {
-		err := pm.Kill(port)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (pm *PgrokManager) Kill(port uint64) error {
-	tunnel, err := pm.Get(port)
-	if err != nil {
-		return err
-	}
-
-	if tunnel.process != nil {
-		tunnel.process.Stop()
-	}
-
-	delete(pm.tunnels, port)
-
-	log.Debug().Msgf("Killed pgrok tunnel with port %d", port)
-
-	return nil
-}
-
-func (pm *PgrokManager) Spawn(port uint64, protocol string, subdomain string) (*Tunnel, error) {
-	pm.tunnelsLock.Lock()
-	tunnel := pm.tunnels[port]
-	if tunnel != nil {
-		pm.tunnelsLock.Unlock()
-		return nil, fmt.Errorf("a tunnel already exists for port %d, %w", port, errdefs.ErrAlreadyExists)
-	}
-	pm.tunnelsLock.Unlock()
-
-	var args = make([]string, 0)
-	// always use test domain for debugging locally
-	if pm.Config.CommandLineArguments.Environment == string(common.LOCAL) {
-		subdomain = "test"
-	}
-
-	if subdomain != "" {
-		sanitizedSubomain := sanitize.Custom(subdomain, `[^a-zA-Z0-9-]`)
-		args = append(args, fmt.Sprintf("-subdomain=%s", sanitizedSubomain))
-	}
-
-	if protocol != TCP {
-		protocol = HTTP_HTTPS
-	}
-
-	if protocol == TCP {
-		args = append(args, fmt.Sprintf("-remoteport=%d", port))
-	}
-
-	deviceKey := pm.Config.ReswarmConfig.DeviceKey
-	deviceSecret := pm.Config.ReswarmConfig.Secret
-
-	auth := fmt.Sprintf("%d:%s", deviceKey, deviceSecret)
-	args = append(args, "-log", "stdout", "-auth", auth, "-serveraddr", pm.serverAddr, "-proto", protocol, fmt.Sprint(port))
-	pgrokTunnelCmd := cmd.NewCmd(pm.binaryPath, args...)
-
-	log.Debug().Msgf("Attempting to create tunnel with following arguments: %s\n", strings.Join(args, " "))
-	cmdStatusChan := pgrokTunnelCmd.Start()
-
-	var httpURL string
-	var httpsURL string
-	var tcpURL string
-
-outerLoop:
-	for {
-		status := pgrokTunnelCmd.Status()
-		for _, val := range status.Stdout {
-			if strings.Contains(val, "control recovering from failure dial") {
-				return nil, errors.New("failed to establish connection")
-			}
-
-			if strings.Contains(val, "address already in use") {
-				return nil, fmt.Errorf("a tunnel already exists for port %d, %w", port, errdefs.ErrAlreadyExists)
-			}
-
-			if strings.Contains(val, "is already registered") {
-				return nil, errors.New("subdomain already exists")
-			}
-
-			if strings.Contains(val, "Tunnel established at") {
-				if protocol != TCP {
-					httpsURLRegex := regexp.MustCompile(`Tunnel established at (https.*)`)
-					httpsMatch := httpsURLRegex.FindStringSubmatch(val)
-					if len(httpsMatch) == 2 && httpsMatch[1] != "" {
-						httpsURL = httpsMatch[1]
-					}
-
-					httpURLRegex := regexp.MustCompile(`Tunnel established at (http:.*)`)
-					httpMatch := httpURLRegex.FindStringSubmatch(val)
-					if len(httpMatch) == 2 && httpMatch[1] != "" {
-						httpURL = httpMatch[1]
-					}
-				} else {
-					tcpURLRegex := regexp.MustCompile(`Tunnel established at (tcp:.*)`)
-					tcpMatch := tcpURLRegex.FindStringSubmatch(val)
-					if len(tcpMatch) == 2 && tcpMatch[1] != "" {
-						tcpURL = tcpMatch[1]
-					}
-				}
-			}
-
-			if protocol == TCP {
-				if tcpURL != "" {
-					break outerLoop
-				}
-			} else {
-				if httpURL != "" && httpsURL != "" {
-					break outerLoop
-				}
-			}
-
-			time.Sleep(time.Millisecond * 10)
-		}
-	}
-
-	log.Debug().Msgf("Started tunnel with { port: %s, protocol: %s, subdomain: %s, auth: %s}\n", port, protocol, subdomain, auth)
-
-	go func() {
-		<-cmdStatusChan
-
-		log.Debug().Msgf("Tunnel for port %d with URL %s has exited.", port, httpsURL)
-		pm.tunnelsLock.Lock()
-		delete(pm.tunnels, port)
-		pm.tunnelsLock.Unlock()
-	}()
-
-	result := &Tunnel{
-		Port:      port,
-		Subdomain: subdomain,
-		Protocol:  protocol,
-		process:   pgrokTunnelCmd,
-		FullURL: FullURL{
-			HttpURL:  httpURL,
-			HttpsURL: httpsURL,
-			TcpURL:   tcpURL,
-		},
-	}
-
-	pm.tunnelsLock.Lock()
-	pm.tunnels[port] = result
-	pm.tunnelsLock.Unlock()
-
-	return result, nil
 }

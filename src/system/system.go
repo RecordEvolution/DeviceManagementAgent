@@ -287,8 +287,8 @@ func (system *System) compareVersion(currentVersion string, latestVersion string
 	return shouldUpdate, errors, nil
 }
 
-func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
-	latestVersion, err := system.GetLatestVersion("pgrok")
+func (system *System) updateFrpIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
+	latestVersion, err := system.GetLatestVersion("frpc")
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -297,7 +297,7 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 	var shouldUpdate bool
 	var errorsArr []error
 
-	currentVersion, err := system.GetPgrokCurrentVersion()
+	currentVersion, err := system.GetFrpCurrentVersion()
 	if err != nil {
 		if errors.Is(err, errdefs.ErrNotFound) {
 			exists = false
@@ -323,7 +323,7 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 		}, nil
 	}
 
-	err = system.downloadBinary("pgrok", "pgrok", latestVersion, false, progressCallback)
+	err = system.downloadBinary("frpc", "frpc", latestVersion, false, progressCallback)
 	if err != nil {
 		if errdefs.IsInProgress(err) {
 			return UpdateResult{
@@ -343,10 +343,10 @@ func (system *System) updatePgrokIfRequired(progressCallback func(filesystem.Dow
 	}, nil
 }
 
-func (system *System) GetPgrokCurrentVersion() (string, error) {
-	pgrokPath := filesystem.GetPgrokBinaryPath(system.config)
+func (system *System) GetFrpCurrentVersion() (string, error) {
+	frpPath := filesystem.GetTunnelBinaryPath(system.config, "frp")
 
-	exists, err := filesystem.PathExists(pgrokPath)
+	exists, err := filesystem.PathExists(frpPath)
 	if err != nil {
 		return "", err
 	}
@@ -355,7 +355,7 @@ func (system *System) GetPgrokCurrentVersion() (string, error) {
 		return "", errdefs.ErrNotFound
 	}
 
-	cmd := exec.Command(pgrokPath, "version")
+	cmd := exec.Command(frpPath, "--version")
 	stdout, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -413,13 +413,13 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 
 		defer wg.Done()
 
-		updateResult, err := system.updatePgrokIfRequired(progressFunction)
+		updateResult, err := system.updateFrpIfRequired(progressFunction)
 		if err != nil {
-			log.Error().Stack().Err(err).Msgf("Failed to update pgrok.. continuing...")
+			log.Error().Stack().Err(err).Msgf("Failed to update frpc.. continuing...")
 		}
 
 		if !updateResult.DidUpdate {
-			log.Debug().Msgf("Not downloading Pgrok because: %s", updateResult.Message)
+			log.Debug().Msgf("Not downloading frpc because: %s", updateResult.Message)
 		}
 
 		didTunnelUpdate = updateResult.DidUpdate

@@ -7,27 +7,28 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog/log"
 )
 
 type AppManager struct {
-	AppStore         *store.AppStore
-	StateMachine     *StateMachine
-	StateObserver    *StateObserver
-	AppTunnelManager tunnel.AppTunnelManager
-	crashLoops       map[*CrashLoop]struct{}
-	crashLoopLock    sync.Mutex
+	AppStore      *store.AppStore
+	StateMachine  *StateMachine
+	StateObserver *StateObserver
+	tunnelManager tunnel.TunnelManager
+	crashLoops    map[*CrashLoop]struct{}
+	crashLoopLock sync.Mutex
 }
 
-func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.AppTunnelManager) *AppManager {
+func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.TunnelManager) *AppManager {
 	am := AppManager{
-		StateMachine:     sm,
-		StateObserver:    so,
-		AppStore:         as,
-		AppTunnelManager: tm,
-		crashLoops:       make(map[*CrashLoop]struct{}),
+		StateMachine:  sm,
+		StateObserver: so,
+		AppStore:      as,
+		tunnelManager: tm,
+		crashLoops:    make(map[*CrashLoop]struct{}),
 	}
 
 	am.StateObserver.AppManager = &am
@@ -46,51 +47,62 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	for _, portRule := range portRules {
-		appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
+		// appTunnel, _ := am.tunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
 
 		// port creation
-		if portRule.Public {
-			// if the app is currently running, spawn a tunnel, else just register it for later spawnage
-			if curAppState == common.RUNNING {
-				if appTunnel == nil {
-					log.Debug().Msgf("Creating app tunnel for app: %d", app.AppKey)
-					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-					if err != nil {
-						log.Error().Err(err).Msgf("failed to create app tunnel for %d\n", app.AppKey)
-					}
-				} else {
-					if !appTunnel.Running {
-						err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
-						if err != nil {
-							log.Error().Err(err).Msgf("failed to activate app tunnel for %d\n", app.AppKey)
-						}
-					}
-				}
-			} else {
-				if appTunnel == nil {
-					log.Debug().Msgf("Registering app tunnel for app: %d\n", app.AppKey)
-					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-				} else {
-					appTunnel.Mutex.Lock()
-					if appTunnel.Running {
-						appTunnel.Mutex.Unlock()
-						log.Debug().Msgf("Deactivating app tunnel for app: %d\n", app.AppKey)
-						am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
-					} else {
-						appTunnel.Mutex.Unlock()
-					}
-				}
+		subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
+		tunnelID := tunnel.GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
+
+		// if the app is currently running, spawn a tunnel, else just register it for later spawnage
+		if portRule.Public && curAppState == common.RUNNING {
+			status, err := am.tunnelManager.Status(tunnelID)
+			if err == nil && status.Status == "running" {
+				log.Debug().Msg("tunnel is already running")
+				continue
 			}
 
-			// port deletion
-		} else {
-			if appTunnel != nil {
-				log.Debug().Msgf("Killing app tunnel for app: %d", app.AppKey)
-				err = am.AppTunnelManager.KillAppTunnel(portRule.AppKey, portRule.Port)
-				if err != nil {
-					log.Error().Err(err).Msgf("failed to kill app tunnel for %d", app.AppKey)
-				}
+			_, err = am.tunnelManager.AddTunnel(portRule)
+			if err != nil {
+				return err
 			}
+
+			log.Debug().Msgf("Added tunnel for %s", app.AppName)
+
+		} else {
+			status, err := am.tunnelManager.Status(tunnelID)
+			if err != nil {
+				continue
+			}
+
+			if status.Status != "running" {
+				continue
+			}
+
+			tunnel := am.tunnelManager.Get(tunnelID)
+			if tunnel == nil {
+				continue
+			}
+
+			log.Debug().Msgf("%+v\n", tunnel)
+
+			err = am.tunnelManager.RemoveTunnel(tunnel.Config, portRule)
+			if err != nil {
+				return err
+			}
+
+			// if appTunnel == nil {
+			// log.Debug().Msgf("Registering app tunnel for app: %d\n", app.AppKey)
+			// am.tunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
+			// } else {
+			// appTunnel.Mutex.Lock()
+			// if appTunnel.Running {
+			// 	appTunnel.Mutex.Unlock()
+			// 	log.Debug().Msgf("Deactivating app tunnel for app: %d\n", app.AppKey)
+			// 	// am.tunnelManager.DeactivateAppTunnel(appTunnel)
+			// } else {
+			// 	appTunnel.Mutex.Unlock()
+			// }
+			// }
 		}
 
 	}
@@ -454,14 +466,23 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 
 					// if the app is currently running, spawn a tunnel, else just register it for later spawnage
 					if app.CurrentState == common.RUNNING {
-						_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
+						subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
+						tunnelID := tunnel.GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
+
+						status, err := am.tunnelManager.Status(tunnelID)
+						if err == nil && status.Status == "running" {
+							log.Debug().Msg("tunnel is already running")
+							continue
+						}
+
+						_, err = am.tunnelManager.AddTunnel(portRule)
 						if err != nil {
 							return err
 						}
-					} else {
-						am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-					}
 
+						log.Debug().Msgf("Added tunnel for %s", app.AppName)
+
+					}
 				}
 			}
 

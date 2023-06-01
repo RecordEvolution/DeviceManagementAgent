@@ -41,7 +41,7 @@ type Agent struct {
 	External        *api.External
 	LogManager      *logging.LogManager
 	TerminalManager *terminal.TerminalManager
-	TunnelManager   tunnel.AppTunnelManager
+	TunnelManager   tunnel.TunnelManager
 	Filesystem      *filesystem.Filesystem
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
@@ -185,13 +185,16 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	}
 
 	filesystem := filesystem.New()
-	tunnelManager := tunnel.NewPgrokTunnel(generalConfig)
-	appTunnelManager := tunnel.NewPgrokAppTunnelManager(&tunnelManager, dummyMessenger)
+	tunnelManager, err := tunnel.NewFrpTunnelManager(dummyMessenger, generalConfig)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to init tunnel manager")
+	}
+
 	appStore := store.NewAppStore(database, dummyMessenger)
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateObserver := apps.NewObserver(container, &appStore, &logManager)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
-	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, &appTunnelManager)
+	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, &tunnelManager)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
 	var networkInstance network.Network
@@ -253,23 +256,23 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	terminalManager.SetMessenger(mainSession)
 	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
-	appTunnelManager.SetMessenger(mainSession)
+	tunnelManager.SetMessenger(mainSession)
 	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{
-		Container:        container,
-		Messenger:        mainSession,
-		LogMessenger:     mainSession,
-		Database:         database,
-		Network:          networkInstance,
-		Privilege:        &privilege,
-		Filesystem:       &filesystem,
-		AppTunnelManager: &appTunnelManager,
-		System:           &systemAPI,
-		AppManager:       appManager,
-		TerminalManager:  &terminalManager,
-		LogManager:       &logManager,
-		Config:           generalConfig,
+		Container:       container,
+		Messenger:       mainSession,
+		LogMessenger:    mainSession,
+		Database:        database,
+		Network:         networkInstance,
+		Privilege:       &privilege,
+		Filesystem:      &filesystem,
+		TunnelManager:   &tunnelManager,
+		System:          &systemAPI,
+		AppManager:      appManager,
+		TerminalManager: &terminalManager,
+		LogManager:      &logManager,
+		Config:          generalConfig,
 	}
 
 	return &Agent{
@@ -279,7 +282,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogManager:      &logManager,
 		Network:         networkInstance,
 		TerminalManager: &terminalManager,
-		TunnelManager:   &appTunnelManager,
+		TunnelManager:   &tunnelManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,

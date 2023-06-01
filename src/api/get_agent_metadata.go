@@ -41,7 +41,7 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 	}
 
 	pgrokIsLatest := true
-	pgrokCurrentVersion, err := ex.System.GetPgrokCurrentVersion()
+	pgrokCurrentVersion, err := ex.System.GetFrpCurrentVersion()
 	if err != nil {
 		if errors.Is(err, errdefs.ErrNotFound) {
 			pgrokIsLatest = false
