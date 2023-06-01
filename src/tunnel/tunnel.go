@@ -385,10 +385,11 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForw
 		return errors.New("tunnel does not exist")
 	}
 
-	err := frpTm.closeRemotePort(uint16(conf.RemotePort), conf.Protocol)
-	if err != nil {
-		return err
-	}
+	// The port manager will automatically cleanup unused ports
+	// err := frpTm.closeRemotePort(uint16(conf.RemotePort), conf.Protocol)
+	// if err != nil {
+	// 	return err
+	// }
 
 	frpTm.configBuilder.RemoveTunnelConfig(conf)
 
@@ -406,7 +407,7 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForw
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
-	_, err = frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+	_, err := frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
