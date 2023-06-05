@@ -113,6 +113,7 @@ type TunnelManager interface {
 	Get(tunnelID string) *Tunnel
 	Status(tunnelID string) (TunnelStatus, error)
 	Reload() error
+	Start() error
 }
 
 type TunnelStatus struct {
@@ -164,30 +165,22 @@ func parseProxyStatus(text string) []TunnelStatus {
 	return proxyStatusList
 }
 
-func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
-	frpcPath := filesystem.GetTunnelBinaryPath(config, "frpc")
+func (frpTm *FrpTunnelManager) Start() error {
+	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
-	configBuilder := NewTunnelConfigBuilder(config)
 	frpCommand := exec.Command(frpcPath)
 	frpCommand.Dir = filepath.Dir(frpcPath)
 
+	frpTm.clientProcess = frpCommand
+
 	stdout, err := frpCommand.StdoutPipe()
 	if err != nil {
-		return FrpTunnelManager{}, err
+		return err
 	}
 
 	err = frpCommand.Start()
 	if err != nil {
-		return FrpTunnelManager{}, err
-	}
-
-	frpTunnelManager := FrpTunnelManager{
-		clientProcess:       frpCommand,
-		configBuilder:       configBuilder,
-		messenger:           messenger,
-		config:              config,
-		tunnelsLock:         &sync.RWMutex{},
-		activeTunnelConfigs: make(map[string]*Tunnel),
+		return err
 	}
 
 	go func() {
@@ -205,11 +198,11 @@ func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (
 					errMatch := errMessageRegexp.FindStringSubmatch(line)
 					if len(errMatch) > 1 {
 						errMessage := errMatch[1]
-						frpTunnelManager.tunnelsLock.Lock()
-						activeTunnel := frpTunnelManager.activeTunnelConfigs[tunnelID]
+						frpTm.tunnelsLock.Lock()
+						activeTunnel := frpTm.activeTunnelConfigs[tunnelID]
 						activeTunnel.Error = errMessage
 						log.Debug().Msgf("%+v\n", activeTunnel)
-						frpTunnelManager.tunnelsLock.Unlock()
+						frpTm.tunnelsLock.Unlock()
 					}
 
 				}
@@ -222,24 +215,23 @@ func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (
 		}
 	}()
 
-	return frpTunnelManager, nil
+	return nil
 }
 
-// func (frpTm *FrpTunnelManager) closeRemotePort(remotePort uint16, protocol Protocol) error {
-// 	args := []interface{}{
-// 		common.Dict{
-// 			"remote_port": remotePort,
-// 			"protocol":    string(protocol),
-// 		},
-// 	}
+func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
 
-// 	_, err := frpTm.messenger.Call(context.Background(), topics.ClosePort, args, common.Dict{}, nil, nil)
-// 	if err != nil {
-// 		return err
-// 	}
+	configBuilder := NewTunnelConfigBuilder(config)
 
-// 	return nil
-// }
+	frpTunnelManager := FrpTunnelManager{
+		configBuilder:       configBuilder,
+		messenger:           messenger,
+		config:              config,
+		tunnelsLock:         &sync.RWMutex{},
+		activeTunnelConfigs: make(map[string]*Tunnel),
+	}
+
+	return frpTunnelManager, nil
+}
 
 func (frpTm *FrpTunnelManager) SetMessenger(messenger messenger.Messenger) {
 	frpTm.messenger = messenger

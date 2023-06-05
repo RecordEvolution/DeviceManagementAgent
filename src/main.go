@@ -131,9 +131,6 @@ func main() {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
-	select {
-	case <-sigChan:
-		// agent.TunnelManager.GetTunnelManager().KillAll()
-		return
-	}
+
+	<-sigChan
 }

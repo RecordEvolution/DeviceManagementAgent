@@ -287,6 +287,37 @@ func (system *System) compareVersion(currentVersion string, latestVersion string
 	return shouldUpdate, errors, nil
 }
 
+func (system *System) DownloadFrpIfNotExists() error {
+	latestVersion, err := system.GetLatestVersion("frpc")
+	if err != nil {
+		return err
+	}
+
+	exists := true
+
+	_, err = system.GetFrpCurrentVersion()
+	if err != nil {
+		if errors.Is(err, errdefs.ErrNotFound) {
+			exists = false
+		} else {
+			return err
+		}
+	}
+
+	fmt.Println(exists)
+
+	if exists {
+		return nil
+	}
+
+	err = system.downloadBinary("frpc", "frpc", latestVersion, false, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (system *System) updateFrpIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
 	latestVersion, err := system.GetLatestVersion("frpc")
 	if err != nil {
@@ -344,7 +375,7 @@ func (system *System) updateFrpIfRequired(progressCallback func(filesystem.Downl
 }
 
 func (system *System) GetFrpCurrentVersion() (string, error) {
-	frpPath := filesystem.GetTunnelBinaryPath(system.config, "frp")
+	frpPath := filesystem.GetTunnelBinaryPath(system.config, "frpc")
 
 	exists, err := filesystem.PathExists(frpPath)
 	if err != nil {
