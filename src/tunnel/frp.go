@@ -46,7 +46,8 @@ func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
 	frpcConfig := filepath.Join(config.CommandLineArguments.AgentDir, "frpc.ini")
 	tunnelIni := ini.Empty()
 
-	serverAddr := "app.datapods.io"
+	serverAddr := "app.record-evolution.com"
+
 	switch config.ReswarmConfig.Environment {
 	case string(common.PRODUCTION):
 		serverAddr = "app.record-evolution.com"
