@@ -6,6 +6,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"strings"
 
 	"gopkg.in/ini.v1"
 )
@@ -72,12 +73,16 @@ func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
 	return configBuilder
 }
 
-func GetTunnelID(subdomain string, protocol string, localPort uint64) string {
-	return fmt.Sprintf("%s-%s-%d", subdomain, protocol, localPort)
+func CreateTunnelID(subdomain string, protocol string) string {
+	return fmt.Sprintf("%s-%s", subdomain, protocol)
+}
+
+func CreateSubdomain(deviceKey uint64, appName string, port uint64) string {
+	return strings.ToLower(fmt.Sprintf("%d-%s-%d", deviceKey, appName, port))
 }
 
 func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
-	tunnelID := GetTunnelID(conf.Subdomain, string(conf.Protocol), conf.LocalPort)
+	tunnelID := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
 
 	builder.SetTunnelVariable(tunnelID, TYPE, string(conf.Protocol))
 	builder.SetTunnelVariable(tunnelID, SUBDOMAIN, conf.Subdomain)

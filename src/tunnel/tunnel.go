@@ -193,7 +193,7 @@ func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (
 			line := scanner.Text()
 			// Error was found
 			if strings.Contains(line, "[E]") {
-				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|tcp|udp)-(\d*))]`)
+				tunnelIdRegexp := regexp.MustCompile(`\[([^\]]+)-(http|tcp|udp)]`)
 				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
 				if len(tunnelIdMatch) > 1 {
 					tunnelID := tunnelIdMatch[1]
@@ -222,21 +222,21 @@ func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (
 	return frpTunnelManager, nil
 }
 
-func (frpTm *FrpTunnelManager) closeRemotePort(remotePort uint16, protocol Protocol) error {
-	args := []interface{}{
-		common.Dict{
-			"remote_port": remotePort,
-			"protocol":    string(protocol),
-		},
-	}
+// func (frpTm *FrpTunnelManager) closeRemotePort(remotePort uint16, protocol Protocol) error {
+// 	args := []interface{}{
+// 		common.Dict{
+// 			"remote_port": remotePort,
+// 			"protocol":    string(protocol),
+// 		},
+// 	}
 
-	_, err := frpTm.messenger.Call(context.Background(), topics.ClosePort, args, common.Dict{}, nil, nil)
-	if err != nil {
-		return err
-	}
+// 	_, err := frpTm.messenger.Call(context.Background(), topics.ClosePort, args, common.Dict{}, nil, nil)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func (frpTm *FrpTunnelManager) SetMessenger(messenger messenger.Messenger) {
 	frpTm.messenger = messenger
@@ -315,20 +315,10 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 
 // Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
 func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig, error) {
-	subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
+	subdomain := CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
 
 	protocol := Protocol(portRule.Protocol)
 	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port}
-
-	tunnelId := GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
-	frpTm.tunnelsLock.Lock()
-	if frpTm.activeTunnelConfigs[tunnelId] == nil {
-		frpTm.activeTunnelConfigs[tunnelId] = &Tunnel{Config: newTunnelConfig}
-		frpTm.tunnelsLock.Unlock()
-	} else {
-		frpTm.tunnelsLock.Unlock()
-		return TunnelConfig{}, errors.New("tunnel already exists")
-	}
 
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if protocol != HTTP {
@@ -348,9 +338,9 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 
 	var url string
 	if protocol == HTTP {
-		url = fmt.Sprintf("%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
+		url = fmt.Sprintf("https://%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
 	} else {
-		url = fmt.Sprintf("%s:%s:%d", subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
+		url = fmt.Sprintf("%s://%s:%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
 	}
 
 	payload := common.Dict{
@@ -365,6 +355,16 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
+	tunnelId := CreateTunnelID(subdomain, portRule.Protocol)
+	frpTm.tunnelsLock.Lock()
+	if frpTm.activeTunnelConfigs[tunnelId] == nil {
+		frpTm.activeTunnelConfigs[tunnelId] = &Tunnel{Config: newTunnelConfig}
+		frpTm.tunnelsLock.Unlock()
+	} else {
+		frpTm.tunnelsLock.Unlock()
+		return TunnelConfig{}, errors.New("tunnel already exists")
+	}
+
 	_, err = frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
 	if err != nil {
 		return TunnelConfig{}, nil
@@ -374,7 +374,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 }
 
 func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForwardRule) error {
-	tunnelId := GetTunnelID(conf.Subdomain, string(conf.Protocol), conf.LocalPort)
+	tunnelId := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
 
 	frpTm.tunnelsLock.Lock()
 	if frpTm.activeTunnelConfigs[tunnelId] != nil {

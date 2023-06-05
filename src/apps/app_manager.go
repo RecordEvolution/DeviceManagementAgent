@@ -7,7 +7,6 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
-	"strings"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -50,8 +49,8 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		// appTunnel, _ := am.tunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
 
 		// port creation
-		subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
-		tunnelID := tunnel.GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
+		subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
 		// if the app is currently running, spawn a tunnel, else just register it for later spawnage
 		if portRule.Public && curAppState == common.RUNNING {
@@ -466,8 +465,8 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 
 					// if the app is currently running, spawn a tunnel, else just register it for later spawnage
 					if app.CurrentState == common.RUNNING {
-						subdomain := strings.ToLower(fmt.Sprintf("%d_%s_%d", portRule.DeviceKey, portRule.AppName, portRule.Port))
-						tunnelID := tunnel.GetTunnelID(subdomain, portRule.Protocol, portRule.Port)
+						subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+						tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
 						status, err := am.tunnelManager.Status(tunnelID)
 						if err == nil && status.Status == "running" {
