@@ -49,7 +49,7 @@ func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
 	serverAddr := "app.datapods.io"
 	switch config.ReswarmConfig.Environment {
 	case string(common.PRODUCTION):
-		serverAddr = "app.recordevolution.com"
+		serverAddr = "app.record-evolution.com"
 	case string(common.TEST):
 		serverAddr = "app.datapods.io"
 	case string(common.LOCAL):
