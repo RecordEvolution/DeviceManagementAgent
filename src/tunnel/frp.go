@@ -109,7 +109,7 @@ func (builder *TunnelConfigBuilder) SetCommonVariable(key FrpcVariable, value st
 }
 
 func (builder *TunnelConfigBuilder) RemoveTunnelConfig(port TunnelConfig) {
-	tunnelID := fmt.Sprintf("%s-%s-%d", port.Subdomain, port.Protocol, port.LocalPort)
+	tunnelID := CreateTunnelID(port.Subdomain, string(port.Protocol))
 	builder.RemoveTunnelVariable(tunnelID)
 
 	builder.SaveConfig()
