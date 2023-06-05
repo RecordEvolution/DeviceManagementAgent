@@ -46,7 +46,6 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	for _, portRule := range portRules {
-		// appTunnel, _ := am.tunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
 
 		// port creation
 		subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
@@ -88,20 +87,6 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 			if err != nil {
 				return err
 			}
-
-			// if appTunnel == nil {
-			// log.Debug().Msgf("Registering app tunnel for app: %d\n", app.AppKey)
-			// am.tunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-			// } else {
-			// appTunnel.Mutex.Lock()
-			// if appTunnel.Running {
-			// 	appTunnel.Mutex.Unlock()
-			// 	log.Debug().Msgf("Deactivating app tunnel for app: %d\n", app.AppKey)
-			// 	// am.tunnelManager.DeactivateAppTunnel(appTunnel)
-			// } else {
-			// 	appTunnel.Mutex.Unlock()
-			// }
-			// }
 		}
 
 	}

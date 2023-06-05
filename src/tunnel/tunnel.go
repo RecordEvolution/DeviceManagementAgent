@@ -97,10 +97,13 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 			return nil, err
 		}
 
+		if portEntry.Protocol == "" {
+			portEntry.Protocol = "http"
+		}
+
 		portEntries = append(portEntries, portEntry)
 
 	}
-
 	return portEntries, nil
 }
 
