@@ -189,7 +189,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 			line := scanner.Text()
 			// Error was found
 			if strings.Contains(line, "[E]") {
-				tunnelIdRegexp := regexp.MustCompile(`\[([^\]]+)-(http|tcp|udp)]`)
+				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|tcp|udp))]`)
 				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
 				if len(tunnelIdMatch) > 1 {
 					tunnelID := tunnelIdMatch[1]
@@ -200,8 +200,11 @@ func (frpTm *FrpTunnelManager) Start() error {
 						errMessage := errMatch[1]
 						frpTm.tunnelsLock.Lock()
 						activeTunnel := frpTm.activeTunnelConfigs[tunnelID]
-						activeTunnel.Error = errMessage
-						log.Debug().Msgf("%+v\n", activeTunnel)
+						if activeTunnel != nil {
+							activeTunnel.Error = errMessage
+						} else {
+							log.Error().Msgf("failed to get tunnel with ID %s\n", tunnelID)
+						}
 						frpTm.tunnelsLock.Unlock()
 					}
 
