@@ -338,7 +338,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 	if protocol == HTTP {
 		url = fmt.Sprintf("https://%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
 	} else {
-		url = fmt.Sprintf("%s://%s:%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
+		url = fmt.Sprintf("%s://%s.%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
 	}
 
 	payload := common.Dict{
