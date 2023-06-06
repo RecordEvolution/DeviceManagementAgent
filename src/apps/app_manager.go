@@ -13,21 +13,21 @@ import (
 )
 
 type AppManager struct {
-	AppStore         *store.AppStore
-	StateMachine     *StateMachine
-	StateObserver    *StateObserver
-	AppTunnelManager tunnel.AppTunnelManager
-	crashLoops       map[*CrashLoop]struct{}
-	crashLoopLock    sync.Mutex
+	AppStore      *store.AppStore
+	StateMachine  *StateMachine
+	StateObserver *StateObserver
+	tunnelManager tunnel.TunnelManager
+	crashLoops    map[*CrashLoop]struct{}
+	crashLoopLock sync.Mutex
 }
 
-func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.AppTunnelManager) *AppManager {
+func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.TunnelManager) *AppManager {
 	am := AppManager{
-		StateMachine:     sm,
-		StateObserver:    so,
-		AppStore:         as,
-		AppTunnelManager: tm,
-		crashLoops:       make(map[*CrashLoop]struct{}),
+		StateMachine:  sm,
+		StateObserver: so,
+		AppStore:      as,
+		tunnelManager: tm,
+		crashLoops:    make(map[*CrashLoop]struct{}),
 	}
 
 	am.StateObserver.AppManager = &am
@@ -46,50 +46,46 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	for _, portRule := range portRules {
-		appTunnel, _ := am.AppTunnelManager.GetAppTunnel(app.AppKey, portRule.Port)
 
 		// port creation
-		if portRule.Public {
-			// if the app is currently running, spawn a tunnel, else just register it for later spawnage
-			if curAppState == common.RUNNING {
-				if appTunnel == nil {
-					log.Debug().Msgf("Creating app tunnel for app: %d", app.AppKey)
-					_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-					if err != nil {
-						log.Error().Err(err).Msgf("failed to create app tunnel for %d\n", app.AppKey)
-					}
-				} else {
-					if !appTunnel.Running {
-						err = am.AppTunnelManager.ActivateAppTunnel(appTunnel)
-						if err != nil {
-							log.Error().Err(err).Msgf("failed to activate app tunnel for %d\n", app.AppKey)
-						}
-					}
-				}
-			} else {
-				if appTunnel == nil {
-					log.Debug().Msgf("Registering app tunnel for app: %d\n", app.AppKey)
-					am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-				} else {
-					appTunnel.Mutex.Lock()
-					if appTunnel.Running {
-						appTunnel.Mutex.Unlock()
-						log.Debug().Msgf("Deactivating app tunnel for app: %d\n", app.AppKey)
-						am.AppTunnelManager.DeactivateAppTunnel(appTunnel)
-					} else {
-						appTunnel.Mutex.Unlock()
-					}
-				}
+		subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
+
+		// if the app is currently running, spawn a tunnel, else just register it for later spawnage
+		if portRule.Public && curAppState == common.RUNNING {
+			status, err := am.tunnelManager.Status(tunnelID)
+			if err == nil && status.Status == "running" {
+				log.Debug().Msg("tunnel is already running")
+				continue
 			}
 
-			// port deletion
+			_, err = am.tunnelManager.AddTunnel(portRule)
+			if err != nil {
+				return err
+			}
+
+			log.Debug().Msgf("Added tunnel for %s", app.AppName)
+
 		} else {
-			if appTunnel != nil {
-				log.Debug().Msgf("Killing app tunnel for app: %d", app.AppKey)
-				err = am.AppTunnelManager.KillAppTunnel(portRule.AppKey, portRule.Port)
-				if err != nil {
-					log.Error().Err(err).Msgf("failed to kill app tunnel for %d", app.AppKey)
-				}
+			status, err := am.tunnelManager.Status(tunnelID)
+			if err != nil {
+				continue
+			}
+
+			if status.Status != "running" {
+				continue
+			}
+
+			tunnel := am.tunnelManager.Get(tunnelID)
+			if tunnel == nil {
+				continue
+			}
+
+			log.Debug().Msgf("%+v\n", tunnel)
+
+			err = am.tunnelManager.RemoveTunnel(tunnel.Config, portRule)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -454,14 +450,23 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 
 					// if the app is currently running, spawn a tunnel, else just register it for later spawnage
 					if app.CurrentState == common.RUNNING {
-						_, err = am.AppTunnelManager.CreateAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
+						subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+						tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
+
+						status, err := am.tunnelManager.Status(tunnelID)
+						if err == nil && status.Status == "running" {
+							log.Debug().Msg("tunnel is already running")
+							continue
+						}
+
+						_, err = am.tunnelManager.AddTunnel(portRule)
 						if err != nil {
 							return err
 						}
-					} else {
-						am.AppTunnelManager.RegisterAppTunnel(portRule.AppKey, portRule.AppName, portRule.DeviceKey, portRule.Port, portRule.Protocol)
-					}
 
+						log.Debug().Msgf("Added tunnel for %s", app.AppName)
+
+					}
 				}
 			}
 
@@ -472,74 +477,6 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 			return err
 		}
 	}
-
-	// currentAppState := payload.CurrentState
-	// containerName := common.BuildContainerName(payload.Stage, payload.AppKey, payload.AppName)
-
-	// ctx := context.Background()
-	// container, err := am.StateMachine.Container.GetContainerState(ctx, containerName)
-	// if err != nil {
-	// 	if !errdefs.IsContainerNotFound(err) {
-	// 		return err
-	// 	}
-
-	// 	// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
-	// 	var fullImageName string
-	// 	if payload.Stage == common.DEV {
-	// 		fullImageName = payload.RegistryImageName.Dev
-	// 	} else if payload.Stage == common.PROD {
-	// 		fullImageName = payload.RegistryImageName.Prod
-	// 	}
-
-	// 	images, err := am.StateMachine.Container.GetImages(ctx, fullImageName)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	var correctedAppState common.AppState
-	// 	// no images were found (and no container) for this guy, so this guy is REMOVED
-	// 	if len(images) == 0 {
-	// 		if currentAppState == common.UNINSTALLED {
-	// 			correctedAppState = common.UNINSTALLED
-	// 		} else {
-	// 			correctedAppState = common.REMOVED
-	// 		}
-	// 	} else {
-	// 		// images were found for this guy, but no container, this means --> PRESENT
-	// 		correctedAppState = common.PRESENT
-	// 	}
-
-	// 	if err != nil {
-	// 		log.Error().Err(err).Msg("failed to notify app state")
-	// 	}
-
-	// 	payload.CurrentState = correctedAppState
-
-	// } else {
-
-	// 	appStateDeterminedByContainer, err := common.ContainerStateToAppState(container.Status, int(container.ExitCode))
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	var correctedAppState common.AppState
-	// 	switch currentAppState {
-	// 	case common.DOWNLOADING,
-	// 		common.TRANSFERING,
-	// 		common.BUILDING,
-	// 		common.PUBLISHING:
-	// 		correctedAppState = common.REMOVED
-	// 	case common.UPDATING:
-	// 		correctedAppState = common.PRESENT
-	// 	case common.STOPPING,
-	// 		common.STARTING:
-	// 		correctedAppState = appStateDeterminedByContainer
-	// 	default:
-	// 		correctedAppState = appStateDeterminedByContainer
-	// 	}
-
-	// 	payload.CurrentState = correctedAppState
-	// }
 
 	return nil
 }

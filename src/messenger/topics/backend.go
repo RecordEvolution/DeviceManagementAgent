@@ -14,3 +14,5 @@ const UpdateDeviceArchitecture Topic = "reswarm.devices.update_device_architectu
 const CheckPrivilege Topic = "reswarm.devices.check_privilege"
 const SetDeviceTestament Topic = "reswarm.api.testament_device"
 const UpdateAppTunnel Topic = "reswarm.devices.update_app_tunnel"
+const ExposePort Topic = "re.tunnel.expose_port"
+const ClosePort Topic = "re.tunnel.close_port"

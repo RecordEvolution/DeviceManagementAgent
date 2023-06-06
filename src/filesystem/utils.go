@@ -117,8 +117,7 @@ func (wc *WriteCounter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func GetPgrokBinaryPath(config *config.Config) string {
-	binaryName := "pgrok"
+func GetTunnelBinaryPath(config *config.Config, binaryName string) string {
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
