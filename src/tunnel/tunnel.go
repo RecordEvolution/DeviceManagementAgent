@@ -30,15 +30,6 @@ const (
 	HTTP Protocol = "http"
 )
 
-type PgrokManager struct {
-	TunnelManager
-	Config      *config.Config
-	binaryPath  string
-	serverAddr  string
-	tunnels     map[uint64]*Tunnel
-	tunnelsLock sync.Mutex
-}
-
 type FrpTunnelManager struct {
 	TunnelManager
 	tunnelsLock         *sync.RWMutex
@@ -411,15 +402,4 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForw
 	}
 
 	return nil
-}
-
-type AppTunnelManager interface {
-	GetTunnelManager() TunnelManager
-	SetMessenger(m messenger.Messenger)
-	GetAppTunnel(appKey uint64, port uint64) (*AppTunnel, error)
-	CreateAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) (*AppTunnel, error)
-	RegisterAppTunnel(appKey uint64, appName string, deviceKey uint64, port uint64, protocol string) *AppTunnel
-	DeactivateAppTunnel(appTunnel *AppTunnel) error
-	ActivateAppTunnel(appTunnel *AppTunnel) error
-	KillAppTunnel(appKey uint64, port uint64) error
 }
