@@ -40,20 +40,20 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"canUpdate":    reswarmModeEnabled,
 	}
 
-	pgrokIsLatest := true
-	pgrokCurrentVersion, err := ex.System.GetFrpCurrentVersion()
+	frpIsLatest := true
+	frpCurrentVersion, err := ex.System.GetFrpCurrentVersion()
 	if err != nil {
 		if errors.Is(err, errdefs.ErrNotFound) {
-			pgrokIsLatest = false
+			frpIsLatest = false
 		} else {
 			return nil, err
 		}
 	}
 
-	latestPgrokVersion, err := ex.System.GetLatestVersion("pgrok")
+	latestFrpVersion, err := ex.System.GetLatestVersion("frpc")
 	if err == nil {
-		if pgrokIsLatest {
-			pgrokIsLatest = pgrokCurrentVersion == latestPgrokVersion
+		if frpIsLatest {
+			frpIsLatest = frpCurrentVersion == latestFrpVersion
 		}
 	}
 
@@ -61,9 +61,9 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 	agentIsLatest := lastAgentVersion == currentAgentVersion
 	if err == nil {
 		dict["latestVersion"] = lastAgentVersion
-		dict["latestTunnelVersion"] = latestPgrokVersion
+		dict["latestTunnelVersion"] = latestFrpVersion
 		dict["latestAgentVersion"] = lastAgentVersion
-		dict["hasLatest"] = agentIsLatest && pgrokIsLatest
+		dict["hasLatest"] = agentIsLatest && frpIsLatest
 	}
 
 	if OSVersion != "" {
