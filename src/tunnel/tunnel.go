@@ -63,14 +63,16 @@ type AppTunnel struct {
 }
 
 type PortForwardRule struct {
-	Main      bool   `json:"main"`
-	RuleName  string `json:"name"`
-	AppName   string `json:"app_name"`
-	Port      uint64 `json:"port"`
-	Protocol  string `json:"protocol"`
-	DeviceKey uint64 `json:"device_key"`
-	AppKey    uint64 `json:"app_key"`
-	Public    bool   `json:"public"`
+	Main                  bool   `json:"main"`
+	RuleName              string `json:"name"`
+	AppName               string `json:"app_name"`
+	Port                  uint64 `json:"port"`
+	Protocol              string `json:"protocol"`
+	RemotePort            uint64 `json:"remote_port"`
+	RemotePortEnvironment string `json:"remote_port_environment"`
+	DeviceKey             uint64 `json:"device_key"`
+	AppKey                uint64 `json:"app_key"`
+	Public                bool   `json:"public"`
 }
 
 func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
@@ -99,6 +101,7 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 }
 
 type TunnelManager interface {
+	ReservePort(portRule PortForwardRule) (uint64, error)
 	AddTunnel(portRule PortForwardRule) (TunnelConfig, error)
 	RemoveTunnel(conf TunnelConfig, portRule PortForwardRule) error
 	Get(tunnelID string) *Tunnel
@@ -231,15 +234,20 @@ func (frpTm *FrpTunnelManager) SetMessenger(messenger messenger.Messenger) {
 	frpTm.messenger = messenger
 }
 
-func (frpTm *FrpTunnelManager) reserveRemotePort(protocol Protocol) (uint64, error) {
+func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol) (uint64, error) {
 	args := []interface{}{
 		common.Dict{
+			"port":     port,
 			"protocol": string(protocol),
 		},
 	}
 
 	result, err := frpTm.messenger.Call(context.Background(), topics.ExposePort, args, common.Dict{}, nil, nil)
 	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate value") {
+			log.Debug().Msg("Port still exposed in backend, continuing...")
+			return port, nil
+		}
 		return 0, err
 	}
 
@@ -302,16 +310,62 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 	return TunnelStatus{}, errdefs.ErrNotFound
 }
 
+func (frpTm *FrpTunnelManager) ReservePort(portRule PortForwardRule) (uint64, error) {
+	subdomain := CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+
+	protocol := Protocol(portRule.Protocol)
+	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
+
+	// Don't need to reserve a port if the user starts an HTTP tunnel
+	if protocol != HTTP {
+		// If no remote port is set, we will allocate one
+		remotePort, err := frpTm.reserveRemotePort(portRule.RemotePort, protocol)
+		if err != nil {
+			return 0, err
+		}
+		newTunnelConfig.RemotePort = remotePort
+	}
+
+	var url string
+	if protocol == HTTP {
+		url = fmt.Sprintf("https://%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
+	} else {
+		url = fmt.Sprintf("%s://%s.%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
+	}
+
+	payload := common.Dict{
+		"device_key":  portRule.DeviceKey,
+		"app_key":     portRule.AppKey,
+		"url":         url,
+		"local_port":  newTunnelConfig.LocalPort,
+		"remote_port": newTunnelConfig.RemotePort,
+		"protocol":    newTunnelConfig.Protocol,
+		"active":      true,
+		"error":       common.Dict{"message": ""},
+	}
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancelFunc()
+
+	_, err := frpTm.messenger.Call(ctx, topics.UpdateAppTunnel, []interface{}{payload}, nil, nil, nil)
+	if err != nil {
+		return newTunnelConfig.RemotePort, err
+	}
+
+	return newTunnelConfig.RemotePort, nil
+}
+
 // Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
 func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig, error) {
 	subdomain := CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
 
 	protocol := Protocol(portRule.Protocol)
-	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port}
+	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
 
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if protocol != HTTP {
-		remotePort, err := frpTm.reserveRemotePort(protocol)
+		// If no remote port is set, we will allocate one
+		remotePort, err := frpTm.reserveRemotePort(portRule.RemotePort, protocol)
 		if err != nil {
 			return TunnelConfig{}, err
 		}
@@ -333,12 +387,14 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 	}
 
 	payload := common.Dict{
-		"device_key": portRule.DeviceKey,
-		"app_key":    portRule.AppKey,
-		"url":        url,
-		"port":       newTunnelConfig.LocalPort,
-		"active":     true,
-		"error":      common.Dict{"message": ""},
+		"device_key":  portRule.DeviceKey,
+		"app_key":     portRule.AppKey,
+		"url":         url,
+		"local_port":  newTunnelConfig.LocalPort,
+		"remote_port": newTunnelConfig.RemotePort,
+		"protocol":    newTunnelConfig.Protocol,
+		"active":      true,
+		"error":       common.Dict{"message": ""},
 	}
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
@@ -385,12 +441,14 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig, portRule PortForw
 	frpTm.Reload()
 
 	payload := common.Dict{
-		"device_key": portRule.DeviceKey,
-		"app_key":    portRule.AppKey,
-		"active":     false,
-		"url":        "", // remove url in database
-		"port":       conf.RemotePort,
-		"error":      common.Dict{"message": ""},
+		"device_key":  portRule.DeviceKey,
+		"app_key":     portRule.AppKey,
+		"active":      false,
+		"url":         "", // remove url in database
+		"local_port":  conf.LocalPort,
+		"remote_port": conf.RemotePort,
+		"protocol":    conf.Protocol,
+		"error":       common.Dict{"message": ""},
 	}
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
