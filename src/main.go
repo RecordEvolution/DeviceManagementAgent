@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"reagent/benchmark"
-	"reagent/common"
 
 	// "reagent/common"
 	"reagent/config"
@@ -37,10 +36,10 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
 	}
 
-	if release.BuildArch == "" && cliArgs.Environment != string(common.LOCAL) {
-		fmt.Println("The 'reagent/release.BuildArch' build flag was not included during the build of this version.")
-		os.Exit(1)
-	}
+	// if release.BuildArch == "" && cliArgs.Environment != string(common.LOCAL) {
+	// 	fmt.Println("The 'reagent/release.BuildArch' build flag was not included during the build of this version.")
+	// 	os.Exit(1)
+	// }
 
 	if cliArgs.ConfigFileLocation == "" {
 		if cliArgs.Version {

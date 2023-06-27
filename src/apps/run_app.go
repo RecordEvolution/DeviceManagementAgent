@@ -8,6 +8,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/system"
+	"reagent/tunnel"
 	"strings"
 	"time"
 
@@ -297,9 +298,24 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			}
 		}
 
+		var remotePortEnvs []string
+		portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		for _, portRule := range portRules {
+			if portRule.RemotePortEnvironment != "" {
+				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, portRule.RemotePort)
+				remotePortEnvs = append(remotePortEnvs, portEnv)
+			}
+		}
+
+		log.Debug().Msgf("Port env: %+v\n", remotePortEnvs)
+
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,
-			Env:    append(environmentVariables, missingDefaultEnvs...),
+			Env:    append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...),
 			Labels: map[string]string{"real": "True"},
 			Tty:    true,
 		}
