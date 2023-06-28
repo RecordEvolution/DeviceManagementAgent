@@ -57,7 +57,7 @@ func (agent *Agent) OnConnect() error {
 
 	err = agent.System.DownloadFrpIfNotExists()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to download frp tunnel client")
+		log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
 	}
 
 	err = agent.TunnelManager.Start()
@@ -82,28 +82,28 @@ func (agent *Agent) OnConnect() error {
 
 	err = agent.updateRemoteDevice()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device metadata")
+		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
 
 	// first call this in case we don't have any app state yet, then we can start containers accordingly
 	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to sync")
+		log.Error().Stack().Err(err).Msg("failed to sync")
 	}
 
 	err = agent.StateObserver.CorrectAppStates(true)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
+		log.Error().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
 
 	err = agent.StateObserver.ObserveAppStates()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
+		log.Error().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
 	err = agent.AppManager.EnsureRemoteRequestedStates()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
+		log.Error().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
 	wg.Add(1)
@@ -112,12 +112,12 @@ func (agent *Agent) OnConnect() error {
 
 		err = agent.LogManager.ReviveDeadLogs()
 		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to revive dead logs")
+			log.Error().Stack().Err(err).Msg("failed to revive dead logs")
 		}
 
 		err := agent.LogManager.SetupEndpoints()
 		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to setup endpoints")
+			log.Error().Stack().Err(err).Msg("failed to setup endpoints")
 		}
 	})
 
@@ -127,13 +127,13 @@ func (agent *Agent) OnConnect() error {
 	log.Debug().Msg("Registering all endpoints...")
 	err = agent.External.RegisterAll()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to register all external endpoints")
+		log.Error().Stack().Err(err).Msg("failed to register all external endpoints")
 	}
 
 	log.Debug().Msg("Startup setup finished!")
 	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+		log.Error().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	benchmark.TimeTillGreen = time.Since(benchmark.GreenInit)
