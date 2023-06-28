@@ -71,7 +71,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 				return err
 			}
 
-			log.Debug().Msgf("Reserved port for %s (%d)", app.AppName, remotePort)
+			log.Debug().Msgf("Reserved port for %s %s (%d)", app.AppName, portRule.Protocol, remotePort)
 
 			continue
 		}

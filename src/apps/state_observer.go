@@ -291,6 +291,15 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			curAppState := app.CurrentState
 			app.StateLock.Unlock()
 
+			alreadyTransitioning := app.SecureTransition()
+			if alreadyTransitioning {
+				log.Debug().Msg("State observer: app is already transitioning, waiting for transition to finish...")
+				time.Sleep(pollingRate)
+				continue
+			} else {
+				app.UnlockTransition()
+			}
+
 			if curAppState != latestAppState && !common.IsTransientState(curAppState) && !common.IsTransientState(latestAppState) {
 				log.Debug().Msgf("app (%s, %s) state is not up to date", appName, stage)
 				log.Debug().Msgf("app (%s, %s) updating from %s to %s", appName, stage, curAppState, latestAppState)

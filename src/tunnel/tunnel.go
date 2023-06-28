@@ -318,6 +318,7 @@ func (frpTm *FrpTunnelManager) ReservePort(portRule PortForwardRule) (uint64, er
 
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if protocol != HTTP {
+		log.Debug().Msgf("Reserving port: %d (%s)\n", portRule.Port, portRule.Protocol)
 		// If no remote port is set, we will allocate one
 		remotePort, err := frpTm.reserveRemotePort(portRule.RemotePort, protocol)
 		if err != nil {
