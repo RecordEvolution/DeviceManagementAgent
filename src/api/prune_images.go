@@ -40,7 +40,7 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 		}
 
 		if all {
-			output, err := ex.Container.PruneSystem(ctx)
+			output, err := ex.Container.PruneAllImages()
 			if err != nil {
 				return nil, err
 			}
@@ -49,7 +49,7 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 		}
 	}
 
-	err = ex.Container.PruneImages(context.Background(), options)
+	_, err = ex.Container.PruneDanglingImages()
 	if err != nil {
 		return nil, err
 	}

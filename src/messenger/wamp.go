@@ -230,7 +230,7 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 			}
 
 			onDestroyListener := func(event *wamp.Event) {
-				container.PruneSystem(context.Background())
+				container.PruneSystem()
 				os.Exit(1)
 			}
 

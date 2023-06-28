@@ -317,8 +317,30 @@ func (docker *Docker) PruneImages(ctx context.Context, options common.Dict) erro
 	return err
 }
 
-func (docker *Docker) PruneSystem(ctx context.Context) (string, error) {
+func (docker *Docker) PruneSystem() (string, error) {
 	cmd := exec.Command("docker", "system", "prune", "-af", "--volumes")
+	cmd.Stderr = cmd.Stdout
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
+func (docker *Docker) PruneAllImages() (string, error) {
+	cmd := exec.Command("docker", "image", "prune", "-af")
+	cmd.Stderr = cmd.Stdout
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
+func (docker *Docker) PruneDanglingImages() (string, error) {
+	cmd := exec.Command("docker", "image", "prune", "-f")
 	cmd.Stderr = cmd.Stdout
 	output, err := cmd.Output()
 	if err != nil {

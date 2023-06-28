@@ -101,7 +101,9 @@ type Container interface {
 	RemoveImageByName(ctx context.Context, imageName string, tag string, options map[string]interface{}) error
 	RemoveImagesByName(ctx context.Context, imageName string, options map[string]interface{}) error
 	PruneImages(ctx context.Context, options common.Dict) error
-	PruneSystem(ctx context.Context) (string, error)
+	PruneSystem() (string, error)
+	PruneAllImages() (string, error)
+	PruneDanglingImages() (string, error)
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	WaitForDaemon(retryTimeout ...time.Duration) error
