@@ -10,6 +10,7 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,12 +119,13 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 	}
 	log.Debug().Msg("Got requested states")
 
+	log.Debug().Msg("Get all local images for next step")
 	allImages, err := so.Container.GetImages(context.Background(), "")
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("All Images: %+v\n", allImages)
+	log.Debug().Msg("Done getting all local images for next step")
 
 	for _, rState := range rStates {
 
@@ -151,19 +153,23 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 				fullImageName = rState.RegistryImageName.Prod
 			}
 
-			log.Debug().Msgf("Getting image for %s\n", fullImageName)
-			images, err := so.Container.GetImages(ctx, fullImageName)
-			if err != nil {
-				return err
+			log.Debug().Msgf("Finding image for %s\n", fullImageName)
+
+			foundImage := false
+			for _, image := range allImages {
+				if strings.Contains(image.RepoTags[0], fullImageName) {
+					foundImage = true
+					break
+				}
 			}
 
-			log.Debug().Msgf("Done getting image for %s\n", fullImageName)
+			log.Debug().Msgf("Done getting image for %s (Found: %b) \n", fullImageName, foundImage)
 
 			app.StateLock.Lock()
 			currentAppState := app.CurrentState
 			var correctedAppState common.AppState
 			// no images were found (and no container) for this guy, so this guy is REMOVED
-			if len(images) == 0 {
+			if !foundImage {
 				if currentAppState == common.UNINSTALLED {
 					correctedAppState = common.UNINSTALLED
 				} else {
