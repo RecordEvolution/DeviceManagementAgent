@@ -111,10 +111,12 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 // Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely if true is passed.
 func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
+	log.Debug().Msgf("Getting requested states (UpdateRemote: %b)\n", updateRemote)
 	rStates, err := so.AppStore.GetRequestedStates()
 	if err != nil {
 		return err
 	}
+	log.Debug().Msg("Got requested states")
 
 	for _, rState := range rStates {
 
@@ -124,12 +126,15 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			return err
 		}
 
+		log.Debug().Msgf("Getting container state for %s\n", containerName)
 		ctx := context.Background()
 		container, err := so.Container.GetContainerState(ctx, containerName)
 		if err != nil {
 			if !errdefs.IsContainerNotFound(err) {
 				return err
 			}
+
+			log.Debug().Msgf("Container %s was not found\n", containerName)
 
 			// we should check if the image exists, if it does not, we should set the state to 'REMOVED', else to 'STOPPED'
 			var fullImageName string
@@ -139,10 +144,13 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 				fullImageName = rState.RegistryImageName.Prod
 			}
 
+			log.Debug().Msgf("Getting image for %s\n", fullImageName)
 			images, err := so.Container.GetImages(ctx, fullImageName)
 			if err != nil {
 				return err
 			}
+
+			log.Debug().Msgf("Done getting image for %s\n", fullImageName)
 
 			app.StateLock.Lock()
 			currentAppState := app.CurrentState
