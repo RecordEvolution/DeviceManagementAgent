@@ -41,7 +41,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
-	requestedState := app.RequestedState
+	// requestedState := app.RequestedState
 	app.StateLock.Unlock()
 
 	// handle app tunnels
@@ -65,16 +65,16 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
-		if curAppState != common.RUNNING && requestedState != common.UNINSTALLED && portRule.RemotePort == 0 {
-			remotePort, err := am.tunnelManager.ReservePort(portRule)
-			if err != nil {
-				return err
-			}
+		// if requestedState != common.UNINSTALLED && portRule.RemotePort == 0 {
+		// 	remotePort, err := am.tunnelManager.ReservePort(portRule)
+		// 	if err != nil {
+		// 		return err
+		// 	}
 
-			log.Debug().Msgf("Reserved port for %s %s (%d)", app.AppName, portRule.Protocol, remotePort)
+		// 	log.Debug().Msgf("Reserved port for %s %s (%d)", app.AppName, portRule.Protocol, remotePort)
 
-			continue
-		}
+		// 	continue
+		// }
 
 		if portRule.Public && curAppState == common.RUNNING {
 			status, err := am.tunnelManager.Status(tunnelID)
@@ -475,35 +475,34 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 						portRule.DeviceKey = uint64(globalConfig.ReswarmConfig.DeviceKey)
 					}
 
-					isAppRunning := app.CurrentState == common.RUNNING
+					// isAppRunning := app.CurrentState == common.RUNNING
+					// if !isAppRunning && app.RequestedState != common.UNINSTALLED && portRule.RemotePort == 0 {
+					// 	remotePort, err := am.tunnelManager.ReservePort(portRule)
+					// 	if err != nil {
+					// 		return err
+					// 	}
 
-					if !isAppRunning && app.RequestedState != common.UNINSTALLED && portRule.RemotePort == 0 {
-						remotePort, err := am.tunnelManager.ReservePort(portRule)
-						if err != nil {
-							return err
-						}
+					// 	log.Debug().Msgf("Reserved port for %s (%d)", app.AppName, remotePort)
+					// 	continue
+					// }
 
-						log.Debug().Msgf("Reserved port for %s (%d)", app.AppName, remotePort)
-						continue
-					}
+					// if isAppRunning && portRule.Public {
+					// 	subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, app.AppName, portRule.Port)
+					// 	tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
-					if isAppRunning && portRule.Public {
-						subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, app.AppName, portRule.Port)
-						tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
+					// 	status, err := am.tunnelManager.Status(tunnelID)
+					// 	if err == nil && status.Status == "running" {
+					// 		log.Debug().Msg("tunnel is already running")
+					// 		continue
+					// 	}
 
-						status, err := am.tunnelManager.Status(tunnelID)
-						if err == nil && status.Status == "running" {
-							log.Debug().Msg("tunnel is already running")
-							continue
-						}
+					// 	_, err = am.tunnelManager.AddTunnel(portRule)
+					// 	if err != nil {
+					// 		return err
+					// 	}
 
-						_, err = am.tunnelManager.AddTunnel(portRule)
-						if err != nil {
-							return err
-						}
-
-						log.Debug().Msgf("Added tunnel for %s", app.AppName)
-					}
+					// 	log.Debug().Msgf("Added tunnel for %s", app.AppName)
+					// }
 				}
 			}
 		}
