@@ -449,10 +449,10 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
 	}
 
 	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(newestPayloads))
-	// pretty, err := common.PrettyFormat(newestPayloads)
-	// if err == nil {
-	// 	log.Debug().Msgf("Payloads: %s", pretty)
-	// }
+	pretty, err := common.PrettyFormat(newestPayloads)
+	if err == nil {
+		log.Debug().Msgf("Payloads: %s", pretty)
+	}
 
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
