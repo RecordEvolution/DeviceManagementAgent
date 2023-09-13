@@ -118,6 +118,13 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 	}
 	log.Debug().Msg("Got requested states")
 
+	allImages, err := so.Container.GetImages(context.Background(), "")
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("All Images: %+v\n", allImages)
+
 	for _, rState := range rStates {
 
 		containerName := common.BuildContainerName(rState.Stage, rState.AppKey, rState.AppName)

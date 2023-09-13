@@ -230,10 +230,13 @@ func (docker *Docker) StopContainerByName(ctx context.Context, containerName str
 }
 
 func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error) {
-	filters := filters.NewArgs()
-	filters.Add("reference", fullImageName)
+	options := types.ImageListOptions{}
 
-	options := types.ImageListOptions{Filters: filters}
+	if fullImageName != "" {
+		filters := filters.NewArgs()
+		filters.Add("reference", fullImageName)
+		options.Filters = filters
+	}
 
 	imagesResult, err := docker.client.ImageList(ctx, options)
 	if err != nil {
