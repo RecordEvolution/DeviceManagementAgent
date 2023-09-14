@@ -77,6 +77,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.DownloadOSUpdate: ex.downloadOSUpdateHandler,
 		topics.InstallOSUpdate:  ex.installOSUpdateHandler,
 
+		topics.ExecuteCommand:     ex.codeExecutionHandler,
 		topics.InitDeviceTerminal: ex.initDeviceTerm,
 		topics.GetIPv4Addresses:   ex.getCurrentIPAddresses,
 	}
