@@ -152,7 +152,7 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 			foundImage := false
 			for _, image := range allImages {
-				if strings.Contains(image.RepoTags[0], fullImageName) {
+				if len(image.RepoTags) > 0 && strings.Contains(image.RepoTags[0], fullImageName) {
 					foundImage = true
 					break
 				}
