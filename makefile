@@ -7,6 +7,9 @@ help: ## This help.
 
 .DEFAULT_GOAL := help
 
+run:
+	cd src && sudo go run . -config ${HOME}/git/RESWARM/agent/device-config.reswarm -prettyLogging
+
 build-all:
 	scripts/build-all.sh
 
