@@ -62,7 +62,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 
 		// port creation
-		subdomain := tunnel.CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), portRule.DeviceKey, portRule.AppName, portRule.Port)
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
 		// if requestedState != common.UNINSTALLED && portRule.RemotePort == 0 {

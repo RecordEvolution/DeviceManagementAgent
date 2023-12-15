@@ -20,6 +20,7 @@ type TunnelConfig struct {
 	Subdomain  string
 	Protocol   Protocol
 	LocalPort  uint64
+	LocalIP    string
 	RemotePort uint64
 }
 
@@ -40,6 +41,7 @@ const ADMIN_PORT FrpcVariable = "admin_port"
 const TYPE FrpcVariable = "type"
 const SUBDOMAIN FrpcVariable = "subdomain"
 const LOCAL_PORT FrpcVariable = "local_port"
+const LOCAL_IP FrpcVariable = "local_port"
 const REMOTE_PORT FrpcVariable = "remote_port"
 
 func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
@@ -78,8 +80,13 @@ func CreateTunnelID(subdomain string, protocol string) string {
 	return fmt.Sprintf("%s-%s", subdomain, protocol)
 }
 
-func CreateSubdomain(deviceKey uint64, appName string, port uint64) string {
-	return strings.ToLower(fmt.Sprintf("%d-%s-%d", deviceKey, appName, port))
+func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, port uint64) string {
+	baseSubdomain := strings.ToLower(fmt.Sprintf("%d-%s-%d", deviceKey, appName, port))
+	if protocol == HTTPS {
+		return fmt.Sprintf("%s-%s", "secure", baseSubdomain)
+	}
+
+	return baseSubdomain
 }
 
 func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
@@ -89,7 +96,11 @@ func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 	builder.SetTunnelVariable(tunnelID, SUBDOMAIN, conf.Subdomain)
 	builder.SetTunnelVariable(tunnelID, LOCAL_PORT, fmt.Sprintf("%d", conf.LocalPort))
 
-	if conf.Protocol != HTTP {
+	if conf.LocalIP != "" {
+		builder.SetTunnelVariable(tunnelID, LOCAL_IP, conf.LocalIP)
+	}
+
+	if conf.Protocol != HTTP && conf.Protocol != HTTPS {
 		builder.SetTunnelVariable(tunnelID, REMOTE_PORT, fmt.Sprintf("%d", conf.RemotePort))
 	}
 

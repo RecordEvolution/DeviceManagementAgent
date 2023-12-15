@@ -25,9 +25,10 @@ import (
 type Protocol string
 
 const (
-	TCP  Protocol = "tcp"
-	UDP  Protocol = "udp"
-	HTTP Protocol = "http"
+	TCP   Protocol = "tcp"
+	UDP   Protocol = "udp"
+	HTTP  Protocol = "http"
+	HTTPS Protocol = "https"
 )
 
 type FrpTunnelManager struct {
@@ -68,6 +69,7 @@ type PortForwardRule struct {
 	AppName               string `json:"app_name"`
 	Port                  uint64 `json:"port"`
 	Protocol              string `json:"protocol"`
+	LocalIP               string `json:"local_ip"`
 	RemotePort            uint64 `json:"remote_port"`
 	RemotePortEnvironment string `json:"remote_port_environment"`
 	DeviceKey             uint64 `json:"device_key"`
@@ -129,7 +131,7 @@ func parseProxyStatus(text string) []TunnelStatus {
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 
-		if line == "TCP" || line == "HTTP" || line == "UDP" {
+		if line == "TCP" || line == "HTTP" || line == "HTTPS" || line == "UDP" {
 			currentProtocol = line
 			i++
 			continue
@@ -183,7 +185,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 			line := scanner.Text()
 			// Error was found
 			if strings.Contains(line, "[E]") {
-				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|tcp|udp))]`)
+				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
 				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
 				if len(tunnelIdMatch) > 1 {
 					tunnelID := tunnelIdMatch[1]
@@ -311,13 +313,12 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 }
 
 func (frpTm *FrpTunnelManager) ReservePort(portRule PortForwardRule) (uint64, error) {
-	subdomain := CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
-
+	subdomain := CreateSubdomain(Protocol(portRule.Protocol), portRule.DeviceKey, portRule.AppName, portRule.Port)
 	protocol := Protocol(portRule.Protocol)
-	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
+	newTunnelConfig := TunnelConfig{Subdomain: subdomain, LocalIP: portRule.LocalIP, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
 
 	// Don't need to reserve a port if the user starts an HTTP tunnel
-	if protocol != HTTP {
+	if protocol != HTTP && protocol != HTTPS {
 		log.Debug().Msgf("Reserving port: %d (%s)\n", portRule.Port, portRule.Protocol)
 		// If no remote port is set, we will allocate one
 		remotePort, err := frpTm.reserveRemotePort(portRule.RemotePort, protocol)
@@ -328,7 +329,7 @@ func (frpTm *FrpTunnelManager) ReservePort(portRule PortForwardRule) (uint64, er
 	}
 
 	var url string
-	if protocol == HTTP {
+	if protocol == HTTP || protocol == HTTPS {
 		url = fmt.Sprintf("https://%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
 	} else {
 		url = fmt.Sprintf("%s://%s.%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
@@ -358,10 +359,10 @@ func (frpTm *FrpTunnelManager) ReservePort(portRule PortForwardRule) (uint64, er
 
 // Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
 func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig, error) {
-	subdomain := CreateSubdomain(portRule.DeviceKey, portRule.AppName, portRule.Port)
+	subdomain := CreateSubdomain(Protocol(portRule.Protocol), portRule.DeviceKey, portRule.AppName, portRule.Port)
 
 	protocol := Protocol(portRule.Protocol)
-	newTunnelConfig := TunnelConfig{Subdomain: subdomain, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
+	newTunnelConfig := TunnelConfig{Subdomain: subdomain, LocalIP: portRule.LocalIP, Protocol: protocol, LocalPort: portRule.Port, RemotePort: portRule.RemotePort}
 
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if protocol != HTTP {
@@ -381,7 +382,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(portRule PortForwardRule) (TunnelConfig
 	}
 
 	var url string
-	if protocol == HTTP {
+	if protocol == HTTP || protocol == HTTPS {
 		url = fmt.Sprintf("https://%s.%s", subdomain, frpTm.configBuilder.BaseTunnelURL)
 	} else {
 		url = fmt.Sprintf("%s://%s.%s:%d", strings.ToLower(string(newTunnelConfig.Protocol)), subdomain, frpTm.configBuilder.BaseTunnelURL, newTunnelConfig.RemotePort)
