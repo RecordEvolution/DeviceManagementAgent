@@ -307,7 +307,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 		for _, portRule := range portRules {
 			if portRule.RemotePortEnvironment != "" {
-				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, portRule.RemotePort)
+				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, "TODO")
 				remotePortEnvs = append(remotePortEnvs, portEnv)
 			}
 		}

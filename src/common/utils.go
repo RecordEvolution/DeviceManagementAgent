@@ -45,6 +45,10 @@ func BuildPerformOSUpdateProgress(serialNumber string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.PerformOSUpdateProgress)
 }
 
+func BuildTunnelStateUpdate(serialNumber string) string {
+	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.TunnelStateUpdate)
+}
+
 const topicPrefix = "re.mgmt"
 
 func BuildLogTopic(serialNumber string, containerName string) string {
