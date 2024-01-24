@@ -8,6 +8,7 @@ import (
 	"reagent/messenger"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/ini.v1"
 )
 
@@ -18,6 +19,7 @@ type Frp struct {
 
 type TunnelConfig struct {
 	Subdomain  string
+	AppName    string
 	Protocol   Protocol
 	LocalPort  uint64
 	LocalIP    string
@@ -26,6 +28,7 @@ type TunnelConfig struct {
 
 type TunnelConfigBuilder struct {
 	ini           *ini.File
+	config        *config.Config
 	ConfigPath    string
 	BaseTunnelURL string
 }
@@ -41,28 +44,36 @@ const ADMIN_PORT FrpcVariable = "admin_port"
 const TYPE FrpcVariable = "type"
 const SUBDOMAIN FrpcVariable = "subdomain"
 const LOCAL_PORT FrpcVariable = "local_port"
-const LOCAL_IP FrpcVariable = "local_port"
+const LOCAL_IP FrpcVariable = "local_ip"
 const REMOTE_PORT FrpcVariable = "remote_port"
 
+const PROD_SERVER_ADDR = "app.record-evolution.com"
+const TEST_SERVER_ADDR = "app.datapods.io"
+
 func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
+	return initialize(config)
+}
+
+func initialize(config *config.Config) TunnelConfigBuilder {
 	frpcConfig := filepath.Join(config.CommandLineArguments.AgentDir, "frpc.ini")
 	tunnelIni := ini.Empty()
 
-	serverAddr := "app.record-evolution.com"
+	serverAddr := PROD_SERVER_ADDR
 
 	switch config.ReswarmConfig.Environment {
 	case string(common.PRODUCTION):
-		serverAddr = "app.record-evolution.com"
+		serverAddr = PROD_SERVER_ADDR
 	case string(common.TEST):
-		serverAddr = "app.datapods.io"
+		serverAddr = TEST_SERVER_ADDR
 	case string(common.LOCAL):
-		serverAddr = "app.datapods.io"
+		serverAddr = TEST_SERVER_ADDR
 	}
 
 	configBuilder := TunnelConfigBuilder{
 		ini:           tunnelIni,
 		ConfigPath:    frpcConfig,
 		BaseTunnelURL: serverAddr,
+		config:        config,
 	}
 
 	configBuilder.SetCommonVariable(SERVER_ADDRESS, serverAddr)
@@ -80,13 +91,55 @@ func CreateTunnelID(subdomain string, protocol string) string {
 	return fmt.Sprintf("%s-%s", subdomain, protocol)
 }
 
-func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, port uint64) string {
-	baseSubdomain := strings.ToLower(fmt.Sprintf("%d-%s-%d", deviceKey, appName, port))
+func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localPort uint64) string {
+	baseSubdomain := strings.ToLower(fmt.Sprintf("%d-%s-%d", deviceKey, appName, localPort))
 	if protocol == HTTPS {
 		return fmt.Sprintf("%s-%s", "secure", baseSubdomain)
 	}
 
 	return baseSubdomain
+}
+
+func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
+	tunnelConfigs := make([]TunnelConfig, 0)
+
+	for _, section := range builder.ini.Sections() {
+		name := section.Name()
+		if name == "DEFAULT" || name == "common" {
+			continue
+		}
+
+		tunnelConfig := TunnelConfig{}
+		tunnelConfig.Protocol = Protocol(section.Key(string(TYPE)).String())
+
+		localPort, err := section.Key(string(LOCAL_PORT)).Uint64()
+		if err != nil {
+			return nil, err
+		}
+
+		tunnelConfig.LocalPort = localPort
+
+		remotePort, err := section.Key(string(REMOTE_PORT)).Uint64()
+		if err != nil {
+			log.Debug().Msgf("Remote port was not set while reading ini file (port likely not specified)")
+		}
+
+		tunnelConfig.RemotePort = remotePort
+
+		tunnelConfig.LocalIP = section.Key(string(LOCAL_IP)).String()
+
+		subdomain := section.Key(string(SUBDOMAIN)).String()
+		tunnelConfig.Subdomain = subdomain
+
+		splitSubdomain := strings.Split(subdomain, "-")
+		appName := splitSubdomain[1]
+
+		tunnelConfig.AppName = appName
+
+		tunnelConfigs = append(tunnelConfigs, tunnelConfig)
+	}
+
+	return tunnelConfigs, nil
 }
 
 func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
@@ -114,6 +167,10 @@ func (builder *TunnelConfigBuilder) SetTunnelVariable(tunnelID string, key FrpcV
 func (builder *TunnelConfigBuilder) RemoveTunnelVariable(tunnelID string) {
 	builder.ini.DeleteSection(tunnelID)
 
+}
+
+func (builder *TunnelConfigBuilder) Reset() {
+	initialize(builder.config)
 }
 
 func (builder *TunnelConfigBuilder) SetCommonVariable(key FrpcVariable, value string) {
