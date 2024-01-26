@@ -46,7 +46,7 @@ func BuildPerformOSUpdateProgress(serialNumber string) string {
 }
 
 func BuildTunnelStateUpdate(serialNumber string) string {
-	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.TunnelStateUpdate)
+	return fmt.Sprintf("%s.%s.%s/onreload", topicPrefix, serialNumber, topics.TunnelStateUpdate)
 }
 
 const topicPrefix = "re.mgmt"

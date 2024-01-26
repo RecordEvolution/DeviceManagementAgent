@@ -231,7 +231,12 @@ func (frpTm *FrpTunnelManager) Start() error {
 							return
 						}
 
-						frpTm.messenger.Publish(topics.Topic(updateTopic), []interface{}{tunnelStates}, nil, nil)
+						var args []interface{}
+						for _, tunnelState := range tunnelStates {
+							args = append(args, tunnelState)
+						}
+
+						frpTm.messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 					})
 				}
 
