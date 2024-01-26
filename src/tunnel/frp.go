@@ -6,6 +6,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"regexp"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -131,8 +132,15 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 		subdomain := section.Key(string(SUBDOMAIN)).String()
 		tunnelConfig.Subdomain = subdomain
 
-		splitSubdomain := strings.Split(subdomain, "-")
-		appName := splitSubdomain[1]
+		var appName string
+		re := regexp.MustCompile(`\d+-(.*)-\d+`)
+		result := re.FindStringSubmatch(subdomain)
+
+		if len(result) > 1 {
+			appName = result[1]
+		} else {
+			log.Error().Msg("Failed to get app name from tunnel config")
+		}
 
 		tunnelConfig.AppName = appName
 
