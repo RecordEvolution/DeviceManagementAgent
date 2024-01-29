@@ -304,8 +304,6 @@ func (system *System) DownloadFrpIfNotExists() error {
 		}
 	}
 
-	fmt.Println(exists)
-
 	if exists {
 		return nil
 	}
