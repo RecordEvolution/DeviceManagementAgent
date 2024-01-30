@@ -46,7 +46,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
-	// requestedState := app.RequestedState
+	requestedState := app.RequestedState
 	app.StateLock.Unlock()
 
 	// handle app tunnels
@@ -55,14 +55,12 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	fmt.Println(payload.AppKey)
-
 	for _, portRule := range portRules {
 		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(globalConfig.ReswarmConfig.DeviceKey), payload.AppName, portRule.Port)
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 
 		if portRule.Active {
-			if curAppState == common.RUNNING {
+			if requestedState == common.RUNNING || curAppState == common.RUNNING {
 				tnl := am.tunnelManager.Get(tunnelID)
 				if tnl != nil {
 					continue
@@ -122,23 +120,6 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
 	}
 
-	// App can get stuck in BUILT or PUBLISHED state if the backend never updates it's state
-	// Therefore allow the state transition to be rerun
-	builtState := curAppState == common.BUILT && requestedAppState == common.BUILT
-	publishedState := curAppState == common.PUBLISHED && requestedAppState == common.PUBLISHED
-	if curAppState == requestedAppState && !payload.RequestUpdate && !builtState && !publishedState {
-
-		// sync ports even when app is already in the same state
-		err = am.syncPortState(payload, app)
-		if err != nil {
-			log.Error().Err(err).Msgf("failed to sync port state")
-			return err
-		}
-
-		log.Debug().Msgf("app %s (%s) is already on latest state (%s)", app.AppName, app.Stage, requestedAppState)
-		return nil
-	}
-
 	if payload.CancelTransition {
 		log.Debug().Msgf("Cancel request was received for %s (%s) (currently: %s)", app.AppName, app.Stage, app.CurrentState)
 		am.StateMachine.CancelTransition(app, payload)
@@ -169,10 +150,11 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	payload.RegisteryToken = token
 
-	// if there's an active crashloopbackoff and we are no longer transitioning to running state, clear the loop
-	// if payload.Stage == common.PROD && payload.RequestedState != common.RUNNING {
-	// 	am.clearCrashLoop(payload.AppKey, payload.Stage)
-	// }
+	err = am.syncPortState(payload, app)
+	if err != nil {
+		log.Error().Err(err).Msgf("failed to sync port state")
+		return err
+	}
 
 	errC := am.StateMachine.InitTransition(app, payload)
 	if errC == nil {

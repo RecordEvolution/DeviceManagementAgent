@@ -307,12 +307,14 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 		for _, portRule := range portRules {
 			if portRule.RemotePortEnvironment != "" {
-				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, "TODO")
+				subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(config.ReswarmConfig.DeviceKey), app.AppName, portRule.Port)
+				tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
+				tunnel := sm.StateObserver.AppManager.tunnelManager.Get(tunnelID)
+
+				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
 				remotePortEnvs = append(remotePortEnvs, portEnv)
 			}
 		}
-
-		log.Debug().Msgf("Port env: %+v\n", remotePortEnvs)
 
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,

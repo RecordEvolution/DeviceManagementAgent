@@ -15,7 +15,9 @@ import (
 	"reagent/filesystem"
 	"reagent/messenger"
 	"reagent/messenger/topics"
+	"reagent/safe"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,11 +37,27 @@ const (
 type FrpTunnelManager struct {
 	TunnelManager
 	tunnelsLock         *sync.RWMutex
+	tunnelUpdateChan    chan TunnelUpdate
 	activeTunnelConfigs map[string]*Tunnel
 	clientProcess       *exec.Cmd
 	configBuilder       TunnelConfigBuilder
 	config              *config.Config
 	messenger           messenger.Messenger
+}
+
+type UpdateType string
+
+const (
+	STARTED UpdateType = "started"
+	REMOVED UpdateType = "removed"
+)
+
+type TunnelUpdate struct {
+	DeviceKey  uint64
+	AppName    string
+	LocalPort  uint64
+	UpdateType UpdateType
+	Protocol   Protocol
 }
 
 type FullURL struct {
@@ -104,6 +122,7 @@ type TunnelManager interface {
 	GetState() ([]TunnelState, error)
 	GetStateById(tunnelID string) (TunnelState, error)
 	RemoveTunnel(conf TunnelConfig) error
+	GetTunnelConfig() ([]TunnelConfig, error)
 	Get(tunnelID string) *Tunnel
 	Status(tunnelID string) (TunnelStatus, error)
 	Reload() error
@@ -116,6 +135,7 @@ type TunnelStatus struct {
 	LocalAddr  string   `json:"localAddr"`
 	Plugin     string   `json:"plugin"`
 	RemoteAddr string   `json:"remoteAddr"`
+	RemotePort uint64   `json:"remotePort"`
 	Error      string   `json:"error"`
 	Protocol   Protocol `json:"protocol"`
 }
@@ -149,11 +169,23 @@ func parseProxyStatus(text string) []TunnelStatus {
 			continue
 		}
 
+		remoteAddr := fields[3]
+		remoteAddrSplit := strings.Split(remoteAddr, ":")
+
+		var remotePortStr string
+		var remotePort int64
+
+		if len(remoteAddrSplit) == 2 {
+			remotePortStr = remoteAddrSplit[1]
+			remotePort, _ = strconv.ParseInt(remotePortStr, 10, 64)
+		}
+
 		proxyStatus := TunnelStatus{
 			Name:       fields[0],
 			Status:     fields[1],
 			LocalAddr:  fields[2],
 			RemoteAddr: fields[3],
+			RemotePort: uint64(remotePort),
 			Protocol:   Protocol(strings.ToLower(currentProtocol)),
 		}
 
@@ -223,7 +255,50 @@ func (frpTm *FrpTunnelManager) Start() error {
 				log.Error().Msgf("frp-err: %s\n", line)
 
 			} else {
-				if strings.Contains(line, "start proxy success") || strings.Contains(line, "proxy removed") {
+				proxyStarted := strings.Contains(line, "start proxy success")
+				proxyRemoved := strings.Contains(line, "proxy removed")
+
+				if proxyStarted || proxyRemoved {
+					safe.Go(func() {
+						regexPattern := `\[(\d+)-(.*)-(\d+)-(.*)\]`
+
+						re := regexp.MustCompile(regexPattern)
+						matches := re.FindStringSubmatch(line)
+
+						if len(matches) > 1 {
+							deviceKeyStr := matches[1]
+							appName := matches[2]
+							localPortStr := matches[3]
+							protocol := matches[4]
+
+							updateType := STARTED
+							if proxyRemoved {
+								updateType = REMOVED
+							}
+
+							deviceKey, err := strconv.ParseInt(deviceKeyStr, 10, 64)
+							if err != nil {
+								return
+							}
+
+							localPort, err := strconv.ParseInt(localPortStr, 10, 64)
+							if err != nil {
+								return
+							}
+
+							tunnelUpdate := TunnelUpdate{
+								DeviceKey:  uint64(deviceKey),
+								AppName:    appName,
+								LocalPort:  uint64(localPort),
+								UpdateType: updateType,
+								Protocol:   Protocol(protocol),
+							}
+
+							frpTm.tunnelUpdateChan <- tunnelUpdate
+						}
+
+					})
+
 					debounced(func() {
 						updateTopic := common.BuildTunnelStateUpdate(frpTm.config.ReswarmConfig.SerialNumber)
 						tunnelStates, err := frpTm.GetState()
@@ -264,12 +339,12 @@ func (frpTm *FrpTunnelManager) Reset() error {
 func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
 
 	configBuilder := NewTunnelConfigBuilder(config)
-
 	frpTunnelManager := FrpTunnelManager{
 		configBuilder:       configBuilder,
 		messenger:           messenger,
 		config:              config,
 		tunnelsLock:         &sync.RWMutex{},
+		tunnelUpdateChan:    make(chan TunnelUpdate),
 		activeTunnelConfigs: make(map[string]*Tunnel),
 	}
 
@@ -338,8 +413,12 @@ func (frpTm *FrpTunnelManager) Get(tunnelID string) *Tunnel {
 	return tunnel
 }
 
-func (frpTm *FrpTunnelManager) buildURL(protocol Protocol, subdomain string) string {
+func (frpTm *FrpTunnelManager) buildURL(protocol Protocol, subdomain string, remotePort uint64) string {
 	protocolString := string(protocol)
+
+	if remotePort != 0 && protocol != HTTP && protocol != HTTPS {
+		return fmt.Sprintf("%s://%s.%s:%d", protocolString, subdomain, frpTm.configBuilder.BaseTunnelURL, remotePort)
+	}
 
 	// we always have HTTPS since we tunnel to our HTTPS service
 	if protocolString == "http" {
@@ -373,7 +452,7 @@ func (frpTm *FrpTunnelManager) GetState() ([]TunnelState, error) {
 				Port:    tunnelConfig.LocalPort,
 				AppName: tunnelConfig.AppName,
 				Active:  tunnelStatus.Status == "running",
-				URL:     frpTm.buildURL(tunnelConfig.Protocol, tunnelConfig.Subdomain),
+				URL:     frpTm.buildURL(tunnelConfig.Protocol, tunnelConfig.Subdomain, tunnelStatus.RemotePort),
 			}
 
 			tunnelStates = append(tunnelStates, tunnelState)
@@ -451,6 +530,15 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 		return TunnelConfig{}, err
 	}
 
+	for update := range frpTm.tunnelUpdateChan {
+		if update.AppName == strings.ToLower(config.AppName) &&
+			update.LocalPort == config.LocalPort &&
+			update.Protocol == config.Protocol &&
+			update.UpdateType == STARTED {
+			break
+		}
+	}
+
 	tunnelId := CreateTunnelID(config.Subdomain, string(config.Protocol))
 	frpTm.tunnelsLock.Lock()
 	if frpTm.activeTunnelConfigs[tunnelId] == nil {
@@ -478,5 +566,19 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
 
 	frpTm.configBuilder.RemoveTunnelConfig(conf)
 
-	return frpTm.Reload()
+	err := frpTm.Reload()
+	if err != nil {
+		return err
+	}
+
+	for update := range frpTm.tunnelUpdateChan {
+		if update.AppName == strings.ToLower(conf.AppName) &&
+			update.LocalPort == conf.LocalPort &&
+			update.Protocol == conf.Protocol &&
+			update.UpdateType == REMOVED {
+			break
+		}
+	}
+
+	return nil
 }
