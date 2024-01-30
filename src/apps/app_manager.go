@@ -150,10 +150,6 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	payload.RegisteryToken = token
 
-	// if there's an active crashloopbackoff and we are no longer transitioning to running state, clear the loop
-	// if payload.Stage == common.PROD && payload.RequestedState != common.RUNNING {
-	// 	am.clearCrashLoop(payload.AppKey, payload.Stage)
-	// }
 	err = am.syncPortState(payload, app)
 	if err != nil {
 		log.Error().Err(err).Msgf("failed to sync port state")
