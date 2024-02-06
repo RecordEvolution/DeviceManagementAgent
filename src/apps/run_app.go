@@ -311,8 +311,10 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 				tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 				tunnel := sm.StateObserver.AppManager.tunnelManager.Get(tunnelID)
 
-				portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
-				remotePortEnvs = append(remotePortEnvs, portEnv)
+				if tunnel != nil {
+					portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
+					remotePortEnvs = append(remotePortEnvs, portEnv)
+				}
 			}
 		}
 
