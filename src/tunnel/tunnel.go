@@ -321,7 +321,6 @@ func (frpTm *FrpTunnelManager) Start() error {
 	}()
 
 	<-ackChan
-	close(ackChan)
 
 	return nil
 }
