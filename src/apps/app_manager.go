@@ -47,8 +47,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
 	requestedState := app.RequestedState
-
-	defer app.StateLock.Unlock()
+	app.StateLock.Unlock()
 
 	// handle app tunnels
 	portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
@@ -121,7 +120,6 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
 	}
 
-	fmt.Println(payload.CancelTransition)
 	if payload.CancelTransition {
 		log.Debug().Msgf("Cancel request was received for %s (%s) (currently: %s)", app.AppName, app.Stage, app.CurrentState)
 		am.StateMachine.CancelTransition(app, payload)
