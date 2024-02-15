@@ -529,14 +529,14 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 		return TunnelConfig{}, err
 	}
 
-	for update := range frpTm.tunnelUpdateChan {
-		if update.AppName == strings.ToLower(config.AppName) &&
-			update.LocalPort == config.LocalPort &&
-			update.Protocol == config.Protocol &&
-			update.UpdateType == STARTED {
-			break
-		}
-	}
+	// for update := range frpTm.tunnelUpdateChan {
+	// 	if update.AppName == strings.ToLower(config.AppName) &&
+	// 		update.LocalPort == config.LocalPort &&
+	// 		update.Protocol == config.Protocol &&
+	// 		update.UpdateType == STARTED {
+	// 		break
+	// 	}
+	// }
 
 	tunnelId := CreateTunnelID(config.Subdomain, string(config.Protocol))
 	frpTm.tunnelsLock.Lock()
@@ -570,14 +570,14 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
 		return err
 	}
 
-	for update := range frpTm.tunnelUpdateChan {
-		if update.AppName == strings.ToLower(conf.AppName) &&
-			update.LocalPort == conf.LocalPort &&
-			update.Protocol == conf.Protocol &&
-			update.UpdateType == REMOVED {
-			break
-		}
-	}
+	// for update := range frpTm.tunnelUpdateChan {
+	// 	if update.AppName == strings.ToLower(conf.AppName) &&
+	// 		update.LocalPort == conf.LocalPort &&
+	// 		update.Protocol == conf.Protocol &&
+	// 		update.UpdateType == REMOVED {
+	// 		break
+	// 	}
+	// }
 
 	return nil
 }
