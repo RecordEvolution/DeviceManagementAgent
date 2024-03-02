@@ -27,7 +27,14 @@ func (sm *StateMachine) uninstallApp(payload common.TransitionPayload, app *comm
 		buildZipFile := buildDir + "/" + fileName
 		err = os.RemoveAll(buildZipFile) // removes the build zip if it exists
 		log.Debug().Msgf("Removed build zip file: %s, error: %v\n", buildZipFile, err)
+	}
 
+	if payload.Stage == common.PROD && payload.DockerCompose != nil {
+		targetAppDir := config.CommandLineArguments.AppsComposeDir + "/" + app.AppName
+		err = os.RemoveAll(targetAppDir)
+		if err != nil {
+			return err
+		}
 	}
 
 	appsDir := config.CommandLineArguments.AppsDirectory

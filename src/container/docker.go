@@ -40,6 +40,7 @@ type DockerStream struct {
 type Docker struct {
 	client         *client.Client
 	config         *config.Config
+	compose        *Compose
 	activeStreams  map[string]*DockerStream
 	streamMapMutex sync.Mutex
 }
@@ -51,7 +52,9 @@ func NewDocker(config *config.Config) (*Docker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Docker{client: client, config: config, activeStreams: activeBuilds}, nil
+
+	compose := NewCompose()
+	return &Docker{client: client, config: config, activeStreams: activeBuilds, compose: &compose}, nil
 }
 
 // For now stick only with Docker as implementation
@@ -973,6 +976,10 @@ func (docker *Docker) CancelAllStreams() error {
 
 func (docker *Docker) Tag(ctx context.Context, source string, target string) error {
 	return docker.client.ImageTag(ctx, source, target)
+}
+
+func (docker *Docker) Compose() *Compose {
+	return docker.compose
 }
 
 // Build builds a Docker image using a tarfile as context

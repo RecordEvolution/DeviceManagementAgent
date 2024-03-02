@@ -1,0 +1,1 @@
+ALTER TABLE RequestedAppStates ADD COLUMN docker_compose TEXT

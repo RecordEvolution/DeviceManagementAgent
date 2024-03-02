@@ -79,6 +79,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	requestUpdateKw := kwargs["request_update"]
 	cancelTransitionKw := kwargs["cancel_transition"]
 	environmentTemplateKw := kwargs["environment_template"]
+	dockerComposeKw := kwargs["docker_compose"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -100,6 +101,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var ports []interface{}
 	var environmentTemplate map[string]interface{}
 	var environment map[string]interface{}
+	var dockerCompose map[string]interface{}
 
 	// TODO: can be simplified with parser function, but unneccessary
 	if appKeyKw != nil {
@@ -273,6 +275,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if dockerComposeKw != nil {
+		dockerCompose, ok = dockerComposeKw.(map[string]interface{})
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("%w docker compose", errdefs.ErrFailedToParse)
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -315,6 +324,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	payload.EnvironmentTemplate = environmentTemplate
 
 	payload.Ports = ports
+	payload.DockerCompose = dockerCompose
 
 	payload.CancelTransition = cancelTransition
 

@@ -2,8 +2,10 @@ package apps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/filesystem"
@@ -21,8 +23,142 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 	return sm.buildDevApp(payload, app, false)
 }
 
+func (sm *StateMachine) WriteDockerComposeFile(payload common.TransitionPayload, app *common.App) (string, error) {
+	dockerFileName := "docker-compose.json"
+	config := sm.Container.GetConfig()
+
+	isProd := payload.Stage == common.PROD
+	targetDir := config.CommandLineArguments.AppsBuildDir
+	if isProd {
+		targetDir = config.CommandLineArguments.AppsComposeDir
+	}
+
+	targetAppDir := targetDir + "/" + app.AppName
+	dockerComposeFilePath := targetAppDir + "/" + dockerFileName
+	dockerComposeJSONString, err := json.Marshal(payload.DockerCompose)
+	if err != nil {
+		return "", err
+	}
+
+	if isProd {
+		_, err = os.Stat(targetAppDir)
+		if err != nil {
+			err = os.MkdirAll(targetAppDir, os.ModePerm)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+
+	err = os.WriteFile(dockerComposeFilePath, dockerComposeJSONString, 0755)
+	if err != nil {
+		return "", err
+	}
+
+	return dockerComposeFilePath, nil
+}
+
+func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
+
+	config := sm.Container.GetConfig()
+	buildsDir := config.CommandLineArguments.AppsBuildDir
+	fileName := payload.AppName + "." + config.CommandLineArguments.CompressedBuildExtension
+	appFilesTar := buildsDir + "/" + fileName
+	targetAppDir := buildsDir + "/" + app.AppName
+
+	_, err = os.Stat(targetAppDir)
+	if err == nil {
+		err := os.RemoveAll(targetAppDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = filesystem.ExtractTarGz(appFilesTar, targetAppDir)
+	if err != nil {
+		return err
+	}
+
+	app.ReleaseBuild = releaseBuild
+	topicForLogStream := payload.ContainerName.Dev
+	if releaseBuild {
+		topicForLogStream = payload.PublishContainerName
+	}
+
+	err = sm.LogManager.Write(topicForLogStream, "Starting image build...")
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.BUILDING)
+	if err != nil {
+		return err
+	}
+
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+	buildStdout, buildStderr, _, err := compose.Build(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, buildStdout)
+	if err != nil {
+		return err
+	}
+
+	err = <-buildStderr
+	if err != nil {
+		sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to build, reason: %s\n", err.Error()))
+		return err
+	}
+
+	if !releaseBuild {
+		pullStdout, pullStderr, _, err := compose.Pull(dockerComposePath)
+		if err != nil {
+			return err
+		}
+
+		err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, pullStdout)
+		if err != nil {
+			return err
+		}
+
+		err = <-pullStderr
+		if err != nil {
+			sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to build, reason: %s\n", err.Error()))
+			return err
+		}
+	}
+
+	buildMessage := "Compose Image built successfully"
+	err = sm.LogManager.Write(topicForLogStream, buildMessage)
+	if err != nil {
+		return err
+	}
+
+	return sm.setState(app, common.BUILT)
+}
+
 func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
 	ctx := context.Background()
+
+	if payload.DockerCompose != nil {
+		return sm.buildDevComposeApp(payload, app, releaseBuild)
+	}
 
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
 	if err != nil {

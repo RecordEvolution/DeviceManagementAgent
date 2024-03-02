@@ -71,6 +71,7 @@ type TransitionPayload struct {
 	ContainerName        StageBasedResult
 	EnvironmentVariables map[string]interface{}
 	EnvironmentTemplate  map[string]interface{}
+	DockerCompose        map[string]interface{}
 	Ports                []interface{}
 	PublishContainerName string
 	RegisteryToken       string

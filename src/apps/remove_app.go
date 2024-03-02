@@ -10,6 +10,10 @@ import (
 )
 
 func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.removeComposeApp(payload, app)
+	}
+
 	if app.Stage == common.PROD {
 		return sm.removeProdApp(payload, app)
 	} else if app.Stage == common.DEV {
@@ -17,6 +21,75 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 	}
 
 	return nil
+}
+
+func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *common.App) error {
+	containerName := payload.ContainerName.Dev
+	registeryImageName := payload.RegistryImageName.Dev
+	if payload.Stage == common.PROD {
+		registeryImageName = payload.RegistryImageName.Prod
+		containerName = payload.ContainerName.Prod
+	}
+
+	err := sm.LogManager.ClearLogHistory(containerName)
+	if err != nil {
+		return err
+	}
+
+	removeInitMessage := fmt.Sprintf("Starting removal process for %s...", payload.AppName)
+	err = sm.LogManager.Write(containerName, removeInitMessage)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.DELETING)
+	if err != nil {
+		return err
+	}
+
+	options := map[string]interface{}{"force": true}
+
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	err = sm.Container.RemoveImagesByName(ctx, registeryImageName+"*", options)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
+
+	sucessRemoveMessage := fmt.Sprintf("Successfully removed %s!", payload.AppName)
+
+	return sm.LogManager.Write(containerName, sucessRemoveMessage)
 }
 
 func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *common.App) error {

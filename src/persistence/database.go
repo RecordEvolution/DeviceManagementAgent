@@ -369,10 +369,11 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var environmentVariablesString string
 		var environmentTemplateString *string
 		var portsString *string
+		var dockerComposeString *string
 		var currentState common.AppState
 		var requestedState common.AppState
 
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString)
 		if err != nil {
 			return nil, err
 		}
@@ -411,6 +412,16 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 			}
 
 			payload.Ports = ports
+		}
+
+		dockerCompose := make(map[string]interface{})
+		if dockerComposeString != nil && *dockerComposeString != "" {
+			err := json.Unmarshal([]byte(*dockerComposeString), &dockerCompose)
+			if err != nil {
+				return nil, err
+			}
+
+			payload.DockerCompose = dockerCompose
 		}
 
 		payloads = append(payloads, payload)
@@ -454,9 +465,10 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var requestedState common.AppState
 	var environmentVariablesString string
 	var environmentTemplateString *string
+	var dockerComposeString *string
 	var portsString *string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -500,6 +512,16 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 		}
 
 		payload.Ports = ports
+	}
+
+	dockerCompose := make(map[string]interface{})
+	if dockerComposeString != nil && *dockerComposeString != "" {
+		err := json.Unmarshal([]byte(*dockerComposeString), &dockerCompose)
+		if err != nil {
+			return common.TransitionPayload{}, err
+		}
+
+		payload.DockerCompose = dockerCompose
 	}
 
 	if err != nil {
@@ -546,8 +568,16 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 
 		portsJSONString := string(portsJSONBytes)
 
+		dockerComposeJSONBytes, err := json.Marshal(payload.DockerCompose)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		dockerComposeJSONString := string(dockerComposeJSONBytes)
+
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -600,8 +630,15 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 
 	portsJSONString := string(portsJSONBytes)
 
+	dockerComposeJSONBytes, err := json.Marshal(payload.DockerCompose)
+	if err != nil {
+		return err
+	}
+
+	dockerComposeJSONString := string(dockerComposeJSONBytes)
+
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString,
 		time.Now().Format(time.RFC3339),
 	)
 

@@ -28,6 +28,10 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 }
 
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.runProdComposeApp(payload, app)
+	}
+
 	ctx := context.Background()
 
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
@@ -87,8 +91,216 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	return nil
 }
 
+func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Starting %s...", payload.AppName))
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
+	stdoutChan, stdErrChan, _, err := compose.Up(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, stdoutChan)
+	if err != nil {
+		return err
+	}
+
+	pollingRate := time.Second * 1
+	runningSignal, _ := compose.WaitForRunning(dockerComposePath, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+outerLoop:
+	for {
+		select {
+		case err = <-stdErrChan:
+			if err == nil {
+				break
+			}
+
+			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
+			// options := common.Dict{"follow": true, "stdout": true, "stderr": true}
+			// ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
+			// if logsErr != nil {
+			// 	return logsErr
+			// }
+
+			// sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
+			return err
+		case <-runningSignal:
+			break outerLoop
+		}
+	}
+
+	err = sm.setState(app, common.RUNNING)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Now running app %s (%s)", payload.AppName, app.Version))
+	if err != nil {
+		return err
+	}
+
+	logsChannel, err := compose.Logs(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, logsChannel)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Starting %s...", payload.AppName))
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
+	stdoutChan, stdErrChan, _, err := compose.Up(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, stdoutChan)
+	if err != nil {
+		return err
+	}
+
+	pollingRate := time.Second * 1
+	runningSignal, _ := compose.WaitForRunning(dockerComposePath, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+outerLoop:
+	for {
+		select {
+		case err = <-stdErrChan:
+			if err == nil {
+				break
+			}
+
+			sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
+			// options := common.Dict{"follow": true, "stdout": true, "stderr": true}
+			// ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
+			// if logsErr != nil {
+			// 	return logsErr
+			// }
+
+			// sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
+			return err
+		case <-runningSignal:
+			break outerLoop
+		}
+	}
+
+	err = sm.setState(app, common.RUNNING)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s (%s)", payload.AppName, app.Version))
+	if err != nil {
+		return err
+	}
+
+	logsChannel, err := compose.Logs(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, logsChannel)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
 	ctx := context.Background()
+
+	if payload.DockerCompose != nil {
+		return sm.runDevComposeApp(payload, app)
+	}
 
 	// remove old container first, if it exists
 	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)

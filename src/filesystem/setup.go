@@ -18,6 +18,12 @@ func InitDirectories(cliArgs *config.CommandLineArguments) error {
 			return err
 		}
 	}
+	err = os.MkdirAll(cliArgs.AppsComposeDir, os.ModePerm)
+	if err != nil {
+		if !os.IsExist(err) {
+			return err
+		}
+	}
 	err = os.MkdirAll(cliArgs.AppsSharedDir, os.ModePerm)
 	if err != nil {
 		if !os.IsExist(err) {

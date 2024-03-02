@@ -9,7 +9,94 @@ import (
 	"reagent/errdefs"
 )
 
+func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
+	compose := sm.Container.Compose()
+
+	// TODO: make sure that folder exists so that compose can be started, make a different folder for PROD apps
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	topicForLogStream := payload.ContainerName.Prod
+
+	config := sm.Container.GetConfig()
+
+	loginStdout, loginStderr, _, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(topicForLogStream, common.PULL, loginStdout)
+	if err != nil {
+		return err
+	}
+
+	err = <-loginStderr
+	if err != nil {
+		sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to login, reason: %s\n", err.Error()))
+		return err
+	}
+
+	pullStdout, pullStderr, _, err := compose.Pull(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(topicForLogStream, common.PULL, pullStdout)
+	if err != nil {
+		return err
+	}
+
+	err = <-pullStderr
+	if err != nil {
+		sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to build, reason: %s\n", err.Error()))
+		return err
+	}
+
+	buildMessage := "Compose Image Installed successfully"
+	err = sm.LogManager.Write(topicForLogStream, buildMessage)
+	if err != nil {
+		return err
+	}
+
+	return sm.setState(app, common.PRESENT)
+}
+
 func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.pullComposeApp(payload, app)
+	}
+
 	config := sm.Container.GetConfig()
 
 	if payload.Stage == common.DEV {

@@ -49,6 +49,7 @@ type ReswarmConfig struct {
 
 type CommandLineArguments struct {
 	AppsDirectory              string
+	AppsComposeDir             string
 	AppsBuildDir               string
 	AppsSharedDir              string
 	AgentDir                   string
@@ -136,6 +137,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	cliArgs := CommandLineArguments{
 		AppsDirectory:              *appsDir,
 		AppsBuildDir:               (*appsDir) + "/build",
+		AppsComposeDir:             (*appsDir) + "/compose",
 		AppsSharedDir:              (*appsDir) + "/shared",
 		DownloadDir:                (*agentDir) + "/downloads",
 		AgentDir:                   *agentDir,
