@@ -239,6 +239,8 @@ func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]Im
 		filters := filters.NewArgs()
 		filters.Add("reference", fullImageName)
 		options.Filters = filters
+	} else {
+		options.All = true
 	}
 
 	imagesResult, err := docker.client.ImageList(ctx, options)

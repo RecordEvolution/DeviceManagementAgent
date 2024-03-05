@@ -17,6 +17,10 @@ func (sm *StateMachine) getUpdateTransition(payload common.TransitionPayload, ap
 }
 
 func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.updateComposeApp(payload, app)
+	}
+
 	if payload.Stage == common.DEV {
 		return errors.New("cannot update dev app")
 	}
@@ -113,6 +117,118 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 
 	log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
 	sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
+
+	// update the version of the local requested states
+	payload.NewestVersion = app.Version
+	payload.PresentVersion = app.Version
+	payload.Version = app.Version
+
+	// The state validation will ensure it will reach it's requestedState again
+	return sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
+}
+
+func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.Stage == common.DEV {
+		return errors.New("cannot update dev app")
+	}
+
+	if payload.NewestVersion == app.Version {
+		return errors.New("the app is already equal to the newest version")
+	}
+
+	err := sm.setState(app, common.UPDATING)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, true)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	config := sm.Container.GetConfig()
+	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
+	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	loginStdout, loginStderr, _, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, loginStdout)
+	if err != nil {
+		return err
+	}
+
+	err = <-loginStderr
+	if err != nil {
+		sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to login, reason: %s\n", err.Error()))
+		return err
+	}
+
+	pullStdout, pullStderr, _, err := compose.Pull(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, pullStdout)
+	if err != nil {
+		return err
+	}
+
+	err = <-pullStderr
+	if err != nil {
+		sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to pull, reason: %s\n", err.Error()))
+		return err
+	}
+
+	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
+	writeErr := sm.LogManager.Write(payload.ContainerName.Prod, pullMessage)
+	if writeErr != nil {
+		return writeErr
+	}
+
+	app.Version = payload.NewestVersion
+	app.ReleaseKey = payload.NewReleaseKey
+	app.UpdateStatus = common.PENDING_REMOTE_CONFIRMATION // set flag to make backend aware we updated
+
+	// also tell the database that we successfully updated (with the updated flag)
+	err = sm.setState(app, common.PRESENT)
+	if err != nil {
+		return err
+	}
+
+	// TODO: remove old images from docker-compose
 
 	// update the version of the local requested states
 	payload.NewestVersion = app.Version

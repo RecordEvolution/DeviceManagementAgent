@@ -108,6 +108,69 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	so.observerMapMutex.Unlock()
 }
 
+func (so *StateObserver) CorrectComposeAppState(requestedState common.TransitionPayload, images []container.ImageResult, updateRemote bool) error {
+	// if requestedState.Stage == common.PROD {
+	// 	// requestedState.AppName
+	// 	composeDir := so.Container.GetConfig().CommandLineArguments.AppsComposeDir
+	// 	appComposeDir := composeDir + "/" + requestedState.AppName
+	// 	dockerComposeJSONPath := appComposeDir + "/" + "docker-compose.json"
+
+	// 	compose := so.Container.Compose()
+
+	// 	containerStatuses, err := compose.Status(dockerComposeJSONPath)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	_, err = json.Marshal(containerStatuses)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	services, ok := (requestedState.DockerCompose["services"]).(map[string]interface{})
+	// 	if !ok {
+	// 		return errors.New("failed to infer services")
+	// 	}
+
+	// 	// all containers have been removed
+	// 	// if len(containerStatuses) == 0 {
+
+	// 	for _, image := range images {
+	// 		fmt.Println(image.RepoTags[0])
+	// 		// if len(image.RepoTags) > 0 && strings.Contains(image.RepoTags[0], fullImageName) {
+	// 		// 	foundImage = true
+	// 		// 	break
+	// 		// }
+	// 	}
+	// 	// now we have to check if the images exist
+	// 	for _, serviceInterface := range services {
+	// 		_, ok := (serviceInterface).(map[string]interface{})
+	// 		if !ok {
+	// 			return errors.New("failed to infer service")
+	// 		}
+
+	// 		// imageName := fmt.Sprintf("%s", service["image"])
+	// 		// foundImage := false
+
+	// 	}
+
+	// 	// }
+
+	// 	// One of the containers was never created
+	// 	if len(services) != len(containerStatuses) {
+
+	// 	}
+
+	// 	fmt.Println("WTF--", len(services), len(containerStatuses))
+
+	// 	// if len(containerStatuses) == 0 {
+	// 	// }
+
+	// }
+
+	return nil
+}
+
 // CorrectAppStates ensures that the app state corresponds with the container status of the app.
 // Any transient states will be handled accordingly. After the states have been assured, it will attempt to update the app states remotely if true is passed.
 func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
@@ -128,6 +191,15 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 	log.Debug().Msg("Done getting all local images for next step")
 
 	for _, rState := range rStates {
+
+		// ComposeApp
+		if rState.DockerCompose != nil {
+			err = so.CorrectComposeAppState(rState, allImages, updateRemote)
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			continue
+		}
 
 		containerName := common.BuildContainerName(rState.Stage, rState.AppKey, rState.AppName)
 		app, err := so.AppStore.GetApp(rState.AppKey, rState.Stage)

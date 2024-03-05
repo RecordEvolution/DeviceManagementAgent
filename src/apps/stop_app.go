@@ -83,7 +83,7 @@ func (sm *StateMachine) stopProdApp(payload common.TransitionPayload, app *commo
 }
 
 func (sm *StateMachine) stopDevComposeApp(payload common.TransitionPayload, app *common.App) error {
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func (sm *StateMachine) stopDevComposeApp(payload common.TransitionPayload, app 
 }
 
 func (sm *StateMachine) stopProdComposeApp(payload common.TransitionPayload, app *common.App) error {
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}

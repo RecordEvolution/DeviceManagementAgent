@@ -14,9 +14,11 @@ func (sm *StateMachine) recoverFailToRunningHandler(payload common.TransitionPay
 		containerToRemove = payload.ContainerName.Prod
 	}
 
-	ctx := context.Background()
-	// remove any existing container to ensure environment variables are set
-	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
+	if payload.DockerCompose == nil {
+		ctx := context.Background()
+		// remove any existing container to ensure environment variables are set
+		sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
+	}
 
 	return sm.runApp(payload, app)
 }

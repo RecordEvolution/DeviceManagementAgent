@@ -99,7 +99,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 
 	compose := sm.Container.Compose()
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 
 	compose := sm.Container.Compose()
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,7 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 	return sm.buildDevApp(payload, app, false)
 }
 
-func (sm *StateMachine) WriteDockerComposeFile(payload common.TransitionPayload, app *common.App) (string, error) {
+func (sm *StateMachine) WriteDockerComposeFile(payload common.TransitionPayload, app *common.App, updatingApp bool) (string, error) {
 	dockerFileName := "docker-compose.json"
 	config := sm.Container.GetConfig()
 
@@ -35,7 +35,13 @@ func (sm *StateMachine) WriteDockerComposeFile(payload common.TransitionPayload,
 
 	targetAppDir := targetDir + "/" + app.AppName
 	dockerComposeFilePath := targetAppDir + "/" + dockerFileName
-	dockerComposeJSONString, err := json.Marshal(payload.DockerCompose)
+
+	dockerCompose := payload.DockerCompose
+	if payload.NewDockerCompose != nil && updatingApp {
+		dockerCompose = payload.NewDockerCompose
+	}
+
+	dockerComposeJSONString, err := json.Marshal(dockerCompose)
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +110,7 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}

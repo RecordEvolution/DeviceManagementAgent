@@ -49,7 +49,7 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 
 	options := map[string]interface{}{"force": true}
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app)
+	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
 	if err != nil {
 		return err
 	}
