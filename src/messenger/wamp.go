@@ -217,17 +217,17 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 			}
 
 			// add a dummy topic that will be used as a means to check if a client has an existing session or not
-			// topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
-			// invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult {
-			// 	return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
-			// }
+			topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+			invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult {
+				return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
+			}
 
-			// err = wClient.Register(topic, invokeHandler, nil)
-			// if err != nil && strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) {
-			// 	exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
-			// 	fmt.Println(exitMessage)
-			// 	os.Exit(1)
-			// }
+			err = wClient.Register(topic, invokeHandler, nil)
+			if err != nil && strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) {
+				exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
+				fmt.Println(exitMessage)
+				os.Exit(1)
+			}
 
 			onDestroyListener := func(event *wamp.Event) {
 				container.PruneSystem()
