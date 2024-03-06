@@ -67,8 +67,12 @@ type LogManager struct {
 	Messenger              messenger.Messenger
 	Database               persistence.Database
 	AppStore               store.AppStore
+	activeLogConsumer      map[string]struct{}
+	activeLogConsumerMutex sync.Mutex
 	activeLogs             map[string]*LogSubscription
 	activeComposeLogs      map[string]*LogSubscription
+	newActiveLogs          map[string]chan *LogSubscription
+	newActiveLogsMutex     sync.Mutex
 	composeLogsChannel     chan LogSubscription
 	activeLogsMutex        sync.Mutex
 	activeComposeLogsMutex sync.Mutex
@@ -87,6 +91,7 @@ func NewLogManager(cont container.Container, msg messenger.Messenger, db persist
 	return LogManager{
 		activeLogs:         make(map[string]*LogSubscription),
 		activeComposeLogs:  make(map[string]*LogSubscription),
+		newActiveLogs:      make(map[string]chan *LogSubscription),
 		composeLogsChannel: make(chan LogSubscription),
 		Container:          cont,
 		Messenger:          msg,
@@ -576,6 +581,65 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 	}
 
 	return stringLogEntries, nil
+}
+
+func (lm *LogManager) SetupLogConsumer(containerName string) chan *LogSubscription {
+	lm.newActiveLogsMutex.Lock()
+
+	logSubChannel := lm.newActiveLogs[containerName]
+	if logSubChannel == nil {
+		logSubChannel = make(chan *LogSubscription)
+		lm.newActiveLogs[containerName] = logSubChannel
+	}
+
+	lm.newActiveLogsMutex.Unlock()
+
+	safe.Go(func() {
+		defer func() {
+			lm.newActiveLogsMutex.Lock()
+			delete(lm.newActiveLogs, containerName)
+			lm.newActiveLogsMutex.Unlock()
+
+			fmt.Println("CLOSED LOG CHANNEL CONSUMER FOR", containerName)
+
+		}()
+
+		logChannel := lm.newActiveLogs[containerName]
+		for sub := range logChannel {
+			fmt.Println("RECEIVED SUB FOR", containerName)
+			lm.emitChannelStream(sub)
+			fmt.Println("FINISHED STREAMING SUB FOR", containerName)
+		}
+	})
+
+	return logSubChannel
+}
+
+func (lm *LogManager) StreamLogsChannel(channel chan string, containerName string) error {
+	logSubscriptionChannel := lm.SetupLogConsumer(containerName)
+
+	// in case there is already an active subscription, we need to start publishing straight away
+	id, err := lm.getActiveSubscriptionID(containerName)
+	if err != nil {
+		return err
+	}
+
+	activeLog := LogSubscription{
+		ContainerName: containerName,
+		logHistory:    make([]*LogEntry, 0),
+		ChannelStream: channel,
+		Active:        false,
+		Publish:       false,
+	}
+
+	if id != "" {
+		activeLog.Publish = true
+		activeLog.SubscriptionID = id
+	}
+
+	logSubscriptionChannel <- &activeLog
+
+	return nil
 }
 
 func (lm *LogManager) SetupEndpoints() error {

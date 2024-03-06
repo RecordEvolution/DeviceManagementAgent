@@ -139,7 +139,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, stdErrChan)
+	err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, logsChannel)
+	err = sm.LogManager.StreamLogsChannel(logsChannel, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, stdErrChan)
+	err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -257,7 +257,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, logsChannel)
+	err = sm.LogManager.StreamLogsChannel(logsChannel, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}

@@ -185,7 +185,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, loginStderr)
+	err = sm.LogManager.StreamLogsChannel(loginStderr, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, pullStderr)
+	err = sm.LogManager.StreamLogsChannel(pullStderr, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}

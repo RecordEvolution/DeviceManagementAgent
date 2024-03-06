@@ -56,7 +56,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(topicForLogStream, common.PULL, loginStderr)
+	err = sm.LogManager.StreamLogsChannel(loginStderr, topicForLogStream)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(topicForLogStream, common.PULL, pullStderr)
+	err = sm.LogManager.StreamLogsChannel(pullStderr, topicForLogStream)
 	if err != nil {
 		return err
 	}

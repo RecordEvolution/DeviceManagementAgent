@@ -121,7 +121,7 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, buildStderr)
+	err = sm.LogManager.StreamLogsChannel(buildStderr, topicForLogStream)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 			return err
 		}
 
-		err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, pullStderr)
+		err = sm.LogManager.StreamLogsChannel(pullStderr, topicForLogStream)
 		if err != nil {
 			return err
 		}
