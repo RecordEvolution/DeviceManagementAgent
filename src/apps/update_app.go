@@ -180,35 +180,33 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	loginStdout, loginStderr, _, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	_, loginStderr, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, loginStdout)
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, loginStderr)
 	if err != nil {
 		return err
 	}
 
-	err = <-loginStderr
-	if err != nil {
-		sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to login, reason: %s\n", err.Error()))
-		return err
-	}
-
-	pullStdout, pullStderr, _, err := compose.Pull(dockerComposePath)
+	err = loginCmd.Wait()
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, pullStdout)
+	_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	err = <-pullStderr
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.PULL, pullStderr)
 	if err != nil {
-		sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to pull, reason: %s\n", err.Error()))
+		return err
+	}
+
+	err = pullCmd.Wait()
+	if err != nil {
 		return err
 	}
 

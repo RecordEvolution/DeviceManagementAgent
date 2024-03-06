@@ -134,12 +134,17 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	stdoutChan, stdErrChan, _, err := compose.Up(dockerComposePath)
+	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, stdoutChan)
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Dev, common.APP, stdErrChan)
+	if err != nil {
+		return err
+	}
+
+	err = upCmd.Wait()
 	if err != nil {
 		return err
 	}
@@ -148,27 +153,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	runningSignal, _ := compose.WaitForRunning(dockerComposePath, pollingRate)
 
 	// block and wait for running, if exited status then return as a failed state
-outerLoop:
-	for {
-		select {
-		case err = <-stdErrChan:
-			if err == nil {
-				break
-			}
-
-			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
-			// options := common.Dict{"follow": true, "stdout": true, "stderr": true}
-			// ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
-			// if logsErr != nil {
-			// 	return logsErr
-			// }
-
-			// sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
-			return err
-		case <-runningSignal:
-			break outerLoop
-		}
-	}
+	<-runningSignal
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {
@@ -236,12 +221,17 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	stdoutChan, stdErrChan, _, err := compose.Up(dockerComposePath)
+	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, stdoutChan)
+	err = sm.LogManager.StreamChannel(payload.ContainerName.Prod, common.APP, stdErrChan)
+	if err != nil {
+		return err
+	}
+
+	err = upCmd.Wait()
 	if err != nil {
 		return err
 	}
@@ -250,27 +240,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	runningSignal, _ := compose.WaitForRunning(dockerComposePath, pollingRate)
 
 	// block and wait for running, if exited status then return as a failed state
-outerLoop:
-	for {
-		select {
-		case err = <-stdErrChan:
-			if err == nil {
-				break
-			}
-
-			sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
-			// options := common.Dict{"follow": true, "stdout": true, "stderr": true}
-			// ioReader, logsErr := sm.Container.Logs(context.Background(), containerID, options)
-			// if logsErr != nil {
-			// 	return logsErr
-			// }
-
-			// sm.LogManager.StreamBlocking(payload.ContainerName.Prod, common.APP, ioReader)
-			return err
-		case <-runningSignal:
-			break outerLoop
-		}
-	}
+	<-runningSignal
 
 	err = sm.setState(app, common.RUNNING)
 	if err != nil {

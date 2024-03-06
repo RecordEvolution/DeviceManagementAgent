@@ -116,36 +116,34 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 	}
 
 	compose := sm.Container.Compose()
-	buildStdout, buildStderr, _, err := compose.Build(dockerComposePath)
+	_, buildStderr, buildCmd, err := compose.Build(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, buildStdout)
+	err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, buildStderr)
 	if err != nil {
 		return err
 	}
 
-	err = <-buildStderr
+	err = buildCmd.Wait()
 	if err != nil {
-		sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to build, reason: %s\n", err.Error()))
 		return err
 	}
 
 	if !releaseBuild {
-		pullStdout, pullStderr, _, err := compose.Pull(dockerComposePath)
+		_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
 		if err != nil {
 			return err
 		}
 
-		err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, pullStdout)
+		err = sm.LogManager.StreamChannel(topicForLogStream, common.BUILD, pullStderr)
 		if err != nil {
 			return err
 		}
 
-		err = <-pullStderr
+		err = pullCmd.Wait()
 		if err != nil {
-			sm.LogManager.Write(topicForLogStream, fmt.Sprintf("The app failed to build, reason: %s\n", err.Error()))
 			return err
 		}
 	}

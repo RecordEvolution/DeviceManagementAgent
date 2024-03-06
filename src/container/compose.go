@@ -75,16 +75,15 @@ func NewCompose() Compose {
 	}
 }
 
-func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, chan string, *exec.Cmd, error) {
 	finalArgs := []string{}
 	finalArgs = append(finalArgs, "compose", "-f", dockerComposePath)
 	finalArgs = append(finalArgs, providedArgs...)
 
 	cmd := exec.Command("docker", finalArgs...)
-	cmd.Env = append(cmd.Env, "COMPOSE_STATUS_STDOUT=1")
 
 	stdoutChan := make(chan string)
-	stderrChan := make(chan error)
+	stderrChan := make(chan string)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -113,17 +112,9 @@ func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...strin
 
 	go func() {
 		scanner := bufio.NewScanner(stderrPipe)
-
-		var stringBuilder strings.Builder
 		for scanner.Scan() {
 			text := scanner.Text()
-			stringBuilder.WriteString(text)
-			stringBuilder.WriteString("\n")
-		}
-
-		stringResult := stringBuilder.String()
-		if len(stringResult) > 0 && strings.Contains(strings.ToLower(stringResult), "error") {
-			stderrChan <- errors.New(stringResult)
+			stderrChan <- text
 		}
 
 		close(stderrChan)
@@ -132,12 +123,11 @@ func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...strin
 	return stdoutChan, stderrChan, cmd, nil
 }
 
-func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan string, *exec.Cmd, error) {
 	cmd := exec.Command("docker", providedArgs...)
-	cmd.Env = append(cmd.Env, "COMPOSE_STATUS_STDOUT=1")
 
 	stdoutChan := make(chan string)
-	stderrChan := make(chan error)
+	stderrChan := make(chan string)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -166,17 +156,9 @@ func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan error
 
 	go func() {
 		scanner := bufio.NewScanner(stderrPipe)
-
-		var stringBuilder strings.Builder
 		for scanner.Scan() {
 			text := scanner.Text()
-			stringBuilder.WriteString(text)
-			stringBuilder.WriteString("\n")
-		}
-
-		stringResult := stringBuilder.String()
-		if len(stringResult) > 0 && strings.Contains(strings.ToLower(stringResult), "error") {
-			stderrChan <- errors.New(stringResult)
+			stderrChan <- text
 		}
 
 		close(stderrChan)
@@ -185,23 +167,23 @@ func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan error
 	return stdoutChan, stderrChan, cmd, nil
 }
 
-func (c *Compose) Login(dockerRegistryURL string, username string, password string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Login(dockerRegistryURL string, username string, password string) (chan string, chan string, *exec.Cmd, error) {
 	return c.dockerCommand("login", dockerRegistryURL, "-u", username, "-p", password)
 }
 
-func (c *Compose) Build(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Build(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "build")
 }
 
-func (c *Compose) Push(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Push(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "push")
 }
 
-func (c *Compose) Pull(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Pull(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "pull")
 }
 
-func (c *Compose) Up(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Up(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "up", "-d")
 }
 
@@ -271,29 +253,29 @@ func (c *Compose) IsRunning(dockerComposePath string) (bool, error) {
 	return allRunning, nil
 }
 
-func (c *Compose) Stop(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Stop(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "stop")
 }
 
-func (c *Compose) Remove(dockerComposePath string) (chan string, chan error, *exec.Cmd, error) {
+func (c *Compose) Remove(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "rm", "-f")
 }
 
 func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
-	c.logStreamMapMutex.Lock()
-	existingComposeLog := c.logStreamMap[dockerComposePath]
+	// c.logStreamMapMutex.Lock()
+	// existingComposeLog := c.logStreamMap[dockerComposePath]
 
-	if existingComposeLog != nil {
-		err := existingComposeLog.command.Process.Kill()
-		if err != nil {
-			c.logStreamMapMutex.Unlock()
-			return nil, err
-		}
+	// if existingComposeLog != nil {
+	// 	err := existingComposeLog.command.Process.Kill()
+	// 	if err != nil {
+	// 		c.logStreamMapMutex.Unlock()
+	// 		return nil, err
+	// 	}
 
-		delete(c.logStreamMap, dockerComposePath)
-	}
+	// 	delete(c.logStreamMap, dockerComposePath)
+	// }
 
-	c.logStreamMapMutex.Unlock()
+	// c.logStreamMapMutex.Unlock()
 
 	cmd := exec.Command("docker", "compose", "-f", dockerComposePath, "logs", "-f")
 	cmdReader, err := cmd.StdoutPipe()
@@ -307,7 +289,8 @@ func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
 	scanner := bufio.NewScanner(cmdReader)
 	safe.Go(func() {
 		for scanner.Scan() {
-			logChan <- scanner.Text()
+			chunk := scanner.Text()
+			logChan <- chunk
 		}
 
 		close(logChan)
@@ -318,9 +301,9 @@ func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
 		return nil, err
 	}
 
-	c.logStreamMapMutex.Lock()
-	c.logStreamMap[dockerComposePath] = &ComposeLog{channel: logChan, command: cmd}
-	c.logStreamMapMutex.Unlock()
+	// c.logStreamMapMutex.Lock()
+	// c.logStreamMap[dockerComposePath] = &ComposeLog{channel: logChan, command: cmd}
+	// c.logStreamMapMutex.Unlock()
 
 	return logChan, nil
 }

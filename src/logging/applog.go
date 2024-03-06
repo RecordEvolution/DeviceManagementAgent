@@ -63,12 +63,15 @@ func (ls *LogSubscription) appendLog(logEntry LogEntry) {
 }
 
 type LogManager struct {
-	Container       container.Container
-	Messenger       messenger.Messenger
-	Database        persistence.Database
-	AppStore        store.AppStore
-	activeLogs      map[string]*LogSubscription
-	activeLogsMutex sync.Mutex
+	Container              container.Container
+	Messenger              messenger.Messenger
+	Database               persistence.Database
+	AppStore               store.AppStore
+	activeLogs             map[string]*LogSubscription
+	activeComposeLogs      map[string]*LogSubscription
+	composeLogsChannel     chan LogSubscription
+	activeLogsMutex        sync.Mutex
+	activeComposeLogsMutex sync.Mutex
 }
 
 type ErrorChunk struct {
@@ -82,11 +85,13 @@ type ErrorDetail struct {
 
 func NewLogManager(cont container.Container, msg messenger.Messenger, db persistence.Database, as store.AppStore) LogManager {
 	return LogManager{
-		activeLogs: make(map[string]*LogSubscription),
-		Container:  cont,
-		Messenger:  msg,
-		Database:   db,
-		AppStore:   as,
+		activeLogs:         make(map[string]*LogSubscription),
+		activeComposeLogs:  make(map[string]*LogSubscription),
+		composeLogsChannel: make(chan LogSubscription),
+		Container:          cont,
+		Messenger:          msg,
+		Database:           db,
+		AppStore:           as,
 	}
 }
 
@@ -211,7 +216,7 @@ func (lm *LogManager) emitChannelStream(logEntry *LogSubscription) error {
 				}
 			})
 
-			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
+			log.Debug().Msgf("goroutine has finshed following logs for %s", logEntry.ContainerName)
 		})
 	}()
 
@@ -320,7 +325,7 @@ func (lm *LogManager) emitStream(logEntry *LogSubscription) error {
 				}
 			})
 
-			log.Print("goroutine has finshed following logs for", logEntry.ContainerName)
+			log.Debug().Msgf("goroutine has finshed following logs for %s", logEntry.ContainerName)
 		})
 	}()
 
@@ -767,9 +772,9 @@ func (lm *LogManager) StreamChannel(containerName string, logType common.LogType
 }
 
 func (lm *LogManager) initLogStreamChannel(containerName string, logType common.LogType, channel chan string) error {
-	lm.activeLogsMutex.Lock()
-	exisitingLog := lm.activeLogs[containerName]
-	lm.activeLogsMutex.Unlock()
+	lm.activeComposeLogsMutex.Lock()
+	exisitingLog := lm.activeComposeLogs[containerName]
+	lm.activeComposeLogsMutex.Unlock()
 
 	// found an entry without an active stream, populate the stream
 	if exisitingLog != nil {
@@ -796,10 +801,11 @@ func (lm *LogManager) initLogStreamChannel(containerName string, logType common.
 		activeLog.SubscriptionID = id
 	}
 
-	lm.activeLogsMutex.Lock()
-	lm.activeLogs[containerName] = &activeLog
-	lm.activeLogsMutex.Unlock()
-	return lm.emitStream(&activeLog)
+	lm.activeComposeLogsMutex.Lock()
+	lm.activeComposeLogs[containerName] = &activeLog
+	lm.activeComposeLogsMutex.Unlock()
+
+	return lm.emitChannelStream(&activeLog)
 }
 
 // StreamBlocking publishes a stream of string data to a specific subscribable container synchronisly.

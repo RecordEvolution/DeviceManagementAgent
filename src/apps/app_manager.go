@@ -388,7 +388,7 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 		payload := payloads[i]
 
 		// do not execute publishes on reconnect
-		if payload.RequestedState == common.PUBLISHED {
+		if payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
 			continue
 		}
 
