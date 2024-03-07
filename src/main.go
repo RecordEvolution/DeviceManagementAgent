@@ -18,7 +18,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	profile "github.com/bygui86/multi-profile/v2"
+	_ "net/http/pprof"
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -69,11 +70,6 @@ func main() {
 			}
 		})
 
-		defer profile.CPUProfile(&profile.Config{}).Start().Stop()
-		defer profile.BlockProfile(&profile.Config{}).Start().Stop()
-		defer profile.GoroutineProfile(&profile.Config{}).Start().Stop()
-		defer profile.MutexProfile(&profile.Config{}).Start().Stop()
-		defer profile.MemProfile(&profile.Config{}).Start().Stop()
 	}
 
 	logging.SetupLogger(cliArgs)
