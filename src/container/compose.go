@@ -341,3 +341,43 @@ func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 
 	return composeStatuses, nil
 }
+
+type ComposeListEntry struct {
+	Name        string `json:"Name"`
+	Status      string `json:"Status"`
+	ConfigFiles string `json:"ConfigFiles"`
+}
+
+func (c *Compose) GetComposeAppEntry(appName string) (*ComposeListEntry, error) {
+	composeList, err := c.List()
+	if err != nil {
+		return &ComposeListEntry{}, err
+	}
+
+	var entry ComposeListEntry
+	for _, composeEntry := range composeList {
+		if composeEntry.Name == strings.ToLower(appName) {
+			entry = composeEntry
+		}
+	}
+
+	return &entry, nil
+}
+
+func (c *Compose) List() ([]ComposeListEntry, error) {
+	cmd := exec.Command("docker", "compose", "ls", "-a", "--format", "json")
+	cmd.Stderr = cmd.Stdout
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var composeListEntries []ComposeListEntry
+	err = json.Unmarshal([]byte(output), &composeListEntries)
+	if err != nil {
+		return nil, err
+	}
+
+	return composeListEntries, nil
+}

@@ -116,7 +116,7 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	err = sm.LogManager.StreamLogsChannel(loginStderr, payload.PublishContainerName)
+	_, err = sm.LogManager.StreamLogsChannel(loginStderr, payload.PublishContainerName)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	err = sm.LogManager.StreamLogsChannel(pushStderr, payload.PublishContainerName)
+	_, err = sm.LogManager.StreamLogsChannel(pushStderr, payload.PublishContainerName)
 	if err != nil {
 		return err
 	}
