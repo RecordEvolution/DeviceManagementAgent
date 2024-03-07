@@ -122,10 +122,8 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 
 		tunnelConfig.LocalPort = localPort
 
-		remotePort, err := section.Key(string(REMOTE_PORT)).Uint64()
-		if err != nil {
-			log.Debug().Msgf("Remote port was not set while reading ini file (port likely not specified)")
-		}
+		// Remote port can be 0 if it's not set, do not handle error
+		remotePort, _ := section.Key(string(REMOTE_PORT)).Uint64()
 
 		tunnelConfig.RemotePort = remotePort
 
