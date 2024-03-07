@@ -15,8 +15,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var ContainerNameRegExp = `(.{3,4})_([0-9]*)_.*`
-
 func BuildContainerName(stage Stage, appKey uint64, appName string) string {
 	return strings.ToLower(fmt.Sprintf("%s_%d_%s", stage, appKey, appName))
 }
@@ -95,8 +93,10 @@ func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []stri
 	return stringArray
 }
 
+var StatusRegex = regexp.MustCompile(`\((.*?)\)`)
+
 func ParseExitCodeFromContainerStatus(status string) (int64, error) {
-	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
+	statusString := StatusRegex.FindString(status)
 	exitCodeString := strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 	exitCodeInt, err := strconv.ParseInt(exitCodeString, 10, 64)
 	if err != nil {

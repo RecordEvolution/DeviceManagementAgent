@@ -73,6 +73,8 @@ type SocketConfig struct {
 	SetupTestament    bool
 }
 
+var legacyEndpointRegex = regexp.MustCompile(`devices.*\.(com|io):8080`)
+
 func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
 	reswarmConfig := config.ReswarmConfig
 
@@ -88,11 +90,7 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 		Logger: wrapZeroLogger(log.Logger),
 	}
 
-	isLegacyEndpoint, err := regexp.Match(`devices.*\.(com|io):8080`, []byte(reswarmConfig.DeviceEndpointURL))
-	if err != nil {
-		return nil, err
-	}
-
+	isLegacyEndpoint := legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL))
 	if isLegacyEndpoint {
 		tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
 		if err != nil {

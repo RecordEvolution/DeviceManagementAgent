@@ -81,6 +81,7 @@ type TerminalManager struct {
 
 var supportedShells = [...]string{"/bin/zsh", "/bin/bash"}
 var defaultShell = "/bin/sh"
+var shellRegex = regexp.MustCompile("\r?\n")
 
 func (tm *TerminalManager) getShell(containerName string) (string, error) {
 	ctx := context.Background()
@@ -97,8 +98,7 @@ func (tm *TerminalManager) getShell(containerName string) (string, error) {
 		return "", err
 	}
 
-	expression := regexp.MustCompile("\r?\n")
-	etcShells := expression.Split(string(result), -1)
+	etcShells := shellRegex.Split(string(result), -1)
 
 	for _, foundShell := range etcShells {
 		for _, supportedShell := range supportedShells {

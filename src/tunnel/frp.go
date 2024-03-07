@@ -101,6 +101,8 @@ func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localP
 	return baseSubdomain
 }
 
+var subdomainRegex = regexp.MustCompile(`\d+-(.*)-\d+`)
+
 func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 	tunnelConfigs := make([]TunnelConfig, 0)
 
@@ -133,8 +135,7 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 		tunnelConfig.Subdomain = subdomain
 
 		var appName string
-		re := regexp.MustCompile(`\d+-(.*)-\d+`)
-		result := re.FindStringSubmatch(subdomain)
+		result := subdomainRegex.FindStringSubmatch(subdomain)
 
 		if len(result) > 1 {
 			appName = result[1]

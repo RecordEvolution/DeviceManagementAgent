@@ -436,6 +436,8 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 	return errorC
 }
 
+var ContainerNameRegexExp = regexp.MustCompile(`(.{3,4})_([0-9]*)_.*`)
+
 func (so *StateObserver) initObserverSpawner() chan error {
 	messageC, errC := so.Container.ListenForContainerEvents(context.Background())
 
@@ -449,8 +451,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 				switch event.Action {
 				case "die", "kill", "destroy":
 					containerName := event.Actor.Attributes["name"]
-					reg := regexp.MustCompile(common.ContainerNameRegExp)
-					match := reg.FindStringSubmatch(containerName)
+					match := ContainerNameRegexExp.FindStringSubmatch(containerName)
 
 					// invalid container name, probably an intermediare container
 					// or a container spawned by the user
@@ -466,8 +467,7 @@ func (so *StateObserver) initObserverSpawner() chan error {
 					so.removeObserver(stage, key, name)
 				case "create", "start":
 					containerName := event.Actor.Attributes["name"]
-					reg := regexp.MustCompile(common.ContainerNameRegExp)
-					match := reg.FindStringSubmatch(containerName)
+					match := ContainerNameRegexExp.FindStringSubmatch(containerName)
 
 					// invalid container name, probably an intermediare container
 					// or a container spawned by the user

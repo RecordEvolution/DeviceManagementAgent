@@ -199,6 +199,10 @@ func parseProxyStatus(text string) []TunnelStatus {
 	return proxyStatusList
 }
 
+var tunnelIdRegexp = regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
+var errMessageRegexp = regexp.MustCompile(`error: (.*)`)
+var proxyNameRegex = regexp.MustCompile(`\[(\d+)-(.*)-(\d+)-(.*)\]`)
+
 func (frpTm *FrpTunnelManager) Start() error {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
@@ -231,12 +235,10 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 			// Error was found
 			if strings.Contains(line, "[E]") {
-				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
 				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
 				if len(tunnelIdMatch) > 1 {
 					tunnelID := tunnelIdMatch[1]
 
-					errMessageRegexp := regexp.MustCompile(`error: (.*)`)
 					errMatch := errMessageRegexp.FindStringSubmatch(line)
 					if len(errMatch) > 1 {
 						errMessage := errMatch[1]
@@ -260,10 +262,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 				if proxyStarted || proxyRemoved {
 					safe.Go(func() {
-						regexPattern := `\[(\d+)-(.*)-(\d+)-(.*)\]`
-
-						re := regexp.MustCompile(regexPattern)
-						matches := re.FindStringSubmatch(line)
+						matches := proxyNameRegex.FindStringSubmatch(line)
 
 						if len(matches) > 1 {
 							deviceKeyStr := matches[1]

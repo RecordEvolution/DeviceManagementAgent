@@ -74,13 +74,10 @@ type Ipv4Address struct {
 	Ip            string `json:"ip"`
 }
 
+var ipv4regex = regexp.MustCompile(IPv4RegExp)
+
 func GetIPv4Addresses() ([]Ipv4Address, error) {
 	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-
-	ipv4regex, err := regexp.Compile(IPv4RegExp)
 	if err != nil {
 		return nil, err
 	}
