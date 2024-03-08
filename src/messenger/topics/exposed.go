@@ -24,6 +24,7 @@ const GetIPv4Addresses Topic = "get_ipv4_addresses"
 
 const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"
+const SystemRestartAgent Topic = "system_restart_agent"
 
 const GetNetworkMetaData Topic = "get_network_metadata"
 

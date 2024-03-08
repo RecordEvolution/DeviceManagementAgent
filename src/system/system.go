@@ -61,6 +61,11 @@ func (sys *System) Poweroff() error {
 	return err
 }
 
+func (sys *System) RestartAgent() error {
+	_, err := exec.Command("systemctl", "restart", "reagent").Output()
+	return err
+}
+
 // ------------------------------------------------------------------------- //
 
 func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, progressCallback func(filesystem.DownloadProgress)) error {
