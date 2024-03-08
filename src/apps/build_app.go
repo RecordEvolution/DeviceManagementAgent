@@ -119,13 +119,11 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		return "", err
 	}
 
-	if isProd {
-		_, err = os.Stat(targetAppDir)
+	_, err = os.Stat(targetAppDir)
+	if err != nil {
+		err = os.MkdirAll(targetAppDir, os.ModePerm)
 		if err != nil {
-			err = os.MkdirAll(targetAppDir, os.ModePerm)
-			if err != nil {
-				return "", err
-			}
+			return "", err
 		}
 	}
 
