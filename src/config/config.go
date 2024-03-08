@@ -171,7 +171,7 @@ func SaveReswarmConfig(path string, reswarmConfig *ReswarmConfig) error {
 		return err
 	}
 
-	return ioutil.WriteFile(path, file, 0644)
+	return ioutil.WriteFile(path, file, os.ModePerm)
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path

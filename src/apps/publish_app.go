@@ -102,7 +102,7 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
 	}

@@ -143,7 +143,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 
 	compose := sm.Container.Compose()
 
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, true)
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, true)
 	if err != nil {
 		return err
 	}

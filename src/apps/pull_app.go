@@ -22,7 +22,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 	compose := sm.Container.Compose()
 
 	// TODO: make sure that folder exists so that compose can be started, make a different folder for PROD apps
-	dockerComposePath, err := sm.WriteDockerComposeFile(payload, app, false)
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
 	}
