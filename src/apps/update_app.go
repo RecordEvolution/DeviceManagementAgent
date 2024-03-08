@@ -83,7 +83,10 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	}
 
 	log.Debug().Msgf("PULLING IMAGE: %s", fullImageNameWithVersion)
-	reader, err := sm.Container.Pull(ctx, fullImageNameWithVersion, pullOptions)
+	pullContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	reader, err := sm.Container.Pull(pullContext, fullImageNameWithVersion, pullOptions)
 	if err != nil {
 		errorMessage := fmt.Sprintf("Error occured while trying to pull the image: %s", err.Error())
 		sm.LogManager.Write(payload.ContainerName.Prod, errorMessage)
@@ -121,8 +124,11 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
+	removeImageByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
 	log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
-	sm.Container.RemoveImageByName(ctx, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
+	sm.Container.RemoveImageByName(removeImageByNameContext, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
 
 	// update the version of the local requested states
 	payload.NewestVersion = app.Version
