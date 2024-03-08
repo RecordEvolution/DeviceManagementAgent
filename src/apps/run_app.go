@@ -159,6 +159,27 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	select {
 	case err = <-errC:
 		if err != nil {
+			// cleanup docker containers
+			_, _, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			_, _, cmd, cleanupErr = compose.Remove(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
 			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
 			return err
 		}
