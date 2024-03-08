@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -84,9 +85,10 @@ var defaultShell = "/bin/sh"
 var shellRegex = regexp.MustCompile("\r?\n")
 
 func (tm *TerminalManager) getShell(containerName string) (string, error) {
-	ctx := context.Background()
+	execCommandContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
 
-	hijackedResponse, err := tm.Container.ExecCommand(ctx, containerName, []string{"cat", "/etc/shells"})
+	hijackedResponse, err := tm.Container.ExecCommand(execCommandContext, containerName, []string{"cat", "/etc/shells"})
 	if err != nil {
 		return "", err
 	}
@@ -248,8 +250,10 @@ func (tm *TerminalManager) ResizeTerminal(sessionID string, dimension container.
 		return err
 	}
 
-	ctx := context.Background()
-	return tm.Container.ResizeExecContainer(ctx, termSession.Session.ExecID, dimension)
+	resizeExecContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	return tm.Container.ResizeExecContainer(resizeExecContainerContext, termSession.Session.ExecID, dimension)
 }
 
 func (tm *TerminalManager) cleanupSession(session *TerminalSession) error {
@@ -334,8 +338,10 @@ func (tm *TerminalManager) StartTerminalSession(sessionID string, registrationID
 }
 
 func (tm *TerminalManager) createTerminalSession(containerName string, shell string) (*TerminalSession, error) {
-	ctx := context.Background()
-	hijackedResponse, err := tm.Container.ExecAttach(ctx, containerName, shell)
+	execAttachContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	hijackedResponse, err := tm.Container.ExecAttach(execAttachContext, containerName, shell)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 )
@@ -76,8 +77,10 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	ctx := context.Background()
-	err = sm.Container.RemoveImagesByName(ctx, registeryImageName+"*", options)
+	removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.RemoveImagesByName(removeImagesByNameContext, registeryImageName+"*", options)
 	if err != nil {
 		return err
 	}
@@ -93,7 +96,6 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 }
 
 func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *common.App) error {
-	ctx := context.Background()
 
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
 	if err != nil {
@@ -112,22 +114,31 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 	}
 
 	options := map[string]interface{}{"force": true}
+
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
 	// check if the image has a running container
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Dev)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
 		}
 	} else {
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
 		// remove container if it exists
-		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, options)
+		removeContainerErr := sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, options)
 		if removeContainerErr != nil {
 			if !errdefs.IsContainerNotFound(removeContainerErr) {
 				return removeContainerErr
 			}
 		}
 
-		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		waitForContainerByIDContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		_, err = sm.Container.WaitForContainerByID(waitForContainerByIDContext, cont.ID, container.WaitConditionRemoved)
 		if err != nil {
 			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
 			// still useful, and will wait if it's still not removed
@@ -137,7 +148,10 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 		}
 	}
 
-	err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Dev, options)
+	removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.RemoveImagesByName(removeImagesByNameContext, payload.RegistryImageName.Dev, options)
 	if err != nil {
 		return err
 	}
@@ -152,7 +166,6 @@ func (sm *StateMachine) removeDevApp(payload common.TransitionPayload, app *comm
 }
 
 func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *common.App) error {
-	ctx := context.Background()
 
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {
@@ -173,21 +186,30 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 	options := map[string]interface{}{"force": true}
 
 	// check if the image has a running container
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
 		}
 	} else {
 		// remove container if it exists
-		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, options)
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		removeContainerErr := sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, options)
 		if removeContainerErr != nil {
 			if !errdefs.IsContainerNotFound(removeContainerErr) {
 				return removeContainerErr
 			}
 		}
 
-		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		waitForContainerByIDContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		_, err = sm.Container.WaitForContainerByID(waitForContainerByIDContext, cont.ID, container.WaitConditionRemoved)
 		if err != nil {
 			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
 			// still useful, and will wait if it's still not removed
@@ -197,7 +219,10 @@ func (sm *StateMachine) removeProdApp(payload common.TransitionPayload, app *com
 		}
 	}
 
-	err = sm.Container.RemoveImagesByName(ctx, payload.RegistryImageName.Prod, options)
+	removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.RemoveImagesByName(removeImagesByNameContext, payload.RegistryImageName.Prod, options)
 	if err != nil {
 		return err
 	}

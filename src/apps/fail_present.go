@@ -3,10 +3,10 @@ package apps
 import (
 	"context"
 	"reagent/common"
+	"time"
 )
 
 func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPayload, app *common.App) error {
-	ctx := context.Background()
 
 	var containerToRemove string
 	if payload.Stage == common.DEV {
@@ -15,8 +15,10 @@ func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPay
 		containerToRemove = payload.ContainerName.Prod
 	}
 
+	removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
 	// remove any existing container to ensure environment variables are set
-	sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
+	sm.Container.RemoveContainerByID(removeContainerByIdContext, containerToRemove, map[string]interface{}{"force": true})
 
 	if payload.Stage == common.DEV {
 		return sm.buildApp(payload, app)
@@ -30,7 +32,10 @@ func (sm *StateMachine) recoverFailToPresentHandler(payload common.TransitionPay
 		fullImageName = payload.RegistryImageName.Prod
 	}
 
-	images, err := sm.Container.GetImages(ctx, fullImageName)
+	getImagesContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	images, err := sm.Container.GetImages(getImagesContext, fullImageName)
 	if err != nil {
 		return err
 	}

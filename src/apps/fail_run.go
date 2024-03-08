@@ -3,6 +3,7 @@ package apps
 import (
 	"context"
 	"reagent/common"
+	"time"
 )
 
 func (sm *StateMachine) recoverFailToRunningHandler(payload common.TransitionPayload, app *common.App) error {
@@ -15,9 +16,10 @@ func (sm *StateMachine) recoverFailToRunningHandler(payload common.TransitionPay
 	}
 
 	if payload.DockerCompose == nil {
-		ctx := context.Background()
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
 		// remove any existing container to ensure environment variables are set
-		sm.Container.RemoveContainerByID(ctx, containerToRemove, map[string]interface{}{"force": true})
+		sm.Container.RemoveContainerByID(removeContainerByIdContext, containerToRemove, map[string]interface{}{"force": true})
 	}
 
 	return sm.runApp(payload, app)

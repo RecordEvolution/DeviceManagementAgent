@@ -239,8 +239,6 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 }
 
 func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *common.App, releaseBuild bool) error {
-	ctx := context.Background()
-
 	if payload.DockerCompose != nil {
 		return sm.buildDevComposeApp(payload, app, releaseBuild)
 	}
@@ -293,7 +291,8 @@ func (sm *StateMachine) buildDevApp(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	reader, err := sm.Container.Build(ctx, appFilesTar, buildOptions)
+	// TODO: figure out context for build?
+	reader, err := sm.Container.Build(context.Background(), appFilesTar, buildOptions)
 	if err != nil {
 		errorMessage := err.Error()
 		if errdefs.IsDockerfileCannotBeEmpty(err) {

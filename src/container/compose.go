@@ -2,6 +2,7 @@ package container
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
@@ -187,50 +188,57 @@ func (c *Compose) Up(dockerComposePath string) (chan string, chan string, *exec.
 	return c.composeCommand(dockerComposePath, "up", "-d")
 }
 
-func (c *Compose) WaitForRunning(dockerComposePath string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {
+func (c *Compose) WaitForRunning(ctx context.Context, dockerComposePath string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {
 	errC := make(chan error, 1)
 	runningC := make(chan struct{}, 1)
 
 	safe.Go(func() {
 		for {
-
-			statuses, err := c.Status(dockerComposePath)
-			if err != nil {
-				errC <- err
+			select {
+			case <-ctx.Done():
+				errC <- errors.New("waiting for running canceled")
 				close(errC)
 				close(runningC)
 				return
-			}
-
-			if len(statuses) == 0 {
-				continue
-			}
-
-			running, err := c.IsRunning(dockerComposePath)
-			if err != nil {
-				errC <- err
-				close(errC)
-				close(runningC)
-				return
-			}
-
-			if running {
-				runningC <- struct{}{}
-				close(errC)
-				close(runningC)
-				return
-			}
-
-			for _, status := range statuses {
-				if status.State == "exited" || status.State == "dead" {
-					errC <- errors.New("the container has exited")
+			default:
+				statuses, err := c.Status(dockerComposePath)
+				if err != nil {
+					errC <- err
 					close(errC)
 					close(runningC)
 					return
 				}
-			}
 
-			time.Sleep(pollingRate)
+				if len(statuses) == 0 {
+					continue
+				}
+
+				running, err := c.IsRunning(dockerComposePath)
+				if err != nil {
+					errC <- err
+					close(errC)
+					close(runningC)
+					return
+				}
+
+				if running {
+					runningC <- struct{}{}
+					close(errC)
+					close(runningC)
+					return
+				}
+
+				for _, status := range statuses {
+					if status.State == "exited" || status.State == "dead" {
+						errC <- errors.New("the container has exited")
+						close(errC)
+						close(runningC)
+						return
+					}
+				}
+
+				time.Sleep(pollingRate)
+			}
 		}
 	})
 

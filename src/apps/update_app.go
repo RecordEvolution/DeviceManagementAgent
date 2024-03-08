@@ -34,21 +34,27 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	ctx := context.Background()
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Prod)
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
 	if err == nil {
-		err = sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
 		if err != nil {
 			return err
 		}
 
+		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
 		// should return 'container not found' error, this way we know it's removed successfully
-		_, errC := sm.Container.PollContainerState(ctx, cont.ID, time.Second)
-		select {
-		case err := <-errC:
-			if !errdefs.IsContainerNotFound(err) {
-				return err
-			}
+		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
+		err := <-errC
+		if !errdefs.IsContainerNotFound(err) {
+			return err
 		}
 	}
 

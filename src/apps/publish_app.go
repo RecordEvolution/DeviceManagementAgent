@@ -6,6 +6,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"time"
 )
 
 func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common.App) error {
@@ -28,9 +29,11 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	ctx := context.Background()
 	prodImage := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.Version)
-	err = sm.Container.Tag(ctx, payload.RegistryImageName.Dev, prodImage)
+	tagContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.Tag(tagContext, payload.RegistryImageName.Dev, prodImage)
 	if err != nil {
 		return err
 	}
@@ -48,7 +51,9 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		PushID: common.BuildDockerPushID(payload.AppKey, payload.AppName),
 	}
 
-	reader, err := sm.Container.Push(ctx, prodImage, pushOptions)
+	pushContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	reader, err := sm.Container.Push(pushContext, prodImage, pushOptions)
 	if err != nil {
 		return err
 	}
