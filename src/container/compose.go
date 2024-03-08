@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"reagent/safe"
 	"strings"
@@ -317,34 +318,17 @@ func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
 }
 
 func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
-	cmd := exec.Command("docker", "compose", "-f", dockerComposePath, "ps", "-a", "--format", "\"{{ json . }}\"")
-	cmd.Stderr = cmd.Stdout
-
-	output, err := cmd.Output()
+	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq -s", dockerComposePath)
+	cmd := exec.Command("bash", "-c", statusCommand)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
 
-	strippedOutput := strings.TrimSpace(string(output))
-
-	if len(strippedOutput) == 0 {
-		return []ComposeStatus{}, nil
-	}
-
-	outputSplit := strings.Split(strippedOutput, "\n")
-
-	composeStatuses := make([]ComposeStatus, 0)
-	for _, jsonSplit := range outputSplit {
-
-		var composeStatus ComposeStatus
-		parsedJsonSplit := jsonSplit[1 : len(jsonSplit)-1]
-
-		err := json.Unmarshal([]byte(parsedJsonSplit), &composeStatus)
-		if err != nil {
-			return nil, err
-		}
-
-		composeStatuses = append(composeStatuses, composeStatus)
+	var composeStatuses []ComposeStatus
+	err = json.Unmarshal(output, &composeStatuses)
+	if err != nil {
+		return nil, err
 	}
 
 	return composeStatuses, nil
