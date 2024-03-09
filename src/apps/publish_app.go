@@ -51,9 +51,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		PushID: common.BuildDockerPushID(payload.AppKey, payload.AppName),
 	}
 
-	pushContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-	reader, err := sm.Container.Push(pushContext, prodImage, pushOptions)
+	reader, err := sm.Container.Push(context.Background(), prodImage, pushOptions)
 	if err != nil {
 		return err
 	}
