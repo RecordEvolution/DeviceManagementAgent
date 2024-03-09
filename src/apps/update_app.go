@@ -83,10 +83,7 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	}
 
 	log.Debug().Msgf("PULLING IMAGE: %s", fullImageNameWithVersion)
-	pullContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	reader, err := sm.Container.Pull(pullContext, fullImageNameWithVersion, pullOptions)
+	reader, err := sm.Container.Pull(context.Background(), fullImageNameWithVersion, pullOptions)
 	if err != nil {
 		errorMessage := fmt.Sprintf("Error occured while trying to pull the image: %s", err.Error())
 		sm.LogManager.Write(payload.ContainerName.Prod, errorMessage)

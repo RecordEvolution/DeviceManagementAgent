@@ -7,7 +7,6 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
-	"time"
 )
 
 func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *common.App) error {
@@ -131,10 +130,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		PullID:     common.BuildDockerPullID(payload.AppKey, payload.AppName),
 	}
 
-	pullContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	reader, err := sm.Container.Pull(pullContext, fullImageNameWithVersion, pullOptions)
+	reader, err := sm.Container.Pull(context.Background(), fullImageNameWithVersion, pullOptions)
 	if err != nil {
 		errorMessage := fmt.Sprintf("Error occured while trying to pull the image: %s", err.Error())
 		sm.LogManager.Write(payload.ContainerName.Prod, errorMessage)
