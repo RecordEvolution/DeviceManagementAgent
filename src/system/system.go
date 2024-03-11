@@ -389,7 +389,10 @@ func (system *System) GetFrpCurrentVersion() (string, error) {
 		return "", errdefs.ErrNotFound
 	}
 
-	cmd := exec.Command(frpPath, "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, frpPath, "--version")
 	stdout, err := cmd.Output()
 	if err != nil {
 		return "", err
