@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS "RequestedAppStates" (
   present_version TEXT,
   newest_version TEXT,
   environment_variables TEXT,
+  ports TEXT,
+  docker_compose TEXT,
   release_key INTEGER NOT NULL,
   new_release_key INTEGER NOT NULL,
   request_update BOOLEAN NOT NULL CHECK (request_update IN (0,1)),

@@ -6,9 +6,14 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"time"
 )
 
 func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.publishComposeApp(payload, app)
+	}
+
 	err := sm.LogManager.Write(payload.PublishContainerName, fmt.Sprintf("Initializing publish process for %s...", app.AppName))
 	if err != nil {
 		return err
@@ -24,9 +29,11 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
-	ctx := context.Background()
 	prodImage := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.Version)
-	err = sm.Container.Tag(ctx, payload.RegistryImageName.Dev, prodImage)
+	tagContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.Tag(tagContext, payload.RegistryImageName.Dev, prodImage)
 	if err != nil {
 		return err
 	}
@@ -44,7 +51,7 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		PushID: common.BuildDockerPushID(payload.AppKey, payload.AppName),
 	}
 
-	reader, err := sm.Container.Push(ctx, prodImage, pushOptions)
+	reader, err := sm.Container.Push(context.Background(), prodImage, pushOptions)
 	if err != nil {
 		return err
 	}
@@ -62,6 +69,79 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		}
 
 		return streamErr
+	}
+
+	err = sm.setState(app, common.PUBLISHED)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.ClearLogHistory(payload.PublishContainerName)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.Write(payload.PublishContainerName, fmt.Sprintf("Initializing publish process for %s...", app.AppName))
+	if err != nil {
+		return err
+	}
+
+	err = sm.buildDevApp(payload, app, true)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.PublishContainerName, "App build has finished, Starting to publish...")
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.PUBLISHING)
+	if err != nil {
+		return err
+	}
+
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	config := sm.Container.GetConfig()
+
+	_, loginStderr, pullCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(loginStderr, payload.PublishContainerName)
+	if err != nil {
+		return err
+	}
+
+	err = pullCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, pushStderr, pushCmd, err := compose.Push(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(pushStderr, payload.PublishContainerName)
+	if err != nil {
+		return err
+	}
+
+	err = pushCmd.Wait()
+	if err != nil {
+		return err
 	}
 
 	err = sm.setState(app, common.PUBLISHED)

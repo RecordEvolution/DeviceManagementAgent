@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"reagent/api"
 	"reagent/apps"
 	"reagent/benchmark"
@@ -239,7 +238,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 
 	benchmark.TimeTillPreConnectInit = time.Since(benchmark.PreConnectInit)
 
-	fmt.Println("Attempting to establish a socket connection...")
+	generalConfig.StartupLogChannel <- "Attempting to establish a socket connection..."
 
 	benchmark.OnConnectInitAfterConnection = time.Now()
 	benchmark.SocketConnectionInit = time.Now()
@@ -252,7 +251,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	benchmark.TimeTillSocketConnection = time.Since(benchmark.SocketConnectionInit)
 	benchmark.TimeTillSocketConnectionFromLaunch = time.Since(benchmark.SocketConnectionInitFromLaunch)
 
-	fmt.Println("Connected!")
+	generalConfig.StartupLogChannel <- "Connected!"
 
 	systemAPI := system.New(generalConfig, mainSession)
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reagent/config"
 	"reagent/messenger/topics"
 	"reagent/release"
@@ -15,10 +16,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var ContainerNameRegExp = `(.{3,4})_([0-9]*)_.*`
-
 func BuildContainerName(stage Stage, appKey uint64, appName string) string {
 	return strings.ToLower(fmt.Sprintf("%s_%d_%s", stage, appKey, appName))
+}
+
+func BuildComposeContainerName(stage Stage, appKey uint64, appName string) string {
+	return strings.ToLower(fmt.Sprintf("%s_%d_%s_compose", stage, appKey, appName))
 }
 
 func BuildImageName(stage Stage, arch string, appKey uint64, appName string) string {
@@ -71,17 +74,46 @@ func BuildDockerPushID(appKey uint64, appName string) string {
 	return fmt.Sprintf("push_%d_%s", appKey, appName)
 }
 
+func EscapeNewlineCharacters(input string) string {
+	input = strings.ReplaceAll(input, "\n", "\\n")
+	input = strings.ReplaceAll(input, "\t", "\\t")
+	input = strings.ReplaceAll(input, "\r", "\\r")
+	return input
+}
+
 func EnvironmentTemplateToStringArray(environmentsTemplateMap map[string]interface{}) []string {
 	stringArray := make([]string, 0)
 
 	for key, entry := range environmentsTemplateMap {
 		value := entry.(map[string]interface{})["defaultValue"]
 		if value != nil {
-			stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, fmt.Sprint(value)))
+			stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, EscapeNewlineCharacters(fmt.Sprint(value))))
 		}
 	}
 
 	return stringArray
+}
+
+func ListDirectories(path string) ([]string, error) {
+	folder, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer folder.Close()
+
+	subfolders, err := folder.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	var directories []string
+	for _, item := range subfolders {
+		if item.IsDir() {
+			directories = append(directories, item.Name())
+		}
+	}
+
+	return directories, nil
 }
 
 func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string {
@@ -89,14 +121,16 @@ func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []stri
 
 	for key, entry := range environmentsMap {
 		value := entry.(map[string]interface{})["value"]
-		stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, fmt.Sprint(value)))
+		stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, EscapeNewlineCharacters(fmt.Sprint(value))))
 	}
 
 	return stringArray
 }
 
+var StatusRegex = regexp.MustCompile(`\((.*?)\)`)
+
 func ParseExitCodeFromContainerStatus(status string) (int64, error) {
-	statusString := regexp.MustCompile(`\((.*?)\)`).FindString(status)
+	statusString := StatusRegex.FindString(status)
 	exitCodeString := strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
 	exitCodeInt, err := strconv.ParseInt(exitCodeString, 10, 64)
 	if err != nil {
@@ -168,6 +202,49 @@ func ParseContainerName(containerName string) (Stage, uint64, string, error) {
 
 	// also handles names like dev_6_net_data, aka 2 _'s at the end
 	name = strings.Join(containerSplit[2:], "_")
+
+	return stage, appKey, name, nil
+}
+
+func ParseComposeContainerName(containerName string) (Stage, uint64, string, error) {
+	if containerName == "" {
+		return "", 0, "", errors.New("container name is empty")
+	}
+
+	// cleanup container name
+	if string([]rune(containerName)[0]) == "/" {
+		// get index of the rune that == /
+		_, i := utf8.DecodeRuneInString(containerName)
+		// remove that rune from the string
+		containerName = containerName[i:]
+	}
+
+	var stage Stage
+	var appKey uint64
+	var name string
+
+	containerSplit := strings.Split(containerName, "_")
+	if containerSplit[3] != "compose" {
+		return "", 0, "", errors.New("invalid compose container name")
+	}
+
+	if containerSplit[0] == "dev" {
+		stage = DEV
+	} else if containerSplit[0] == "prod" {
+		stage = PROD
+	} else if containerSplit[0] == "pub" {
+		stage = DEV
+	} else {
+		stage = ""
+	}
+
+	parsedAppKey, err := strconv.ParseUint(containerSplit[1], 10, 64)
+	if err != nil {
+		return "", 0, "", err
+	}
+	appKey = parsedAppKey
+
+	name = containerSplit[2]
 
 	return stage, appKey, name, nil
 }

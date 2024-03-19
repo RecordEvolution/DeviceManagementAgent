@@ -64,6 +64,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.UpdateIPv4Configuration: ex.updateIPConfigHandler,
 		topics.SystemReboot:            ex.systemRebootHandler,
 		topics.SystemShutdown:          ex.systemShutdownHandler,
+		topics.SystemRestartAgent:      ex.systemRestartAgentHandler,
 		topics.RestartWifi:             ex.wifiRebootHandler,
 		topics.UpdateAgent:             ex.updateReagent,
 		topics.PruneImages:             ex.pruneImageHandler,

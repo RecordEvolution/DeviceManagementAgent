@@ -37,10 +37,7 @@ func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm t
 func (am *AppManager) syncPortState(payload common.TransitionPayload, app *common.App) error {
 	globalConfig := am.StateMachine.Container.GetConfig()
 
-	log.Debug().Msg("Syncing port state....")
-
 	if payload.Stage == common.DEV {
-		fmt.Println("Stage is DEV, skipping port sync...")
 		return nil
 	}
 
@@ -134,7 +131,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	locked := app.SecureTransition() // if the app is not locked, it will lock the app
 	if locked {
-		log.Warn().Msgf("App with name %s and stage %s is already transitioning", app.AppName, app.Stage)
+		log.Info().Msgf("App with name %s and stage %s is already transitioning. (CURRENT STATE: %s)", app.AppName, app.Stage, app.CurrentState)
 		return nil
 	}
 
@@ -388,7 +385,7 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 		payload := payloads[i]
 
 		// do not execute publishes on reconnect
-		if payload.RequestedState == common.PUBLISHED {
+		if payload.Stage == common.DEV || payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
 			continue
 		}
 

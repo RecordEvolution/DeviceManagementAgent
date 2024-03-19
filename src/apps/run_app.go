@@ -28,7 +28,9 @@ func (sm *StateMachine) runApp(payload common.TransitionPayload, app *common.App
 }
 
 func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common.App) error {
-	ctx := context.Background()
+	if payload.DockerCompose != nil {
+		return sm.runProdComposeApp(payload, app)
+	}
 
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {
@@ -51,7 +53,9 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	}
 
 	pollingRate := time.Second * 1
-	runningSignal, errC := sm.Container.WaitForRunning(ctx, containerID, pollingRate)
+	waitForRunningContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	runningSignal, errC := sm.Container.WaitForRunning(waitForRunningContext, containerID, pollingRate)
 
 	// block and wait for running, if exited status then return as a failed state
 	select {
@@ -87,17 +91,270 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	return nil
 }
 
+func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Starting %s...", payload.AppName))
+	if err != nil {
+		return err
+	}
+
+	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	err = upCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	waitForRunningContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	pollingRate := time.Second * 1
+	runningSignal, errC := compose.WaitForRunning(waitForRunningContext, dockerComposePath, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+	select {
+	case err = <-errC:
+		if err != nil {
+			// cleanup docker containers
+			_, _, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			_, _, cmd, cleanupErr = compose.Remove(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
+			return err
+		}
+		break
+	case <-runningSignal:
+		break
+	}
+
+	err = sm.setState(app, common.RUNNING)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Now running app %s (%s)", payload.AppName, app.Version))
+	if err != nil {
+		return err
+	}
+
+	logsChannel, err := compose.LogStream(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(logsChannel, payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	compose := sm.Container.Compose()
+
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Starting %s...", payload.AppName))
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
+	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	err = upCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	pollingRate := time.Second * 1
+	waitForRunningContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	runningSignal, errC := compose.WaitForRunning(waitForRunningContext, dockerComposePath, pollingRate)
+
+	// block and wait for running, if exited status then return as a failed state
+	select {
+	case err = <-errC:
+		if err != nil {
+			// cleanup docker containers
+			_, _, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			_, _, cmd, cleanupErr = compose.Remove(dockerComposePath)
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			cleanupErr = cmd.Wait()
+			if cleanupErr != nil {
+				return cleanupErr
+			}
+
+			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
+			return err
+		}
+		break
+	case <-runningSignal:
+		break
+	}
+
+	err = sm.setState(app, common.RUNNING)
+	if err != nil {
+		return err
+	}
+
+	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Now running app %s (%s)", payload.AppName, app.Version))
+	if err != nil {
+		return err
+	}
+
+	logsChannel, err := compose.LogStream(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(logsChannel, payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.App) error {
-	ctx := context.Background()
+	if payload.DockerCompose != nil {
+		return sm.runDevComposeApp(payload, app)
+	}
+
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
 
 	// remove old container first, if it exists
-	cont, err := sm.Container.GetContainer(ctx, payload.ContainerName.Dev)
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Dev)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return err
 		}
 	} else {
-		removeContainerErr := sm.Container.RemoveContainerByID(ctx, cont.ID, map[string]interface{}{"force": true})
+		RemoveContainerByIDContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		removeContainerErr := sm.Container.RemoveContainerByID(RemoveContainerByIDContext, cont.ID, map[string]interface{}{"force": true})
 		if removeContainerErr != nil {
 			// It's possible we're trying to remove the container when it's already being removed
 			// RUNNING -> STOPPED -> RUNNING
@@ -107,7 +364,10 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 			}
 		}
 
-		_, err = sm.Container.WaitForContainerByID(ctx, cont.ID, container.WaitConditionRemoved)
+		waitForContainerByIDContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		_, err = sm.Container.WaitForContainerByID(waitForContainerByIDContext, cont.ID, container.WaitConditionRemoved)
 		if err != nil {
 			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
 			// still useful, and will wait if it's still not removed
@@ -139,7 +399,10 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	}
 
 	pollingRate := time.Second * 1
-	runningSignal, errC := sm.Container.WaitForRunning(ctx, newContainerID, pollingRate)
+	waitForRunningContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	runningSignal, errC := sm.Container.WaitForRunning(waitForRunningContext, newContainerID, pollingRate)
 
 	// block and wait for running, if exited status then return as a failed state
 	select {
@@ -248,8 +511,6 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 }
 
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
-	ctx := context.Background()
-
 	config := sm.Container.GetConfig()
 	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app.AppKey)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
@@ -270,8 +531,12 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			Tty:          true,
 		}
 	} else {
+
 		fullImageNameWithTag := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, app.Version)
-		_, err := sm.Container.GetImage(ctx, payload.RegistryImageName.Prod, payload.PresentVersion)
+		getImageContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		_, err := sm.Container.GetImage(getImageContext, payload.RegistryImageName.Prod, payload.PresentVersion)
 		if err != nil {
 			if errdefs.IsImageNotFound(err) {
 				log.Error().Msgf("Image %s:%s was not found, pulling......", payload.RegistryImageName.Prod, payload.PresentVersion)
@@ -351,7 +616,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	}
 
 	if system.HasNvidiaGPU() {
-		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
+		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...")
 		hostConfig.Runtime = "nvidia"
 		// hostConfig.DeviceRequests = []container.DeviceRequest{
 		// 	{
@@ -370,8 +635,6 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 }
 
 func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *common.App, cConfig *container.Config, hConfig *container.HostConfig) (string, error) {
-	ctx := context.Background()
-
 	var containerID string
 	var containerName string
 
@@ -381,13 +644,17 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 		containerName = payload.ContainerName.Dev
 	}
 
-	cont, err := sm.Container.GetContainer(ctx, containerName)
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	cont, err := sm.Container.GetContainer(getContainerContext, containerName)
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return "", err
 		}
 
-		containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
+		createContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		containerID, err = sm.Container.CreateContainer(createContainerContext, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
 		if err != nil {
 			if errdefs.IsImageNotFound(err) && app.Stage == common.DEV {
 				imageNotFoundMessage := "The image " + payload.RegistryImageName.Dev + " was not found on the device, try building the app again..."
@@ -396,13 +663,17 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 			if strings.Contains(err.Error(), "nvidia") {
 				log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
 
-				sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+				removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+				defer cancel()
+				sm.Container.RemoveContainerByID(removeContainerByIdContext, containerID, map[string]interface{}{"force": true})
 
 				// remove NVIDIA host configuration
 				hConfig.Runtime = ""
 				hConfig.DeviceRequests = []container.DeviceRequest{}
 
-				containerID, err = sm.Container.CreateContainer(ctx, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
+				createContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+				defer cancel()
+				containerID, err = sm.Container.CreateContainer(createContainerContext, *cConfig, *hConfig, network.NetworkingConfig{}, containerName)
 				if err != nil {
 					return "", err
 				}
@@ -418,8 +689,6 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 }
 
 func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *common.App) (string, error) {
-	ctx := context.Background()
-
 	containerConfig, hostConfig, err := sm.computeContainerConfigs(payload, app)
 	if err != nil {
 		return "", err
@@ -430,12 +699,17 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 		return "", err
 	}
 
-	err = sm.Container.StartContainer(ctx, containerID)
+	startContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	err = sm.Container.StartContainer(startContainerContext, containerID)
 	if err != nil {
 		if strings.Contains(err.Error(), "nvidia") {
 			log.Debug().Msgf("Failed to launch container with NVIDIA Capabilities, retrying without... %s \n", err.Error())
 
-			sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+			removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
+			sm.Container.RemoveContainerByID(removeContainerByIdContext, containerID, map[string]interface{}{"force": true})
 
 			// remove nvidia device request
 			hostConfig.DeviceRequests = []container.DeviceRequest{}
@@ -445,7 +719,10 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 				return "", err
 			}
 
-			err = sm.Container.StartContainer(ctx, containerID)
+			startContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
+
+			err = sm.Container.StartContainer(startContainerContext, containerID)
 			if err != nil {
 				return "", err
 			}

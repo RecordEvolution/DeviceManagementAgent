@@ -9,7 +9,92 @@ import (
 	"reagent/errdefs"
 )
 
+func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *common.App) error {
+	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.REMOVED)
+	if err != nil {
+		return err
+	}
+	compose := sm.Container.Compose()
+
+	// TODO: make sure that folder exists so that compose can be started, make a different folder for PROD apps
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, _, cmd, err = compose.Remove(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	topicForLogStream := payload.ContainerName.Prod
+
+	config := sm.Container.GetConfig()
+
+	_, loginStderr, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(loginStderr, topicForLogStream)
+	if err != nil {
+		return err
+	}
+
+	err = loginCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(pullStderr, topicForLogStream)
+	if err != nil {
+		return err
+	}
+
+	err = pullCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	buildMessage := "Compose Image Installed successfully"
+	err = sm.LogManager.Write(topicForLogStream, buildMessage)
+	if err != nil {
+		return err
+	}
+
+	return sm.setState(app, common.PRESENT)
+}
+
 func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.App) error {
+	if payload.DockerCompose != nil {
+		return sm.pullComposeApp(payload, app)
+	}
+
 	config := sm.Container.GetConfig()
 
 	if payload.Stage == common.DEV {
@@ -33,8 +118,6 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	ctx := context.Background()
-
 	// Need to authenticate to private registry to determine proper privileges to pull the app
 	authConfig := container.AuthConfig{
 		Username: payload.RegisteryToken,
@@ -47,7 +130,7 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		PullID:     common.BuildDockerPullID(payload.AppKey, payload.AppName),
 	}
 
-	reader, err := sm.Container.Pull(ctx, fullImageNameWithVersion, pullOptions)
+	reader, err := sm.Container.Pull(context.Background(), fullImageNameWithVersion, pullOptions)
 	if err != nil {
 		errorMessage := fmt.Sprintf("Error occured while trying to pull the image: %s", err.Error())
 		sm.LogManager.Write(payload.ContainerName.Prod, errorMessage)

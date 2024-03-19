@@ -71,6 +71,8 @@ type TransitionPayload struct {
 	ContainerName        StageBasedResult
 	EnvironmentVariables map[string]interface{}
 	EnvironmentTemplate  map[string]interface{}
+	DockerCompose        map[string]interface{}
+	NewDockerCompose     map[string]interface{}
 	Ports                []interface{}
 	PublishContainerName string
 	RegisteryToken       string
@@ -120,6 +122,8 @@ type DeviceSyncResponse struct {
 	DeviceToAppKey         int                    `json:"device_to_app_key"`
 	Environment            map[string]interface{} `json:"environment"`
 	EnvironmentTemplate    map[string]interface{} `json:"environment_template"`
+	DockerCompose          map[string]interface{} `json:"docker_compose"`
+	NewDockerCompose       map[string]interface{} `json:"new_docker_compose"`
 	Ports                  []interface{}          `json:"ports"`
 	CurrentState           string                 `json:"current_state"`
 	Stage                  string                 `json:"stage"`

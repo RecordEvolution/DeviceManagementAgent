@@ -49,6 +49,7 @@ type ReswarmConfig struct {
 
 type CommandLineArguments struct {
 	AppsDirectory              string
+	AppsComposeDir             string
 	AppsBuildDir               string
 	AppsSharedDir              string
 	AgentDir                   string
@@ -77,6 +78,7 @@ type CommandLineArguments struct {
 type Config struct {
 	ReswarmConfig        *ReswarmConfig
 	CommandLineArguments *CommandLineArguments
+	StartupLogChannel    chan string
 }
 
 func New(cliArgs *CommandLineArguments, reswarmConfig *ReswarmConfig) Config {
@@ -136,6 +138,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	cliArgs := CommandLineArguments{
 		AppsDirectory:              *appsDir,
 		AppsBuildDir:               (*appsDir) + "/build",
+		AppsComposeDir:             (*appsDir) + "/compose",
 		AppsSharedDir:              (*appsDir) + "/shared",
 		DownloadDir:                (*agentDir) + "/downloads",
 		AgentDir:                   *agentDir,
@@ -169,7 +172,7 @@ func SaveReswarmConfig(path string, reswarmConfig *ReswarmConfig) error {
 		return err
 	}
 
-	return ioutil.WriteFile(path, file, 0644)
+	return ioutil.WriteFile(path, file, os.ModePerm)
 }
 
 // LoadReswarmConfig populates a ReswarmConfig struct from a given path

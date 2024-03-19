@@ -180,6 +180,7 @@ func parseProxyStatus(text string) []TunnelStatus {
 			remotePort, _ = strconv.ParseInt(remotePortStr, 10, 64)
 		}
 
+		// TODO: read full status on failed to start ports
 		proxyStatus := TunnelStatus{
 			Name:       fields[0],
 			Status:     fields[1],
@@ -189,8 +190,8 @@ func parseProxyStatus(text string) []TunnelStatus {
 			Protocol:   Protocol(strings.ToLower(currentProtocol)),
 		}
 
-		if fieldCnt == 5 {
-			proxyStatus.Error = fields[4]
+		if fieldCnt > 4 {
+			proxyStatus.Error = strings.Join(fields[4:], " ")
 		}
 
 		proxyStatusList = append(proxyStatusList, proxyStatus)
@@ -199,7 +200,35 @@ func parseProxyStatus(text string) []TunnelStatus {
 	return proxyStatusList
 }
 
+var tunnelIdRegexp = regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
+var errMessageRegexp = regexp.MustCompile(`error: (.*)`)
+var proxyNameRegex = regexp.MustCompile(`\[(\d+)-(.*)-(\d+)-(.*)\]`)
+
+func (frpTm *FrpTunnelManager) Restart() error {
+	if frpTm.clientProcess == nil || frpTm.clientProcess.Process == nil {
+		return errors.New("frp client is not running")
+	}
+
+	err := frpTm.clientProcess.Process.Kill()
+	if err != nil {
+		return err
+	}
+
+	processState, err := frpTm.clientProcess.Process.Wait()
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msgf("Tunnel client process exited with state: %+v\n", processState)
+
+	time.Sleep(time.Second * 5)
+
+	return frpTm.Start()
+}
+
 func (frpTm *FrpTunnelManager) Start() error {
+	log.Debug().Msg("Starting tunnel client")
+
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
 	frpCommand := exec.Command(frpcPath)
@@ -231,12 +260,10 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 			// Error was found
 			if strings.Contains(line, "[E]") {
-				tunnelIdRegexp := regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
 				tunnelIdMatch := tunnelIdRegexp.FindStringSubmatch(line)
 				if len(tunnelIdMatch) > 1 {
 					tunnelID := tunnelIdMatch[1]
 
-					errMessageRegexp := regexp.MustCompile(`error: (.*)`)
 					errMatch := errMessageRegexp.FindStringSubmatch(line)
 					if len(errMatch) > 1 {
 						errMessage := errMatch[1]
@@ -245,25 +272,30 @@ func (frpTm *FrpTunnelManager) Start() error {
 						if activeTunnel != nil {
 							activeTunnel.Error = errMessage
 						} else {
-							log.Error().Msgf("failed to get tunnel with ID %s\n", tunnelID)
+							log.Error().Msgf("failed to get tunnel with ID %s", tunnelID)
 						}
 						frpTm.tunnelsLock.Unlock()
 					}
 
 				}
 
-				log.Error().Msgf("frp-err: %s\n", line)
+				log.Error().Msgf("frp-err: %s", line)
 
 			} else {
 				proxyStarted := strings.Contains(line, "start proxy success")
 				proxyRemoved := strings.Contains(line, "proxy removed")
+				runAdminServerError := strings.Contains(line, "run admin server error")
+
+				if runAdminServerError {
+					log.Debug().Msgf("Tunnel process failed to setup admin server: %s, attempting to restart..", line)
+					frpTm.Restart()
+
+					return
+				}
 
 				if proxyStarted || proxyRemoved {
 					safe.Go(func() {
-						regexPattern := `\[(\d+)-(.*)-(\d+)-(.*)\]`
-
-						re := regexp.MustCompile(regexPattern)
-						matches := re.FindStringSubmatch(line)
+						matches := proxyNameRegex.FindStringSubmatch(line)
 
 						if len(matches) > 1 {
 							deviceKeyStr := matches[1]
@@ -315,7 +347,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 					})
 				}
 
-				log.Info().Msgf("frp-out: %s\n", line)
+				log.Info().Msgf("frp-out: %s", line)
 			}
 		}
 	}()
@@ -390,14 +422,18 @@ func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol)
 func (frpTm *FrpTunnelManager) Reload() error {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
-	reloadCmd := exec.Command(frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath)
-	err := reloadCmd.Start()
-	if err != nil {
-		return err
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
 
-	err = reloadCmd.Wait()
+	output, err := exec.CommandContext(ctx, frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath).CombinedOutput()
 	if err != nil {
+		// frpc service is not properly running
+		if strings.Contains(string(output), "connect: connection refused") {
+			safe.Go(func() {
+				frpTm.Restart()
+			})
+			return err
+		}
 		return err
 	}
 
@@ -484,8 +520,12 @@ func (frpTm *FrpTunnelManager) GetTunnelConfig() ([]TunnelConfig, error) {
 func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
-	out, err := exec.Command(frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
 	if err != nil {
+		log.Error().Err(err).Msg("Error while getting tunnel status")
 		return []TunnelStatus{}, nil
 	}
 
@@ -495,8 +535,12 @@ func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
 func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
-	out, err := exec.Command(frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
 	if err != nil {
+		log.Error().Err(err).Msg("Error while getting tunnel status")
 		return TunnelStatus{}, nil
 	}
 

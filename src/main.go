@@ -18,7 +18,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	profile "github.com/bygui86/multi-profile/v2"
+	_ "net/http/pprof"
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -69,11 +70,6 @@ func main() {
 			}
 		})
 
-		defer profile.CPUProfile(&profile.Config{}).Start().Stop()
-		defer profile.BlockProfile(&profile.Config{}).Start().Stop()
-		defer profile.GoroutineProfile(&profile.Config{}).Start().Stop()
-		defer profile.MutexProfile(&profile.Config{}).Start().Stop()
-		defer profile.MemProfile(&profile.Config{}).Start().Stop()
 	}
 
 	logging.SetupLogger(cliArgs)
@@ -83,8 +79,18 @@ func main() {
 	benchmark.SocketConnectionInitFromLaunch = time.Now()
 	benchmark.GreenInit = time.Now()
 
-	log.Info().Msgf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s)", runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s) \n\n", runtime.GOOS, runtime.GOARCH)
+	startupLogChannel := make(chan string)
+	safe.Go(func() {
+		for logMsg := range startupLogChannel {
+			if !cliArgs.PrettyLogging {
+				fmt.Println(logMsg)
+			} else {
+				log.Info().Msg(logMsg)
+			}
+		}
+	})
+
+	startupLogChannel <- fmt.Sprintf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s)", runtime.GOOS, runtime.GOARCH)
 
 	err = filesystem.InitDirectories(cliArgs)
 	if err != nil {
@@ -97,29 +103,28 @@ func main() {
 	}
 
 	generalConfig := config.New(cliArgs, reswarmConfig)
+	generalConfig.StartupLogChannel = startupLogChannel
 
 	agent := NewAgent(&generalConfig)
 	agent.ListenForDisconnect()
 
-	fmt.Println("Waiting for Docker Daemon to be available...")
-	log.Info().Msg("Waiting for Docker Daemon to be available...")
+	startupLogChannel <- "Waiting for Docker Daemon to be available..."
 
 	err = agent.Container.WaitForDaemon()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("error occured while waiting for daemon")
 	}
 
-	log.Info().Msg("Got reply from Docker Daemon, continuing")
-	fmt.Println("Got reply from Docker Daemon, continuing")
+	startupLogChannel <- "Got reply from Docker Daemon, continuing"
 
-	log.Info().Msg("Running onConnect handler")
-	fmt.Println("Running onConnect handler")
+	startupLogChannel <- "Running onConnect handler"
+
 	err = agent.OnConnect()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
-	log.Info().Msg("OnConnect handler finished")
-	fmt.Println("OnConnect handler finished")
+
+	startupLogChannel <- "OnConnect handler finished"
 
 	agent.InitConnectionStatusHeartbeat()
 

@@ -44,12 +44,14 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: sm.uninstallApp,
+			common.REMOVED:     sm.noActionTransitionFunc,
 		},
 		common.UNINSTALLED: {
-			common.PRESENT:   sm.pullApp,
-			common.RUNNING:   sm.runApp,
-			common.BUILT:     sm.buildApp,
-			common.PUBLISHED: sm.publishApp,
+			common.PRESENT:     sm.pullApp,
+			common.RUNNING:     sm.runApp,
+			common.BUILT:       sm.buildApp,
+			common.PUBLISHED:   sm.publishApp,
+			common.UNINSTALLED: sm.noActionTransitionFunc,
 		},
 		common.PUBLISHING: {
 			common.REMOVED: sm.cancelPush,
@@ -63,6 +65,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
+			common.STOPPED:     sm.noActionTransitionFunc,
 		},
 		common.PRESENT: {
 			common.REMOVED:     sm.removeApp,
@@ -70,6 +73,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.RUNNING:     sm.runApp,
 			common.BUILT:       sm.buildApp,
 			common.PUBLISHED:   sm.publishApp,
+			common.PRESENT:     sm.noActionTransitionFunc,
 		},
 		common.FAILED: {
 			common.REMOVED:     sm.removeApp,
@@ -106,6 +110,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHED:   sm.publishApp,
 		},
 		common.RUNNING: {
+			common.RUNNING:     sm.noActionTransitionFunc,
 			common.PRESENT:     sm.stopApp,
 			common.BUILT:       sm.stopApp,
 			common.PUBLISHED:   sm.removeAndPublishApp,

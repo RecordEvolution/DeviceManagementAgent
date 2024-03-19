@@ -45,5 +45,5 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 		prettyArgs = fmt.Sprintf("%+v", *cliArgs)
 	}
 
-	log.Debug().Msgf("REAgent CLI Arguments:\n %s", prettyArgs)
+	log.Debug().Msgf("REAgent CLI Arguments: %s", prettyArgs)
 }

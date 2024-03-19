@@ -139,7 +139,7 @@ func DownloadURL(filePath string, url string, callback func(DownloadProgress)) e
 		currentLock = DownloadLocks[filePath]
 	}
 
-	log.Debug().Msgf("Trying to acquire download lock for %s\n", filePath)
+	log.Debug().Msgf("Trying to acquire download lock for %s", filePath)
 	if !currentLock.TryAcquire(1) {
 		return errdefs.InProgress(errors.New("download already in progress"))
 	}
