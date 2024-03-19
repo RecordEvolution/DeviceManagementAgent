@@ -26,9 +26,7 @@ func (sm *StateMachine) removeApp(payload common.TransitionPayload, app *common.
 
 func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *common.App) error {
 	containerName := payload.ContainerName.Dev
-	registeryImageName := payload.RegistryImageName.Dev
 	if payload.Stage == common.PROD {
-		registeryImageName = payload.RegistryImageName.Prod
 		containerName = payload.ContainerName.Prod
 	}
 
@@ -77,12 +75,20 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	err = sm.Container.RemoveImagesByName(removeImagesByNameContext, registeryImageName+"*", options)
+	images, err := compose.ListImages(payload.DockerCompose)
 	if err != nil {
 		return err
+	}
+
+	for _, imageName := range images {
+		removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		err = sm.Container.RemoveImage(removeImagesByNameContext, imageName, options)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	err = sm.setState(app, common.REMOVED)

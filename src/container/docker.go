@@ -53,7 +53,7 @@ func NewDocker(config *config.Config) (*Docker, error) {
 		return nil, err
 	}
 
-	compose := NewCompose()
+	compose := NewCompose(config)
 	return &Docker{client: client, config: config, activeStreams: activeBuilds, compose: &compose}, nil
 }
 

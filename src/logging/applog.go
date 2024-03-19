@@ -209,7 +209,7 @@ func (lm *LogManager) emitChannelStream(logEntry *LogProccess) error {
 				containerName := logEntry.ContainerName
 				logEntry.subscriptionStateMutex.Unlock()
 
-				logs, err := lm.getNonAgentLogs(containerName)
+				logs, err := lm.getNonAgentLogsCompose(containerName)
 				if err != nil {
 					return
 				}
@@ -422,16 +422,17 @@ func (lm *LogManager) ReviveDeadLogs() error {
 
 			id := result.Arguments[0]
 
+			composeAppName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
 			var composeApp *container.ComposeListEntry
 			for _, composeEntry := range composeEntryList {
-				if composeEntry.Name == strings.ToLower(app.AppName) {
+				if composeEntry.Name == composeAppName {
 					composeApp = &composeEntry
 					break
 				}
 			}
 
 			if composeApp != nil {
-				logStream, err := compose.Logs(composeApp.ConfigFiles)
+				logStream, err := compose.LogStream(composeApp.ConfigFiles)
 				if err != nil {
 					log.Error().Err(err).Msg("Error while getting log stream")
 					continue
@@ -547,7 +548,47 @@ func (lm *LogManager) getNonAgentLogs(containerName string) ([]string, error) {
 		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
 		reader, err := lm.Container.Logs(ctx, containerName, options)
 		if err != nil {
-			log.Warn().Err(err).Msgf("No log history found for: %s\n", containerName)
+			log.Warn().Err(err).Msgf("No log history found for: %s", containerName)
+			return []string{}, nil
+		}
+
+		var containerHistory []string
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			containerHistory = append(containerHistory, scanner.Text())
+		}
+
+		err = reader.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to close reader after getting logs")
+		}
+
+		return containerHistory, nil
+	}
+
+	return []string{}, nil
+}
+
+func (lm *LogManager) getNonAgentLogsCompose(containerName string) ([]string, error) {
+	history, err := lm.getPersistedLogHistory(containerName)
+	if err != nil {
+		return nil, err
+	}
+
+	containsOnlyAgentLogs := true
+	for _, entry := range history {
+		if entry.logType == CONTAINER {
+			containsOnlyAgentLogs = false
+			break
+		}
+	}
+
+	if containsOnlyAgentLogs || len(history) == 0 {
+		compose := lm.Container.Compose()
+
+		reader, err := compose.LogsByContainerName(containerName+"_compose", 50)
+		if err != nil {
+			log.Warn().Err(err).Msgf("No log history found for: %s", containerName)
 			return []string{}, nil
 		}
 
@@ -776,7 +817,7 @@ func (lm *LogManager) SetupEndpoints() error {
 				lm.activeLogs[containerName] = &newActiveLog
 				lm.activeLogsMutex.Unlock()
 
-				log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream... %s\n", newActiveLog.ContainerName)
+				log.Debug().Msgf("Log Manager: A subscription was created without an active stream waiting for stream... %s", newActiveLog.ContainerName)
 			}
 		})
 

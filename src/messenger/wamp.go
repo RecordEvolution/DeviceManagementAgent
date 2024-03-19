@@ -50,7 +50,7 @@ func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
 }
 
 func (wl wampLogWrapper) Print(v ...interface{}) {
-	wl.logger.Print(v)
+	wl.logger.Print(v...)
 }
 
 func (wl wampLogWrapper) Println(v ...interface{}) {
@@ -58,7 +58,7 @@ func (wl wampLogWrapper) Println(v ...interface{}) {
 }
 
 func (wl wampLogWrapper) Printf(format string, v ...interface{}) {
-	wl.logger.Printf(format, v)
+	wl.logger.Printf(format, v...)
 }
 
 func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {

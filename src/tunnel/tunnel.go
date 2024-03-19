@@ -272,14 +272,14 @@ func (frpTm *FrpTunnelManager) Start() error {
 						if activeTunnel != nil {
 							activeTunnel.Error = errMessage
 						} else {
-							log.Error().Msgf("failed to get tunnel with ID %s\n", tunnelID)
+							log.Error().Msgf("failed to get tunnel with ID %s", tunnelID)
 						}
 						frpTm.tunnelsLock.Unlock()
 					}
 
 				}
 
-				log.Error().Msgf("frp-err: %s\n", line)
+				log.Error().Msgf("frp-err: %s", line)
 
 			} else {
 				proxyStarted := strings.Contains(line, "start proxy success")
@@ -287,7 +287,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 				runAdminServerError := strings.Contains(line, "run admin server error")
 
 				if runAdminServerError {
-					log.Debug().Msg("Tunnel process failed to setup admin server, attempting to restart..")
+					log.Debug().Msgf("Tunnel process failed to setup admin server: %s, attempting to restart..", line)
 					frpTm.Restart()
 
 					return
@@ -347,7 +347,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 					})
 				}
 
-				log.Info().Msgf("frp-out: %s\n", line)
+				log.Info().Msgf("frp-out: %s", line)
 			}
 		}
 	}()

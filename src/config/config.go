@@ -78,6 +78,7 @@ type CommandLineArguments struct {
 type Config struct {
 	ReswarmConfig        *ReswarmConfig
 	CommandLineArguments *CommandLineArguments
+	StartupLogChannel    chan string
 }
 
 func New(cliArgs *CommandLineArguments, reswarmConfig *ReswarmConfig) Config {

@@ -100,6 +100,8 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		dockerCompose = payload.NewDockerCompose
 	}
 
+	dockerCompose["name"] = common.BuildComposeContainerName(payload.Stage, app.AppKey, app.AppName)
+
 	services, ok := (dockerCompose["services"]).(map[string]interface{})
 	if !ok {
 		return "", errors.New("failed to infer services")

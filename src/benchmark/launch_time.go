@@ -5,8 +5,6 @@ import (
 	"reagent/config"
 	"reagent/safe"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 var PreConnectInit time.Time
@@ -55,27 +53,15 @@ func LogResults(config *config.Config) {
 	onConnectAfterSocketCompletionTimestamp := fmt.Sprintf("Time until Onconnect handler finished (from socket connection): %s", TimeTillOnConnectAfterConnection)
 	greenTimestamp := fmt.Sprintf("Time until 'green': %s", TimeTillGreen)
 
-	if !config.CommandLineArguments.PrettyLogging {
-		// print to stdout
-		fmt.Println("Benchmarks:")
-		fmt.Println("----------------------------------")
-		fmt.Println(initCompletionTimestamp)
-		fmt.Println()
-		fmt.Println(connectionCompletionTimestamp)
-		fmt.Println(connectionCompletionFromLaunchTimestamp)
-		fmt.Println()
-		fmt.Println(onConnectCompletionTimestamp)
-		fmt.Println(onConnectAfterSocketCompletionTimestamp)
-		fmt.Println()
-		fmt.Println(greenTimestamp)
-		fmt.Println("----------------------------------")
-	}
+	config.StartupLogChannel <- "Benchmarks:"
+	config.StartupLogChannel <- "----------------------------------"
+	config.StartupLogChannel <- initCompletionTimestamp
+	config.StartupLogChannel <- connectionCompletionTimestamp
+	config.StartupLogChannel <- connectionCompletionFromLaunchTimestamp
+	config.StartupLogChannel <- onConnectCompletionTimestamp
+	config.StartupLogChannel <- onConnectAfterSocketCompletionTimestamp
+	config.StartupLogChannel <- greenTimestamp
+	config.StartupLogChannel <- "----------------------------------"
 
-	// log to file
-	log.Info().Msg(initCompletionTimestamp)
-	log.Info().Msg(connectionCompletionTimestamp)
-	log.Info().Msg(connectionCompletionFromLaunchTimestamp)
-	log.Info().Msg(onConnectCompletionTimestamp)
-	log.Info().Msg(onConnectAfterSocketCompletionTimestamp)
-	log.Info().Msg(greenTimestamp)
+	close(config.StartupLogChannel)
 }

@@ -104,6 +104,11 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
 	_, _, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
@@ -125,11 +130,6 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	}
 
 	err = sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("Starting %s...", payload.AppName))
-	if err != nil {
-		return err
-	}
-
-	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	logsChannel, err := compose.Logs(dockerComposePath)
+	logsChannel, err := compose.LogStream(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -220,6 +220,11 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	compose := sm.Container.Compose()
 
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
 	}
@@ -318,7 +323,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	logsChannel, err := compose.Logs(dockerComposePath)
+	logsChannel, err := compose.LogStream(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -611,7 +616,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	}
 
 	if system.HasNvidiaGPU() {
-		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...\n")
+		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...")
 		hostConfig.Runtime = "nvidia"
 		// hostConfig.DeviceRequests = []container.DeviceRequest{
 		// 	{

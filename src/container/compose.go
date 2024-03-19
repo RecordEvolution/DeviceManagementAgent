@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"reagent/common"
+	"reagent/config"
 	"reagent/safe"
 	"strings"
 	"sync"
@@ -14,6 +18,7 @@ import (
 )
 
 type Compose struct {
+	config                *config.Config
 	logStreamMap          map[string]*ComposeLog
 	composeProcessesMap   map[string]*exec.Cmd
 	composeProcessesMutex sync.Mutex
@@ -68,13 +73,36 @@ type Service struct {
 	Environment []string `json:"environment"`
 }
 
-func NewCompose() Compose {
+func NewCompose(config *config.Config) Compose {
 	return Compose{
+		config:                config,
 		logStreamMap:          make(map[string]*ComposeLog),
 		composeProcessesMap:   make(map[string]*exec.Cmd),
 		composeProcessesMutex: sync.Mutex{},
 		logStreamMapMutex:     sync.Mutex{},
 	}
+}
+
+func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, error) {
+	services, ok := (dockerCompose["services"]).(map[string]interface{})
+	if !ok {
+		return nil, errors.New("failed to infer services")
+	}
+
+	images := make([]string, 0)
+	for _, serviceInterface := range services {
+		service, ok := (serviceInterface).(map[string]interface{})
+		if !ok {
+			return nil, errors.New("failed to infer service")
+		}
+
+		if service["image"] != nil {
+			imageName := fmt.Sprint(service["image"])
+			images = append(images, imageName)
+		}
+	}
+
+	return images, nil
 }
 
 func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, chan string, *exec.Cmd, error) {
@@ -270,7 +298,47 @@ func (c *Compose) Remove(dockerComposePath string) (chan string, chan string, *e
 	return c.composeCommand(dockerComposePath, "rm", "-f")
 }
 
-func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
+func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {
+	composeListEntry, err := c.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var foundComposeEntry *ComposeListEntry
+	for _, composeEntry := range composeListEntry {
+		if composeEntry.Name == containerName {
+			foundComposeEntry = &composeEntry
+		}
+	}
+
+	if foundComposeEntry == nil {
+		return nil, errors.New("compose entry not found")
+	}
+
+	output, err := exec.Command("docker", "compose", "-f", foundComposeEntry.ConfigFiles, "logs", "--tail", fmt.Sprint(tail)).CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	reader := strings.NewReader(string(output))
+	readCloser := io.NopCloser(reader)
+
+	return readCloser, nil
+}
+
+func (c *Compose) Logs(dockerComposePath string, tail uint64) (io.ReadCloser, error) {
+	output, err := exec.Command("docker", "compose", "-f", dockerComposePath, "logs", "--tail", fmt.Sprint(tail)).CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+
+	reader := strings.NewReader(string(output))
+	readCloser := io.NopCloser(reader)
+
+	return readCloser, nil
+}
+
+func (c *Compose) LogStream(dockerComposePath string) (chan string, error) {
 	// c.logStreamMapMutex.Lock()
 	// existingComposeLog := c.logStreamMap[dockerComposePath]
 
@@ -320,7 +388,7 @@ func (c *Compose) Logs(dockerComposePath string) (chan string, error) {
 func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq -s", dockerComposePath)
 	cmd := exec.Command("bash", "-c", statusCommand)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
@@ -340,20 +408,15 @@ type ComposeListEntry struct {
 	ConfigFiles string `json:"ConfigFiles"`
 }
 
-func (c *Compose) GetComposeAppEntry(appName string) (*ComposeListEntry, error) {
-	composeList, err := c.List()
-	if err != nil {
-		return &ComposeListEntry{}, err
+func (c *Compose) HasComposeDir(appName string, stage common.Stage) bool {
+	composeDir := c.config.CommandLineArguments.AppsComposeDir + "/" + appName
+	if stage == common.DEV {
+		composeDir = c.config.CommandLineArguments.AppsBuildDir + "/" + appName
 	}
 
-	var entry ComposeListEntry
-	for _, composeEntry := range composeList {
-		if composeEntry.Name == strings.ToLower(appName) {
-			entry = composeEntry
-		}
-	}
+	_, err := os.Stat(composeDir)
 
-	return &entry, nil
+	return err == nil
 }
 
 func (c *Compose) List() ([]ComposeListEntry, error) {

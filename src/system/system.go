@@ -193,7 +193,7 @@ func getOSUpdateTags() (string, string, error) {
 	updateURLSplit := strings.Split(updateURL, "/")
 	updateFile := updateURLSplit[len(updateURLSplit)-1]
 
-	log.Debug().Msgf("getOSUpdateTags(): %s : %s : %s\n", updateInfo, updateURL, updateFile)
+	log.Debug().Msgf("getOSUpdateTags(): %s : %s : %s", updateInfo, updateURL, updateFile)
 
 	return updateURL, updateFile, nil
 }
@@ -237,7 +237,7 @@ func InstallOSUpdate(progressCallback func(operationName string, progressPercent
 
 	err = raucInstallBundle(bundleFile, progressCallback)
 	if err != nil {
-		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle\n")
+		log.Error().Err(err).Msgf("Failed to install ReswarmOS update bundle")
 	}
 
 	return nil
@@ -352,7 +352,7 @@ func (system *System) updateFrpIfRequired(progressCallback func(filesystem.Downl
 		return UpdateResult{
 			CurrentVersion: currentVersion,
 			LatestVersion:  latestVersion,
-			Message:        fmt.Sprintf("%+v\n", errorsArr),
+			Message:        fmt.Sprintf("%+v", errorsArr),
 			DidUpdate:      false,
 		}, nil
 	}
@@ -532,7 +532,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 
 	updateTime := time.Since(startUpdate)
 
-	log.Debug().Msgf("Time it took to update system: %s\n", updateTime)
+	log.Debug().Msgf("Time it took to update system: %s", updateTime)
 
 	return UpdateResult{
 		DidAgentUpdate:  didAgentUpdate,
@@ -561,7 +561,7 @@ func (system *System) updateAgentIfRequired(progressCallback func(filesystem.Dow
 		return UpdateResult{
 			CurrentVersion: currentVersion,
 			LatestVersion:  latestVersion,
-			Message:        fmt.Sprintf("%+v\n", errorsArr),
+			Message:        fmt.Sprintf("%+v", errorsArr),
 			DidUpdate:      false,
 		}, nil
 	}
