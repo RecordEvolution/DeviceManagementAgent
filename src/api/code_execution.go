@@ -99,11 +99,13 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 
 func (ex *External) initDeviceTerm(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
 	var err error
-	pseudoTerminal := terminal.GetPseudoTerminal()
+
+	callerID := fmt.Sprint(response.Details["caller_authid"])
+	pseudoTerminal := terminal.GetPseudoTerminal(callerID)
 
 	if pseudoTerminal == nil {
 
-		pseudoTerminal, err = terminal.NewPseudoTerminal()
+		pseudoTerminal, err = terminal.NewPseudoTerminal(callerID)
 		if err != nil {
 			return nil, err
 		}

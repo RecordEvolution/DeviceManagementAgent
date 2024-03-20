@@ -24,6 +24,7 @@ type TerminalSize struct {
 }
 
 type PseudoTerminal struct {
+	Id          string
 	ptyFile     *os.File
 	Input       chan string
 	Output      chan string
@@ -36,10 +37,10 @@ type PseudoTerminal struct {
 	SessionID   string
 }
 
-var pseudoTerminal *PseudoTerminal
+var pseudoTerminals = make(map[string]*PseudoTerminal)
 
-func GetPseudoTerminal() *PseudoTerminal {
-	return pseudoTerminal
+func GetPseudoTerminal(id string) *PseudoTerminal {
+	return pseudoTerminals[id]
 }
 
 func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messenger) common.Dict {
@@ -57,7 +58,7 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 			return errors.New("failed to parse args")
 		}
 
-		pseudoTerminal.Input <- data
+		pT.Input <- data
 
 		return nil
 	}, nil)
@@ -82,13 +83,13 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 			return nil, errors.New("failed to parse width")
 		}
 
-		pseudoTerminal.Resize <- TerminalSize{Cols: uint16(width), Rows: uint16(height)}
+		pT.Resize <- TerminalSize{Cols: uint16(width), Rows: uint16(height)}
 
 		return &messenger.InvokeResult{}, nil
 	}, nil)
 
 	safe.Go(func() {
-		for output := range pseudoTerminal.Output {
+		for output := range pT.Output {
 
 			options := common.Dict{"acknowledge": true}
 			err := session.Publish(topics.Topic(dataTopic), []interface{}{output}, nil, options)
@@ -102,7 +103,7 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 	safe.Go(func() {
 		<-pT.Cleanup
 
-		pseudoTerminal.Output <- "TERMINAL_EOF"
+		pT.Output <- "TERMINAL_EOF"
 
 		session.Unsubscribe(topics.Topic(writeTopic))
 		session.Unregister(topics.Topic(resizeTopic))
@@ -114,7 +115,7 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 		close(pT.Cleanup)
 
 		sessionID := pT.SessionID
-		pseudoTerminal = nil
+		pseudoTerminals[pT.Id] = nil
 
 		log.Debug().Msgf("Cleaned up the pty with ID %s", sessionID)
 	})
@@ -132,7 +133,7 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 	}
 }
 
-func NewPseudoTerminal() (*PseudoTerminal, error) {
+func NewPseudoTerminal(id string) (*PseudoTerminal, error) {
 	outputChan := make(chan string)
 	inputChan := make(chan string)
 	errChan := make(chan error)
@@ -140,6 +141,9 @@ func NewPseudoTerminal() (*PseudoTerminal, error) {
 	cleanupChan := make(chan struct{})
 
 	c := exec.Command("bash")
+	c.Env = append(c.Env, os.Getenv("PATH"))
+	c.Env = append(c.Env, "TERM=xterm")
+
 	ptmx, err := pty.Start(c)
 	if err != nil {
 		return nil, err
@@ -175,7 +179,7 @@ func NewPseudoTerminal() (*PseudoTerminal, error) {
 		}
 	})
 
-	pseudoTerminal = &PseudoTerminal{ptyFile: ptmx, Input: inputChan, Cleanup: cleanupChan, Output: outputChan, Error: errChan, Resize: resizeChan}
+	pseudoTerminals[id] = &PseudoTerminal{Id: id, ptyFile: ptmx, Input: inputChan, Cleanup: cleanupChan, Output: outputChan, Error: errChan, Resize: resizeChan}
 
-	return pseudoTerminal, nil
+	return pseudoTerminals[id], nil
 }
