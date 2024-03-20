@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reagent/common"
 	"reagent/config"
@@ -231,7 +233,8 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
-	frpCommand := exec.Command(frpcPath)
+	ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
+	frpCommand := exec.CommandContext(ctx, frpcPath)
 	frpCommand.Dir = filepath.Dir(frpcPath)
 
 	frpTm.clientProcess = frpCommand
@@ -248,6 +251,8 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 	ackChan := make(chan bool)
 	go func() {
+		defer cancelNotifyContext()
+
 		scanner := bufio.NewScanner(stdout)
 		debounced := debounce.New(100 * time.Millisecond)
 
