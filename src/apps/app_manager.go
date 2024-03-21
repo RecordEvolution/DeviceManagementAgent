@@ -7,6 +7,7 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
+	"runtime"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -38,6 +39,11 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	globalConfig := am.StateMachine.Container.GetConfig()
 
 	if payload.Stage == common.DEV {
+		return nil
+	}
+
+	if runtime.GOOS == "windows" {
+		log.Warn().Msg("Tunneling feature is not supported on Windows")
 		return nil
 	}
 

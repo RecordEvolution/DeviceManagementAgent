@@ -445,22 +445,24 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	didTunnelUpdate := false
 	didAgentUpdate := false
 
-	wg.Add(1)
-	safe.Go(func() {
+	if runtime.GOOS != "windows" {
+		wg.Add(1)
+		safe.Go(func() {
 
-		defer wg.Done()
+			defer wg.Done()
 
-		updateResult, err := system.updateFrpIfRequired(progressFunction)
-		if err != nil {
-			log.Error().Stack().Err(err).Msgf("Failed to update frpc.. continuing...")
-		}
+			updateResult, err := system.updateFrpIfRequired(progressFunction)
+			if err != nil {
+				log.Error().Stack().Err(err).Msgf("Failed to update frpc.. continuing...")
+			}
 
-		if !updateResult.DidUpdate {
-			log.Debug().Msgf("Not downloading frpc because: %s", updateResult.Message)
-		}
+			if !updateResult.DidUpdate {
+				log.Debug().Msgf("Not downloading frpc because: %s", updateResult.Message)
+			}
 
-		didTunnelUpdate = updateResult.DidUpdate
-	})
+			didTunnelUpdate = updateResult.DidUpdate
+		})
+	}
 
 	if updateAgent {
 		wg.Add(1)

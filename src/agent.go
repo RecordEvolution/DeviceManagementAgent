@@ -54,14 +54,18 @@ func (agent *Agent) OnConnect() error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
-	err = agent.System.DownloadFrpIfNotExists()
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
-	}
+	// Due to an issue with frp, the client is falsely flagged as a virus in Windows
+	// To work around this for now, we do not support tunnels in Windows
+	if runtime.GOOS != "windows" {
+		err = agent.System.DownloadFrpIfNotExists()
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
+		}
 
-	err = agent.TunnelManager.Start()
-	if err != nil {
-		log.Error().Err(err).Msgf("Failed to start tunnel manager")
+		err = agent.TunnelManager.Start()
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to start tunnel manager")
+		}
 	}
 
 	wg.Add(1)
@@ -84,7 +88,7 @@ func (agent *Agent) OnConnect() error {
 		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
 
-	// first call this in case we don't have any app state yet, then we can start containers accordingly
+	// First call this in case we don't have any app state yet, then we can start containers accordingly
 	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to sync")
