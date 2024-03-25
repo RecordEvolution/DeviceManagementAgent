@@ -10,21 +10,33 @@ import (
 )
 
 func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *common.App) error {
-	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
+	topicForLogStream := payload.ContainerName.Prod
+
+	err := sm.LogManager.ClearLogHistory(topicForLogStream)
 	if err != nil {
 		return err
 	}
 
-	err = sm.setState(app, common.REMOVED)
+	err = sm.setState(app, common.DOWNLOADING)
 	if err != nil {
 		return err
 	}
+
 	compose := sm.Container.Compose()
 
 	// TODO: make sure that folder exists so that compose can be started, make a different folder for PROD apps
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
+	}
+
+	if !compose.Supported {
+		message := "Docker Compose is not supported for this device"
+		writeErr := sm.LogManager.Write(topicForLogStream, message)
+		if writeErr != nil {
+			return writeErr
+		}
+		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
 	}
 
 	_, _, cmd, err := compose.Stop(dockerComposePath)
@@ -46,8 +58,6 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 	if err != nil {
 		return err
 	}
-
-	topicForLogStream := payload.ContainerName.Prod
 
 	config := sm.Container.GetConfig()
 

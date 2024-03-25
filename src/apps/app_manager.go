@@ -173,6 +173,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 		if errdefs.IsNoActionTransition(err) {
 			log.Debug().Msg("A no action transition was executed, nothing to do. Will also not verify")
+
+			// Ensure the remote state == current state
+			err := am.StateObserver.Notify(app, app.CurrentState)
+			if err != nil {
+				log.Error().Err(err).Msgf("failed to ensure remote state")
+				return err
+			}
+
 			return nil
 		}
 

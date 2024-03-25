@@ -15,9 +15,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type Compose struct {
+	Supported             bool
 	config                *config.Config
 	logStreamMap          map[string]*ComposeLog
 	composeProcessesMap   map[string]*exec.Cmd
@@ -74,7 +77,10 @@ type Service struct {
 }
 
 func NewCompose(config *config.Config) Compose {
+	supported := IsComposeSupported()
+
 	return Compose{
+		Supported:             supported,
 		config:                config,
 		logStreamMap:          make(map[string]*ComposeLog),
 		composeProcessesMap:   make(map[string]*exec.Cmd),
@@ -290,6 +296,16 @@ func (c *Compose) IsRunning(dockerComposePath string) (bool, error) {
 	return allRunning, nil
 }
 
+func IsComposeSupported() bool {
+	cmd := exec.Command("docker", "compose")
+	_, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
 func (c *Compose) Stop(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "stop")
 }
@@ -386,6 +402,11 @@ func (c *Compose) LogStream(dockerComposePath string) (chan string, error) {
 }
 
 func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
+	if !c.Supported {
+		log.Error().Err(errors.New("compose is not supported for this device")).Msg("Error while calling status")
+		return []ComposeStatus{}, nil
+	}
+
 	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq -s", dockerComposePath)
 	cmd := exec.Command("bash", "-c", statusCommand)
 	output, err := cmd.Output()
@@ -420,6 +441,11 @@ func (c *Compose) HasComposeDir(appName string, stage common.Stage) bool {
 }
 
 func (c *Compose) List() ([]ComposeListEntry, error) {
+	if !c.Supported {
+		log.Error().Err(errors.New("compose is not supported for this device")).Msg("Error while calling list")
+		return []ComposeListEntry{}, nil
+	}
+
 	cmd := exec.Command("docker", "compose", "ls", "-a", "--format", "json")
 	cmd.Stderr = cmd.Stdout
 

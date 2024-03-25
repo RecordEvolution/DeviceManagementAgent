@@ -45,6 +45,11 @@ func IsDockerStreamCanceled(err error) bool {
 	return ok
 }
 
+func IsDockerComposeNotSupported(err error) bool {
+	_, ok := err.(ErrDockerComposeNotSupported)
+	return ok
+}
+
 func IsNoActionTransition(err error) bool {
 	_, ok := err.(ErrNoActionTransition)
 	return ok

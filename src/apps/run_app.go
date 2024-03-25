@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reagent/common"
@@ -218,6 +219,15 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	}
 
 	compose := sm.Container.Compose()
+	if !compose.Supported {
+		message := "Docker Compose is not supported for this device"
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, message)
+		if writeErr != nil {
+			return writeErr
+		}
+
+		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
+	}
 
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {

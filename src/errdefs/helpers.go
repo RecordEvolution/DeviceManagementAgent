@@ -278,3 +278,25 @@ func (e ErrInProgress) Unwrap() error {
 func InProgress(err error) error {
 	return ErrInProgress{err}
 }
+
+/*-----------*/
+
+type ErrDockerComposeNotSupported struct {
+	error
+}
+
+func (e ErrDockerComposeNotSupported) Cause() error {
+	return e.error
+}
+
+func (e ErrDockerComposeNotSupported) Unwrap() error {
+	return e.error
+}
+
+func DockerComposeNotSupported(err error) error {
+	if err == nil || IsDockerComposeNotSupported(err) {
+		return err
+	}
+
+	return ErrDockerComposeNotSupported{err}
+}

@@ -193,12 +193,21 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
+	compose := sm.Container.Compose()
+	if !compose.Supported {
+		message := "Docker Compose is not supported for this device"
+		writeErr := sm.LogManager.Write(topicForLogStream, message)
+		if writeErr != nil {
+			return writeErr
+		}
+		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
+	}
+
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
 	}
 
-	compose := sm.Container.Compose()
 	_, buildStderr, buildCmd, err := compose.Build(dockerComposePath)
 	if err != nil {
 		return err
