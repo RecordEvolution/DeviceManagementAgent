@@ -293,6 +293,9 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 				if runAdminServerError {
 					log.Debug().Msgf("Tunnel process failed to setup admin server: %s, attempting to restart..", line)
+
+					// Reset the webserver port in case the port is in use
+					frpTm.configBuilder.SetAdminPort()
 					frpTm.Restart()
 
 					return

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"reagent/config"
 	"reagent/messenger/topics"
@@ -138,6 +139,30 @@ func ParseExitCodeFromContainerStatus(status string) (int64, error) {
 	}
 
 	return exitCodeInt, nil
+}
+
+func GetRandomFreePort() (port int, err error) {
+	var a *net.TCPAddr
+	if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
+		var l *net.TCPListener
+		if l, err = net.ListenTCP("tcp", a); err == nil {
+			defer l.Close()
+			return l.Addr().(*net.TCPAddr).Port, nil
+		}
+	}
+	return
+}
+
+func GetFreePortFromStart(startPort int) (int, error) {
+	for port := startPort; port <= 65535; port++ {
+		addr := fmt.Sprintf(":%d", port)
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			defer listener.Close()
+			return listener.Addr().(*net.TCPAddr).Port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port available")
 }
 
 // Ordinal gives you the input number in a rank/ordinal format.

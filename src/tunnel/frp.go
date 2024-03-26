@@ -81,7 +81,7 @@ func initialize(config *config.Config) TunnelConfigBuilder {
 	configBuilder.SetCommonVariable(SERVER_PORT, "7000")
 	configBuilder.SetCommonVariable(ENALBE_TLS, "true")
 	configBuilder.SetCommonVariable(ADMIN_ADDRESS, "127.0.0.1")
-	configBuilder.SetCommonVariable(ADMIN_PORT, "7400")
+	configBuilder.SetAdminPort()
 
 	configBuilder.SaveConfig()
 
@@ -178,6 +178,18 @@ func (builder *TunnelConfigBuilder) RemoveTunnelVariable(tunnelID string) {
 
 func (builder *TunnelConfigBuilder) Reset() {
 	initialize(builder.config)
+}
+
+func (builder *TunnelConfigBuilder) SetAdminPort() {
+	port := 7400
+	randomPort, err := common.GetFreePortFromStart(30000)
+	if err == nil {
+		port = randomPort
+	}
+
+	log.Debug().Msgf("Using port %d for Frp webserver", port)
+
+	builder.SetCommonVariable(ADMIN_PORT, fmt.Sprint(port))
 }
 
 func (builder *TunnelConfigBuilder) SetCommonVariable(key FrpcVariable, value string) {
