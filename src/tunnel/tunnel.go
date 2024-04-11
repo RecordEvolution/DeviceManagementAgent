@@ -142,64 +142,64 @@ type TunnelStatus struct {
 	Protocol   Protocol `json:"protocol"`
 }
 
-type TunnelState struct {
-	Status  *TunnelStatus `json:"status"`
-	AppName string        `json:"app_name"`
-	Port    uint64        `json:"port"`
-	Active  bool          `json:"active"`
-	URL     string        `json:"url"`
+type FrpStatus struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Status     string `json:"status"`
+	Err        string `json:"err"`
+	LocalAddr  string `json:"local_addr"`
+	Plugin     string `json:"plugin"`
+	RemoteAddr string `json:"remote_addr"`
 }
 
-func parseProxyStatus(text string) []TunnelStatus {
-	lines := strings.Split(text, "\n")
-	lines = lines[1:]
-	var proxyStatusList []TunnelStatus
+type TunnelState struct {
+	Status       *TunnelStatus `json:"status"`
+	AppName      string        `json:"app_name"`
+	Port         uint64        `json:"port"`
+	Active       bool          `json:"active"`
+	Error        bool          `json:"error"`
+	ErrorMessage string        `json:"error_message"`
+	URL          string        `json:"url"`
+}
 
-	var currentProtocol string
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
+func parseProxyStatus(text string) ([]TunnelStatus, error) {
 
-		if line == "TCP" || line == "HTTP" || line == "HTTPS" || line == "UDP" {
-			currentProtocol = line
-			i++
-			continue
-		}
+	frpStatuses := make([]TunnelStatus, 0)
 
-		fields := strings.Fields(line)
-		fieldCnt := len(fields)
-		if fieldCnt < 4 {
-			continue
-		}
-
-		remoteAddr := fields[3]
-		remoteAddrSplit := strings.Split(remoteAddr, ":")
-
-		var remotePortStr string
-		var remotePort int64
-
-		if len(remoteAddrSplit) == 2 {
-			remotePortStr = remoteAddrSplit[1]
-			remotePort, _ = strconv.ParseInt(remotePortStr, 10, 64)
-		}
-
-		// TODO: read full status on failed to start ports
-		proxyStatus := TunnelStatus{
-			Name:       fields[0],
-			Status:     fields[1],
-			LocalAddr:  fields[2],
-			RemoteAddr: fields[3],
-			RemotePort: uint64(remotePort),
-			Protocol:   Protocol(strings.ToLower(currentProtocol)),
-		}
-
-		if fieldCnt > 4 {
-			proxyStatus.Error = strings.Join(fields[4:], " ")
-		}
-
-		proxyStatusList = append(proxyStatusList, proxyStatus)
+	frpStatusMap := make(map[string][]FrpStatus)
+	err := json.Unmarshal([]byte(text), &frpStatusMap)
+	if err != nil {
+		return nil, err
 	}
 
-	return proxyStatusList
+	for _, statusArray := range frpStatusMap {
+		for _, frpStatus := range statusArray {
+
+			tunnelStatus := TunnelStatus{
+				Status:     frpStatus.Status,
+				Name:       frpStatus.Name,
+				LocalAddr:  frpStatus.LocalAddr,
+				Plugin:     frpStatus.Plugin,
+				RemoteAddr: frpStatus.RemoteAddr,
+				Error:      frpStatus.Err,
+				Protocol:   Protocol(frpStatus.Type),
+			}
+
+			if frpStatus.RemoteAddr != "" {
+				remotePortStr := strings.Split(frpStatus.RemoteAddr, ":")[1]
+				remotePort, err := strconv.ParseInt(remotePortStr, 10, 64)
+				if err != nil {
+					return nil, err
+				}
+
+				tunnelStatus.RemotePort = uint64(remotePort)
+			}
+
+			frpStatuses = append(frpStatuses, tunnelStatus)
+		}
+	}
+
+	return frpStatuses, nil
 }
 
 var tunnelIdRegexp = regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
@@ -491,11 +491,13 @@ func (frpTm *FrpTunnelManager) GetState() ([]TunnelState, error) {
 			}
 
 			tunnelState := TunnelState{
-				Status:  &tunnelStatus,
-				Port:    tunnelConfig.LocalPort,
-				AppName: tunnelConfig.AppName,
-				Active:  tunnelStatus.Status == "running",
-				URL:     frpTm.buildURL(tunnelConfig.Protocol, tunnelConfig.Subdomain, tunnelStatus.RemotePort),
+				Status:       &tunnelStatus,
+				Port:         tunnelConfig.LocalPort,
+				AppName:      tunnelConfig.AppName,
+				Error:        tunnelStatus.Error != "",
+				ErrorMessage: tunnelStatus.Error,
+				Active:       tunnelStatus.Status == "running",
+				URL:          frpTm.buildURL(tunnelConfig.Protocol, tunnelConfig.Subdomain, tunnelStatus.RemotePort),
 			}
 
 			tunnelStates = append(tunnelStates, tunnelState)
@@ -531,13 +533,13 @@ func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
+	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath, "--json").Output()
 	if err != nil {
 		log.Error().Err(err).Msg("Error while getting tunnel status")
 		return []TunnelStatus{}, nil
 	}
 
-	return parseProxyStatus(string(out)), nil
+	return parseProxyStatus(string(out))
 }
 
 func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
@@ -552,7 +554,11 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 		return TunnelStatus{}, nil
 	}
 
-	tunnelStatuses := parseProxyStatus(string(out))
+	tunnelStatuses, err := parseProxyStatus(string(out))
+	if err != nil {
+		return TunnelStatus{}, err
+	}
+
 	for _, tunnelStatus := range tunnelStatuses {
 		if tunnelStatus.Name == tunnelID {
 			return tunnelStatus, nil
