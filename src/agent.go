@@ -46,7 +46,7 @@ type Agent struct {
 	StateMachine    *apps.StateMachine
 }
 
-func (agent *Agent) OnConnect() error {
+func (agent *Agent) OnConnect(reconnect bool) error {
 	var wg sync.WaitGroup
 
 	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
@@ -56,7 +56,7 @@ func (agent *Agent) OnConnect() error {
 
 	// Due to an issue with frp, the client is falsely flagged as a virus in Windows
 	// To work around this for now, we do not support tunnels in Windows
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && !reconnect {
 		err = agent.System.DownloadFrpIfNotExists()
 		if err != nil {
 			log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
@@ -321,7 +321,7 @@ func (agent *Agent) ListenForDisconnect() {
 				if agent.Messenger.Connected() {
 					safe.Go(func() {
 						log.Debug().Msg("Reconnect: was able to reconnect, running setup again")
-						err := agent.OnConnect()
+						err := agent.OnConnect(true)
 						if err != nil {
 							log.Fatal().Stack().Err(err).Msg("failed to run on connect handler")
 						}

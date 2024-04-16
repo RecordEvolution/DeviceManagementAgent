@@ -119,7 +119,7 @@ func main() {
 
 	startupLogChannel <- "Running onConnect handler"
 
-	err = agent.OnConnect()
+	err = agent.OnConnect(false)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
