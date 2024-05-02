@@ -197,7 +197,7 @@ func (sm *StateMachine) InitTransition(app *common.App, payload common.Transitio
 	app.StateLock.Unlock()
 
 	var transitionFunc TransitionFunc
-	if payload.RequestUpdate && payload.NewestVersion != app.Version {
+	if payload.RequestUpdate && payload.NewestVersion != app.Version && payload.RequestedState != common.UNINSTALLED {
 		transitionFunc = sm.getUpdateTransition(payload, app)
 	} else {
 		transitionFunc = sm.getTransitionFunc(curAppState, payload.RequestedState)
