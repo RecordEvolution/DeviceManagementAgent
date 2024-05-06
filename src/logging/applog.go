@@ -719,12 +719,6 @@ func (lm *LogManager) StreamLogsChannel(channel chan string, containerName strin
 		return nil, err
 	}
 
-	for _, log := range lm.activeLogs {
-		if log.ContainerName == containerName {
-			fmt.Println("ACTIVE LOG FOUND BEFORE", log)
-		}
-	}
-
 	logProcess := LogProccess{
 		ContainerName: containerName,
 		logHistory:    make([]*LogEntry, 0),
@@ -1036,7 +1030,10 @@ func (lm *LogManager) Write(containerName string, text string) error {
 	lm.activeLogsMutex.Lock()
 	activeLog := lm.activeLogs[containerName]
 
+	fmt.Println(activeLog)
 	if activeLog != nil {
+		fmt.Println(activeLog.logHistory)
+
 		activeLog.subscriptionStateMutex.Lock()
 
 		activeLog.appendLog(LogEntry{
