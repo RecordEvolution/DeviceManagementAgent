@@ -114,12 +114,12 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 
 	config := sm.Container.GetConfig()
 
-	_, loginStderr, pullCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	loginOutput, pullCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(loginStderr, payload.PublishContainerName)
+	_, err = sm.LogManager.StreamLogsChannel(loginOutput, payload.PublishContainerName)
 	if err != nil {
 		return err
 	}
@@ -129,12 +129,12 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, pushStderr, pushCmd, err := compose.Push(dockerComposePath)
+	pushOutput, pushCmd, err := compose.Push(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(pushStderr, payload.PublishContainerName)
+	_, err = sm.LogManager.StreamLogsChannel(pushOutput, payload.PublishContainerName)
 	if err != nil {
 		return err
 	}

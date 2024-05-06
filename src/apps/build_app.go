@@ -208,12 +208,12 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	_, buildStderr, buildCmd, err := compose.Build(dockerComposePath)
+	buildOutput, buildCmd, err := compose.Build(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(buildStderr, topicForLogStream)
+	_, err = sm.LogManager.StreamLogsChannel(buildOutput, topicForLogStream)
 	if err != nil {
 		return err
 	}
@@ -224,12 +224,12 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 	}
 
 	if !releaseBuild {
-		_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
+		pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
 		if err != nil {
 			return err
 		}
 
-		_, err = sm.LogManager.StreamLogsChannel(pullStderr, topicForLogStream)
+		_, err = sm.LogManager.StreamLogsChannel(pullOutput, topicForLogStream)
 		if err != nil {
 			return err
 		}

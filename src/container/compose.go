@@ -112,73 +112,55 @@ func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, er
 	return images, nil
 }
 
-func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, *exec.Cmd, error) {
 	finalArgs := []string{}
 	finalArgs = append(finalArgs, "compose", "-f", dockerComposePath)
 	finalArgs = append(finalArgs, providedArgs...)
 
 	cmd := exec.Command("docker", finalArgs...)
 
-	stdoutChan := make(chan string)
-	stderrChan := make(chan string)
+	outputChan := make(chan string)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	cmd.Stderr = cmd.Stdout
 
 	err = cmd.Start()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	go func() {
 		scanner := bufio.NewScanner(stdoutPipe)
 		for scanner.Scan() {
 			text := scanner.Text()
-			stdoutChan <- text
+			outputChan <- text
 		}
 
-		close(stdoutChan)
+		close(outputChan)
 	}()
 
-	go func() {
-		scanner := bufio.NewScanner(stderrPipe)
-		for scanner.Scan() {
-			text := scanner.Text()
-			stderrChan <- text
-		}
-
-		close(stderrChan)
-	}()
-
-	return stdoutChan, stderrChan, cmd, nil
+	return outputChan, cmd, nil
 }
 
-func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) dockerCommand(providedArgs ...string) (chan string, *exec.Cmd, error) {
 	cmd := exec.Command("docker", providedArgs...)
 
 	stdoutChan := make(chan string)
-	stderrChan := make(chan string)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	cmd.Stderr = cmd.Stdout
 
 	err = cmd.Start()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	go func() {
@@ -191,36 +173,26 @@ func (c *Compose) dockerCommand(providedArgs ...string) (chan string, chan strin
 		close(stdoutChan)
 	}()
 
-	go func() {
-		scanner := bufio.NewScanner(stderrPipe)
-		for scanner.Scan() {
-			text := scanner.Text()
-			stderrChan <- text
-		}
-
-		close(stderrChan)
-	}()
-
-	return stdoutChan, stderrChan, cmd, nil
+	return stdoutChan, cmd, nil
 }
 
-func (c *Compose) Login(dockerRegistryURL string, username string, password string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Login(dockerRegistryURL string, username string, password string) (chan string, *exec.Cmd, error) {
 	return c.dockerCommand("login", dockerRegistryURL, "-u", username, "-p", password)
 }
 
-func (c *Compose) Build(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Build(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "build")
 }
 
-func (c *Compose) Push(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Push(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "push")
 }
 
-func (c *Compose) Pull(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "pull")
 }
 
-func (c *Compose) Up(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Up(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "up", "-d")
 }
 
@@ -307,11 +279,11 @@ func IsComposeSupported() bool {
 	return true
 }
 
-func (c *Compose) Stop(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Stop(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "stop")
 }
 
-func (c *Compose) Remove(dockerComposePath string) (chan string, chan string, *exec.Cmd, error) {
+func (c *Compose) Remove(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "rm", "-f")
 }
 

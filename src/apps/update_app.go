@@ -166,7 +166,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -198,12 +198,12 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, loginStderr, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	loginOutput, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(loginStderr, payload.ContainerName.Prod)
+	_, err = sm.LogManager.StreamLogsChannel(loginOutput, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -213,12 +213,12 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
+	pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(pullStderr, payload.ContainerName.Prod)
+	_, err = sm.LogManager.StreamLogsChannel(pullOutput, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}

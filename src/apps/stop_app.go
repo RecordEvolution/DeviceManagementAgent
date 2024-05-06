@@ -106,7 +106,7 @@ func (sm *StateMachine) stopDevComposeApp(payload common.TransitionPayload, app 
 
 	compose := sm.Container.Compose()
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (sm *StateMachine) stopDevComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (sm *StateMachine) stopProdComposeApp(payload common.TransitionPayload, app
 
 	compose := sm.Container.Compose()
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (sm *StateMachine) stopProdComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
