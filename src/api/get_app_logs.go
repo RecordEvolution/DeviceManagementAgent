@@ -20,6 +20,8 @@ func (ex *External) getAppLogHistoryHandler(ctx context.Context, response messen
 
 	args := response.Arguments
 
+	fmt.Println(args)
+
 	if args == nil || args[0] == nil {
 		return nil, fmt.Errorf("arguments are missing")
 	}

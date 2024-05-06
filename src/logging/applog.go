@@ -631,6 +631,29 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 
 	fmt.Println("ONLY AGENT LOGS?", containsOnlyAgentLogs)
 
+	// if containsOnlyAgentLogs || len(history) == 0 {
+	// 	compose := lm.Container.Compose()
+
+	// 	reader, err := compose.LogsByContainerName(containerName+"_compose", 50)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Msgf("No log history found for: %s", containerName)
+	// 		return []string{}, nil
+	// 	}
+
+	// 	var containerHistory []string
+	// 	scanner := bufio.NewScanner(reader)
+	// 	for scanner.Scan() {
+	// 		containerHistory = append(containerHistory, scanner.Text())
+	// 	}
+
+	// 	err = reader.Close()
+	// 	if err != nil {
+	// 		log.Error().Err(err).Msg("failed to close reader after getting logs")
+	// 	}
+
+	// 	return containerHistory, nil
+	// }
+
 	if containsOnlyAgentLogs || len(history) == 0 {
 		ctx := context.Background()
 		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
