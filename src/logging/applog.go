@@ -629,6 +629,8 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 
 	stringLogEntries := logEntriesToString(history)
 
+	fmt.Println("ONLY AGENT LOGS?", containsOnlyAgentLogs)
+
 	if containsOnlyAgentLogs || len(history) == 0 {
 		ctx := context.Background()
 		options := common.Dict{"follow": false, "stdout": true, "stderr": true, "tail": "50"}
