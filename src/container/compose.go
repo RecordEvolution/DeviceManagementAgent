@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"reagent/common"
 	"reagent/config"
+	"reagent/filesystem"
 	"reagent/safe"
 	"strings"
 	"sync"
@@ -407,11 +408,10 @@ func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 		return []ComposeStatus{}, nil
 	}
 
-	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq -s", dockerComposePath)
-	cmd := exec.Command("bash", "-c", statusCommand)
-	output, err := cmd.Output()
+	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq . -sc", dockerComposePath)
+	output, err := filesystem.ExecuteAsScript(statusCommand)
 	if err != nil {
-		return nil, err
+		return []ComposeStatus{}, err
 	}
 
 	var composeStatuses []ComposeStatus

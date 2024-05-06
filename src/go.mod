@@ -6,7 +6,6 @@ require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/Masterminds/semver v1.5.0
 	github.com/Microsoft/go-winio v0.5.2 // indirect
-	github.com/bygui86/multi-profile/v2 v2.1.0
 	github.com/creack/pty v1.1.18
 	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/docker/docker v20.10.17+incompatible
@@ -18,6 +17,7 @@ require (
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/moby/term v0.0.0-20210619224110-3f7ff695adc6 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
@@ -25,12 +25,12 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.27.0
 	github.com/sirupsen/logrus v1.8.1 // indirect
-	github.com/stretchr/testify v1.8.4 // indirect
+	github.com/stretchr/testify v1.8.4
 	github.com/ugorji/go v1.2.7 // indirect
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d // indirect
 	golang.org/x/net v0.0.0-20220706163947-c90051bbdb60 // indirect
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
-	golang.org/x/term v0.12.0
+	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
 	golang.org/x/tools v0.1.11 // indirect
 	gopkg.in/ini.v1 v1.67.0
