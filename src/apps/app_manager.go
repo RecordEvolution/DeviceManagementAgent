@@ -296,16 +296,16 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		return nil
 	}
 
-	builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
-		(curAppState == common.BUILT || curAppState == common.PUBLISHED)
-
 	// use in memory requested state, since it's possible the database is not up to date yet if it's waiting for a database lock from other tasks
 	// this requested state is updated properly on every new state request
-	if curAppState != requestedState || builtOrPublishedToPresent {
+	if curAppState != requestedState {
 		log.Printf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
 
 		// transition again
 		safe.Go(func() {
+			builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
+				(curAppState == common.BUILT || curAppState == common.PUBLISHED)
+
 			// we confirmed the release in the backend and can put the state to PRESENT now
 			if builtOrPublishedToPresent {
 				am.StateObserver.Notify(app, common.PRESENT)

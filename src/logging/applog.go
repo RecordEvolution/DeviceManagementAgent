@@ -1030,10 +1030,8 @@ func (lm *LogManager) Write(containerName string, text string) error {
 	lm.activeLogsMutex.Lock()
 	activeLog := lm.activeLogs[containerName]
 
-	fmt.Println(activeLog)
 	if activeLog != nil {
 		fmt.Println(activeLog.logHistory)
-
 		activeLog.subscriptionStateMutex.Lock()
 
 		activeLog.appendLog(LogEntry{
