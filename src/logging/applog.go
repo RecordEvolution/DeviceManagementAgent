@@ -719,6 +719,12 @@ func (lm *LogManager) StreamLogsChannel(channel chan string, containerName strin
 		return nil, err
 	}
 
+	for _, log := range lm.activeLogs {
+		if log.ContainerName == containerName {
+			fmt.Println("ACTIVE LOG FOUND BEFORE", log)
+		}
+	}
+
 	logProcess := LogProccess{
 		ContainerName: containerName,
 		logHistory:    make([]*LogEntry, 0),
