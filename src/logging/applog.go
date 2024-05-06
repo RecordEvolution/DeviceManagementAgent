@@ -610,10 +610,14 @@ func (lm *LogManager) getNonAgentLogsCompose(containerName string) ([]string, er
 }
 
 func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
+	fmt.Println("CONTAINER NAME", containerName)
+
 	history, err := lm.getPersistedLogHistory(containerName)
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("HISTORY", history)
 
 	containsOnlyAgentLogs := true
 	for _, entry := range history {
