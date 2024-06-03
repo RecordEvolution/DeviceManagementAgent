@@ -110,7 +110,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -135,12 +135,12 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
+	outputChan, upCmd, err := compose.Up(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Dev)
+	_, err = sm.LogManager.StreamLogsChannel(outputChan, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			_, _, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			_, cmd, cleanupErr := compose.Stop(dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
@@ -171,7 +171,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 				return cleanupErr
 			}
 
-			_, _, cmd, cleanupErr = compose.Remove(dockerComposePath)
+			_, cmd, cleanupErr = compose.Remove(dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
@@ -239,7 +239,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -249,7 +249,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -269,12 +269,12 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, stdErrChan, upCmd, err := compose.Up(dockerComposePath)
+	outputChan, upCmd, err := compose.Up(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(stdErrChan, payload.ContainerName.Prod)
+	_, err = sm.LogManager.StreamLogsChannel(outputChan, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			_, _, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			_, cmd, cleanupErr := compose.Stop(dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
@@ -305,7 +305,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 				return cleanupErr
 			}
 
-			_, _, cmd, cleanupErr = compose.Remove(dockerComposePath)
+			_, cmd, cleanupErr = compose.Remove(dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}

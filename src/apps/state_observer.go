@@ -668,14 +668,6 @@ func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint6
 				continue
 			}
 
-			// status change detected
-			// always executed the state check on init
-			if lastKnownStatus == latestAppState {
-				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
-				time.Sleep(pollingRate)
-				continue
-			}
-
 			app, err := so.AppStore.GetApp(appKey, stage)
 			if err != nil {
 				errorC <- err
@@ -699,6 +691,14 @@ func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint6
 				continue
 			} else {
 				app.UnlockTransition()
+			}
+
+			// status change detected
+			// always executed the state check on init
+			if lastKnownStatus == latestAppState && latestAppState == curAppState {
+				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
+				time.Sleep(pollingRate)
+				continue
 			}
 
 			if curAppState != latestAppState && !common.IsTransientState(curAppState) {

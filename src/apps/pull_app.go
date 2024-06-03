@@ -39,7 +39,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
 	}
 
-	_, _, cmd, err := compose.Stop(dockerComposePath)
+	_, cmd, err := compose.Stop(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	_, _, cmd, err = compose.Remove(dockerComposePath)
+	_, cmd, err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -61,12 +61,12 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 
 	config := sm.Container.GetConfig()
 
-	_, loginStderr, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	loginOutput, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(loginStderr, topicForLogStream)
+	_, err = sm.LogManager.StreamLogsChannel(loginOutput, topicForLogStream)
 	if err != nil {
 		return err
 	}
@@ -76,12 +76,12 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	_, pullStderr, pullCmd, err := compose.Pull(dockerComposePath)
+	pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(pullStderr, topicForLogStream)
+	_, err = sm.LogManager.StreamLogsChannel(pullOutput, topicForLogStream)
 	if err != nil {
 		return err
 	}
