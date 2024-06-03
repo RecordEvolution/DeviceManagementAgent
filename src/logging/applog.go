@@ -610,14 +610,11 @@ func (lm *LogManager) getNonAgentLogsCompose(containerName string) ([]string, er
 }
 
 func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
-	fmt.Println("CONTAINER NAME", containerName)
 
 	history, err := lm.getPersistedLogHistory(containerName)
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println("HISTORY", history)
 
 	containsOnlyAgentLogs := true
 	for _, entry := range history {
@@ -628,8 +625,6 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 	}
 
 	stringLogEntries := logEntriesToString(history)
-
-	fmt.Println("ONLY AGENT LOGS?", containsOnlyAgentLogs)
 
 	// if containsOnlyAgentLogs || len(history) == 0 {
 	// 	compose := lm.Container.Compose()
@@ -1031,7 +1026,6 @@ func (lm *LogManager) Write(containerName string, text string) error {
 	activeLog := lm.activeLogs[containerName]
 
 	if activeLog != nil {
-		fmt.Println(activeLog.logHistory)
 		activeLog.subscriptionStateMutex.Lock()
 
 		activeLog.appendLog(LogEntry{
