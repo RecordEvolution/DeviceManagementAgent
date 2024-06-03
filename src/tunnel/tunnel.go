@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"reagent/common"
 	"reagent/config"
-	"reagent/debounce"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/messenger"
@@ -254,7 +253,6 @@ func (frpTm *FrpTunnelManager) Start() error {
 		defer cancelNotifyContext()
 
 		scanner := bufio.NewScanner(stdout)
-		debounced := debounce.New(100 * time.Millisecond)
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -339,10 +337,11 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 					})
 
-					debounced(func() {
+					safe.Go(func() {
 						updateTopic := common.BuildTunnelStateUpdate(frpTm.config.ReswarmConfig.SerialNumber)
 						tunnelStates, err := frpTm.GetState()
 						if err != nil {
+							log.Error().Err(err).Msgf("failed to get port state in publish goroutine")
 							return
 						}
 
@@ -411,9 +410,12 @@ func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol)
 		return 0, err
 	}
 
+	if result.Arguments == nil || len(result.Arguments) == 0 {
+		return 0, errors.New("arguments is empty")
+	}
+
 	payloadArg := result.Arguments[0]
 	payload, ok := payloadArg.(map[string]interface{})
-
 	if !ok {
 		return 0, errors.New("failed to parse payload")
 	}
