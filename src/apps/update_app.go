@@ -111,9 +111,11 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return writeErr
 	}
 
+	app.StateLock.Lock()
 	app.Version = payload.NewestVersion
 	app.ReleaseKey = payload.NewReleaseKey
 	app.UpdateStatus = common.PENDING_REMOTE_CONFIRMATION // set flag to make backend aware we updated
+	app.StateLock.Unlock()
 
 	// also tell the database that we successfully updated (with the updated flag)
 	err = sm.setState(app, common.PRESENT)
@@ -234,9 +236,11 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return writeErr
 	}
 
+	app.StateLock.Lock()
 	app.Version = payload.NewestVersion
 	app.ReleaseKey = payload.NewReleaseKey
 	app.UpdateStatus = common.PENDING_REMOTE_CONFIRMATION // set flag to make backend aware we updated
+	app.StateLock.Unlock()
 
 	// also tell the database that we successfully updated (with the updated flag)
 	err = sm.setState(app, common.PRESENT)
@@ -247,6 +251,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	// TODO: remove old images from docker-compose
 
 	// update the version of the local requested states
+	payload.DockerCompose = payload.NewDockerCompose
 	payload.NewestVersion = app.Version
 	payload.PresentVersion = app.Version
 	payload.Version = app.Version
