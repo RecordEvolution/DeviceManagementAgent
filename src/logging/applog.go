@@ -610,7 +610,6 @@ func (lm *LogManager) getNonAgentLogsCompose(containerName string) ([]string, er
 }
 
 func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
-
 	history, err := lm.getPersistedLogHistory(containerName)
 	if err != nil {
 		return nil, err
@@ -625,29 +624,6 @@ func (lm *LogManager) GetLogHistory(containerName string) ([]string, error) {
 	}
 
 	stringLogEntries := logEntriesToString(history)
-
-	// if containsOnlyAgentLogs || len(history) == 0 {
-	// 	compose := lm.Container.Compose()
-
-	// 	reader, err := compose.LogsByContainerName(containerName+"_compose", 50)
-	// 	if err != nil {
-	// 		log.Warn().Err(err).Msgf("No log history found for: %s", containerName)
-	// 		return []string{}, nil
-	// 	}
-
-	// 	var containerHistory []string
-	// 	scanner := bufio.NewScanner(reader)
-	// 	for scanner.Scan() {
-	// 		containerHistory = append(containerHistory, scanner.Text())
-	// 	}
-
-	// 	err = reader.Close()
-	// 	if err != nil {
-	// 		log.Error().Err(err).Msg("failed to close reader after getting logs")
-	// 	}
-
-	// 	return containerHistory, nil
-	// }
 
 	if containsOnlyAgentLogs || len(history) == 0 {
 		ctx := context.Background()
@@ -693,6 +669,10 @@ func (lm *LogManager) SetupLogConsumer(containerName string) chan *LogProccess {
 			lm.logProcessChannelMutex.Lock()
 			delete(lm.logProcessChannelMap, containerName)
 			lm.logProcessChannelMutex.Unlock()
+
+			lm.activeLogsMutex.Lock()
+			delete(lm.activeLogs, containerName)
+			lm.activeLogsMutex.Unlock()
 		}()
 
 		logChannel := lm.logProcessChannelMap[containerName]
@@ -746,6 +726,10 @@ func (lm *LogManager) addLogProcess(logProcess *LogProccess) {
 	lm.logProcessEntriesMutex.Lock()
 	lm.logProcessEntries = append(lm.logProcessEntries, logProcess)
 	lm.logProcessEntriesMutex.Unlock()
+
+	lm.activeLogsMutex.Lock()
+	lm.activeLogs[logProcess.ContainerName] = logProcess
+	lm.activeLogsMutex.Unlock()
 
 	logProcessConsumer := lm.SetupLogConsumer(logProcess.ContainerName)
 	logProcessConsumer <- logProcess
