@@ -58,8 +58,9 @@ The `Container` interface serves as an abstraction layer for any container-relat
 
 Since there is no official Docker Compose API, we have manually implemented and exposed an API that interacts with Docker Compose using the `docker compose` command-line tool. 
 
-We interface with the Compose CLI using the built-in exec Go API and provide the output of each command as a string channel.
+We interface with the Compose CLI using the built-in `exec` Go API and provide the output of each command as a string channel.
 
+The implementation of the Compose API can be found in the `container/compose.go` file.
 
 ## Adding or Editing a Crossbar RPC
 
