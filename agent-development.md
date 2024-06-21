@@ -44,6 +44,10 @@ Upon agent launch, we check whether the operating system is Linux. If it is, we 
 
 When implementations for other operating systems are added, the dummy implementation can be replaced with a proper implementation of the `Network` interface.
 
+#### NetworkManager
+
+We also include the NetworkManager API, copied from the [gonetworkmanager Github repository](https://github.com/Wifx/gonetworkmanager). Since we needed to apply our own custom changes, we decided to incorporate it directly into the agent's source code. The NetworkManager API uses the D-Bus API to manage the network.
+
 ### Messenger
 
 The `Messenger` interface serves as an abstraction layer for the communication protocol used to interface with the agent externally. This interface is defined in the `messenger/types.go` file. Currently, it is implemented using WAMP (Web Application Messaging Protocol).
@@ -61,6 +65,43 @@ Since there is no official Docker Compose API, we have manually implemented and 
 We interface with the Compose CLI using the built-in `exec` Go API and provide the output of each command as a string channel.
 
 The implementation of the Compose API can be found in the `container/compose.go` file.
+
+### Config
+
+In the config package, we define various elements such as the command line arguments and their default values. During the initialization of the CLI arguments, we also specify the default folder locations and log file paths.
+
+### Application Entrypoints
+
+The `main.go` and `agent.go` files are the entry points of the application. In the `main.go` file, we instantiate an `Agent` struct that serves as the API for the entire application.
+
+The `main.go` file is responsible for loading the `.reswarm` file, initializing the agent in offline mode, checking if the Docker Daemon is enabled, and initializing the connection callback for the agent itself.
+
+The `Agent` struct is initialized using the following components:
+
+```go
+Agent{
+    Config:          generalConfig,
+    System:          &systemAPI,
+    External:        &external,
+    LogManager:      &logManager,
+    Network:         networkInstance,
+    TerminalManager: &terminalManager,
+    TunnelManager:   &tunnelManager,
+    AppManager:      appManager,
+    StateObserver:   &stateObserver,
+    StateMachine:    &stateMachine,
+    Filesystem:      &filesystem,
+    Container:       container,
+    Messenger:       mainSession,
+    LogMessenger:    mainSession,
+    Database:        database,
+}
+```
+
+The `Agent` struct contains a `Connect` handler responsible for establishing the WAMP connection, updating the remote and local databases, enabling the frp tunnels, and downloading new versions of the agent and FRP tunnel. Essentially, it handles all initialization tasks that require a remote WAMP connection. 
+
+At the end of the `Connect` handler, the device status is set to `CONNECTED`, commonly referred to as "green."
+
 
 ## Adding or Editing a Crossbar RPC
 
