@@ -48,7 +48,7 @@ const LOCAL_PORT FrpcVariable = "local_port"
 const LOCAL_IP FrpcVariable = "local_ip"
 const REMOTE_PORT FrpcVariable = "remote_port"
 
-const PROD_SERVER_ADDR = "app.record-evolution.com"
+const PROD_SERVER_ADDR = "app.ironflock.com"
 const TEST_SERVER_ADDR = "app.datapods.io"
 
 func NewTunnelConfigBuilder(config *config.Config) TunnelConfigBuilder {
