@@ -14,7 +14,7 @@
 The _Reagent_ is a (lightweight) daemon running on IoT devices that provides
 an interface to manage containers on the device and to collect/request app logs.
 In particular, the daemon enables the
-[Record Evolution IoT Development Studio](https://www.ironflock.com/reswarm)
+[IronFlock IoT Development Studio](https://www.ironflock.com/reswarm)
 to authenticate and securely connect to an IoT device in order to control apps
 running in containers on the device and retrieve their result and logs.
 
