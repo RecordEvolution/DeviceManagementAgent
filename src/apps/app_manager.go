@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/messenger/topics"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
@@ -96,7 +97,24 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 	}
 
+	am.UpdateTunnelState()
+
 	return nil
+}
+
+func (am *AppManager) UpdateTunnelState() error {
+	updateTopic := common.BuildTunnelStateUpdate(am.StateMachine.Container.GetConfig().ReswarmConfig.SerialNumber)
+	tunnelStates, err := am.tunnelManager.GetState()
+	if err != nil {
+		return err
+	}
+
+	var args []interface{}
+	for _, tunnelState := range tunnelStates {
+		args = append(args, tunnelState)
+	}
+
+	return am.AppStore.Messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 }
 
 func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
@@ -181,6 +199,8 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				return err
 			}
 
+			am.UpdateTunnelState()
+
 			return nil
 		}
 
@@ -199,6 +219,9 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				log.Error().Err(err).Msgf("failed to verify app state")
 				return err
 			}
+
+			am.UpdateTunnelState()
+
 			return nil
 		}
 

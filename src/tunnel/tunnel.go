@@ -338,19 +338,10 @@ func (frpTm *FrpTunnelManager) Start() error {
 					})
 
 					safe.Go(func() {
-						updateTopic := common.BuildTunnelStateUpdate(frpTm.config.ReswarmConfig.SerialNumber)
-						tunnelStates, err := frpTm.GetState()
+						err = frpTm.PublishTunnelState()
 						if err != nil {
-							log.Error().Err(err).Msgf("failed to get port state in publish goroutine")
-							return
+							log.Error().Err(err).Msg("Failed to publish tunnel state")
 						}
-
-						var args []interface{}
-						for _, tunnelState := range tunnelStates {
-							args = append(args, tunnelState)
-						}
-
-						frpTm.messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 					})
 				}
 
@@ -372,6 +363,21 @@ func (frpTm *FrpTunnelManager) Reset() error {
 	frpTm.configBuilder.Reset()
 
 	return frpTm.Reload()
+}
+
+func (frpTm *FrpTunnelManager) PublishTunnelState() error {
+	updateTopic := common.BuildTunnelStateUpdate(frpTm.config.ReswarmConfig.SerialNumber)
+	tunnelStates, err := frpTm.GetState()
+	if err != nil {
+		return err
+	}
+
+	var args []interface{}
+	for _, tunnelState := range tunnelStates {
+		args = append(args, tunnelState)
+	}
+
+	return frpTm.messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 }
 
 func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
