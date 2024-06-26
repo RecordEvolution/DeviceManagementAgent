@@ -82,6 +82,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.ExecuteCommand:     ex.codeExecutionHandler,
 		topics.InitDeviceTerminal: ex.initDeviceTerm,
 		topics.GetIPv4Addresses:   ex.getCurrentIPAddresses,
+		topics.GetStorageData:     ex.getStorageDataHandler,
 	}
 }
 
