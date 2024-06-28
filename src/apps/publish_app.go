@@ -43,6 +43,11 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 		return err
 	}
 
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		return err
+	}
+
 	pushOptions := container.PushOptions{
 		AuthConfig: container.AuthConfig{
 			Username: payload.RegisteryToken,
@@ -112,19 +117,7 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 
 	compose := sm.Container.Compose()
 
-	config := sm.Container.GetConfig()
-
-	loginOutput, pullCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
-	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(loginOutput, payload.PublishContainerName)
-	if err != nil {
-		return err
-	}
-
-	err = pullCmd.Wait()
+	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -395,21 +396,57 @@ func (docker *Docker) ListImages(ctx context.Context, options map[string]interfa
 	return imageResults, nil
 }
 
-// Login allows user to authenticate with a specific registry
-func (docker *Docker) Login(ctx context.Context, username string, password string) error {
-	authConfig := types.AuthConfig{
-		Username:      username,
-		Password:      password,
-		ServerAddress: docker.config.ReswarmConfig.DockerRegistryURL,
-	}
+func (c *Docker) dockerCommand(ctx context.Context, providedArgs ...string) (chan string, *exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, "docker", providedArgs...)
+	stdoutChan := make(chan string)
 
-	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	if !strings.Contains(authOkBody.Status, "Login Succeeded") {
-		return fmt.Errorf("Login failed with status: %s", authOkBody.Status)
+	cmd.Stderr = cmd.Stdout
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			text := scanner.Text()
+			stdoutChan <- text
+		}
+
+		close(stdoutChan)
+	}()
+
+	return stdoutChan, cmd, nil
+}
+
+func (c *Docker) Login(ctx context.Context, dockerRegistryURL string, username string, password string) (chan string, *exec.Cmd, error) {
+	return c.dockerCommand(ctx, "login", dockerRegistryURL, "-u", username, "-p", password)
+}
+
+func (c *Docker) HandleRegistryLogins(credentials map[string]common.DockerCredential) error {
+	for registryURL, credential := range credentials {
+		ctx, cancelLogin := context.WithTimeout(context.Background(), time.Second*10)
+		_, loginCmd, err := c.Login(ctx, registryURL, credential.Username, credential.Password)
+		if err != nil {
+			cancelLogin()
+			return err
+		}
+
+		err = loginCmd.Wait()
+		if err != nil {
+			cancelLogin()
+			return err
+		}
+
+		cancelLogin()
+
+		log.Debug().Msgf("Logged into Docker Registry: %s", registryURL)
 	}
 
 	return nil

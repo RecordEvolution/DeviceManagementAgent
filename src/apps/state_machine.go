@@ -210,3 +210,18 @@ func (sm *StateMachine) InitTransition(app *common.App, payload common.Transitio
 
 	return sm.executeTransition(app, payload, transitionFunc)
 }
+
+func (sm *StateMachine) HandleRegistryLoginsWithDefault(payload common.TransitionPayload) error {
+	config := sm.Container.GetConfig()
+
+	if payload.DockerCredentials == nil {
+		payload.DockerCredentials = make(map[string]common.DockerCredential)
+	}
+
+	payload.DockerCredentials[config.ReswarmConfig.DockerRegistryURL] = common.DockerCredential{
+		Username: payload.RegisteryToken,
+		Password: config.ReswarmConfig.Secret,
+	}
+
+	return sm.Container.HandleRegistryLogins(payload.DockerCredentials)
+}

@@ -86,6 +86,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	environmentTemplateKw := kwargs["environment_template"]
 	dockerComposeKw := kwargs["docker_compose"]
 	newDockerComposeKw := kwargs["new_docker_compose"]
+	dockerCredentialsKw := kwargs["docker_credentials"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -109,6 +110,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var environment map[string]interface{}
 	var dockerCompose map[string]interface{}
 	var newDockerCompose map[string]interface{}
+	var dockerCredentials map[string]common.DockerCredential
 
 	// TODO: can be simplified with parser function, but unneccessary
 	if appKeyKw != nil {
@@ -296,6 +298,13 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
+	if dockerCredentialsKw != nil {
+		dockerCredentials, ok = dockerCredentialsKw.(map[string]common.DockerCredential)
+		if !ok {
+			return common.TransitionPayload{}, fmt.Errorf("%w docker credentials", errdefs.ErrFailedToParse)
+		}
+	}
+
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
@@ -342,6 +351,8 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	payload.NewDockerCompose = newDockerCompose
 
 	payload.CancelTransition = cancelTransition
+
+	payload.DockerCredentials = dockerCredentials
 
 	// registryToken is added before we transition state and is not part of the response payload
 	return payload, nil

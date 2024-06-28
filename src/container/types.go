@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"os/exec"
 	"reagent/common"
 	"reagent/config"
 	"time"
@@ -71,7 +72,8 @@ type ContainerState struct {
 
 // Container generic interface for a Container API
 type Container interface {
-	Login(ctx context.Context, username string, password string) error
+	Login(ctx context.Context, serverAddress string, username string, password string) (chan string, *exec.Cmd, error)
+	HandleRegistryLogins(credentials map[string]common.DockerCredential) error
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
