@@ -332,8 +332,6 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		}
 	}
 
-	fmt.Println(dockerCredentials)
-
 	// callerAuthIDString := details["caller_authid"]
 
 	// callerAuthID, err := strconv.Atoi(callerAuthIDString.(string))
