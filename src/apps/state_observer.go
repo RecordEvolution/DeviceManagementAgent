@@ -215,9 +215,10 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 
 				foundImage := false
 				for _, image := range images {
-					if len(image.RepoTags) > 0 && strings.Contains(image.RepoTags[0], imageName) {
-						foundImage = true
-						break
+					for _, repoTag := range image.RepoTags {
+						if strings.Contains(repoTag, imageName) {
+							foundImage = true
+						}
 					}
 				}
 
