@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/filesystem"
@@ -44,8 +45,15 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	// latest release information
 	osReleaseLatest, err := system.GetOSReleaseLatest()
 	if err != nil {
+		// Systems that do not have /etc/os-release can return an empty value
+		if os.IsNotExist(err) {
+			return &messenger.InvokeResult{
+				Arguments: []interface{}{},
+			}, nil
+		}
 		return nil, err
 	}
+
 	latestOSRelease := system.OSRelease{
 		Name:      fmt.Sprint(osReleaseLatest[""]),
 		Version:   fmt.Sprint(osReleaseLatest["version"]),
