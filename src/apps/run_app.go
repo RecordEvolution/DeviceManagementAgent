@@ -105,6 +105,15 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+
 	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
