@@ -218,6 +218,7 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 					for _, repoTag := range image.RepoTags {
 						if strings.Contains(repoTag, imageName) {
 							foundImage = true
+							break
 						}
 					}
 				}
