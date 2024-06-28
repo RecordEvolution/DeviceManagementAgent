@@ -541,9 +541,15 @@ func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath, "--json").Output()
+	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath, "--json").CombinedOutput()
 	if err != nil {
-		log.Error().Err(err).Msg("Error while getting tunnel status")
+		if strings.Contains(string(out), "connect: connection refused") {
+			safe.Go(func() {
+				frpTm.Restart()
+			})
+			return []TunnelStatus{}, nil
+
+		}
 		return []TunnelStatus{}, nil
 	}
 
