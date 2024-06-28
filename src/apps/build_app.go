@@ -205,6 +205,10 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
+		writeErr := sm.LogManager.Write(topicForLogStream, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 

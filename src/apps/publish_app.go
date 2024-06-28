@@ -45,6 +45,10 @@ func (sm *StateMachine) publishApp(payload common.TransitionPayload, app *common
 
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
+		writeErr := sm.LogManager.Write(payload.PublishContainerName, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 
@@ -119,6 +123,10 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
+		writeErr := sm.LogManager.Write(payload.PublishContainerName, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 

@@ -399,51 +399,31 @@ func (docker *Docker) ListImages(ctx context.Context, options map[string]interfa
 	return imageResults, nil
 }
 
-func (c *Docker) dockerCommand(ctx context.Context, providedArgs ...string) (chan string, *exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, "docker", providedArgs...)
-	stdoutChan := make(chan string)
+func (c *Docker) dockerCommand(ctx context.Context, providedArgs ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, "docker", providedArgs...).CombinedOutput()
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmd.Stderr = cmd.Stdout
-
-	err = cmd.Start()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	go func() {
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			text := scanner.Text()
-			stdoutChan <- text
-		}
-
-		close(stdoutChan)
-	}()
-
-	return stdoutChan, cmd, nil
+	return string(output), err
 }
 
-func (c *Docker) Login(ctx context.Context, dockerRegistryURL string, username string, password string) (chan string, *exec.Cmd, error) {
+func (c *Docker) Login(ctx context.Context, dockerRegistryURL string, username string, password string) (string, error) {
 	return c.dockerCommand(ctx, "login", dockerRegistryURL, "-u", username, "-p", password)
 }
 
 func (c *Docker) HandleRegistryLogins(credentials map[string]common.DockerCredential) error {
 	for registryURL, credential := range credentials {
 		ctx, cancelLogin := context.WithTimeout(context.Background(), time.Second*10)
-		_, loginCmd, err := c.Login(ctx, registryURL, credential.Username, credential.Password)
+		output, err := c.Login(ctx, registryURL, credential.Username, credential.Password)
 		if err != nil {
 			cancelLogin()
-			return err
-		}
 
-		err = loginCmd.Wait()
-		if err != nil {
-			cancelLogin()
+			scanner := bufio.NewScanner(strings.NewReader(string(output)))
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, "Error") {
+					return errors.New(line)
+				}
+			}
+
 			return err
 		}
 

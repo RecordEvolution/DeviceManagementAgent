@@ -73,6 +73,10 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	// Need to authenticate to private registry to determine proper privileges to pull the app
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 
@@ -199,12 +203,16 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
+	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 
-	err = sm.HandleRegistryLoginsWithDefault(payload)
+	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}

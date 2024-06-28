@@ -299,11 +299,40 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	}
 
 	if dockerCredentialsKw != nil {
-		dockerCredentials, ok = dockerCredentialsKw.(map[string]common.DockerCredential)
+		// Output map to store the parsed credentials
+		dockerCredentials = make(map[string]common.DockerCredential)
+
+		dockerCredentialsMap, ok := dockerCredentialsKw.(map[string]interface{})
 		if !ok {
 			return common.TransitionPayload{}, fmt.Errorf("%w docker credentials", errdefs.ErrFailedToParse)
 		}
+
+		// Iterate over the input map
+		for key, value := range dockerCredentialsMap {
+			// Assert the value to map[string]interface{}
+			valMap, ok := value.(map[string]interface{})
+			if !ok {
+				return common.TransitionPayload{}, fmt.Errorf("%w docker credentials", errdefs.ErrFailedToParse)
+			}
+
+			// Extract username and password
+			username, usernameOK := valMap["username"].(string)
+			password, passwordOK := valMap["password"].(string)
+
+			// Check if the username and password exist and are strings
+			if !usernameOK || !passwordOK {
+				return common.TransitionPayload{}, fmt.Errorf("%w docker credentials", errdefs.ErrFailedToParse)
+			}
+
+			// Assign the credentials to the output map
+			dockerCredentials[key] = common.DockerCredential{
+				Username: username,
+				Password: password,
+			}
+		}
 	}
+
+	fmt.Println(dockerCredentials)
 
 	// callerAuthIDString := details["caller_authid"]
 
