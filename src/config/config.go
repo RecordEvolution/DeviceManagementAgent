@@ -10,7 +10,7 @@ import (
 	"runtime"
 )
 
-// ReswarmConfig types for the .reswarm file
+// ReswarmConfig types for the .flock file
 type ReswarmConfig struct {
 	Name   string `json:"name"`
 	Secret string `json:"secret"`
@@ -132,7 +132,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client in milliseconds (0 means no timeout)")
 	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds")
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds. (0 means no timeout)")
-	cfgFile := flag.String("config", "", "reswarm configuration file")
+	cfgFile := flag.String("config", "", "ironflock configuration file")
 	flag.Parse()
 
 	cliArgs := CommandLineArguments{

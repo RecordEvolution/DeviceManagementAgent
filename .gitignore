@@ -20,6 +20,7 @@ reagent.db
 reagent.db-shm
 reagent.db-wal
 *.reswarm
+*.flock
 *.tar
 build
 
