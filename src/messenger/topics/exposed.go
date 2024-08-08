@@ -26,6 +26,7 @@ const SystemReboot Topic = "system_reboot"
 const SystemShutdown Topic = "system_shutdown"
 const SystemRestartAgent Topic = "system_restart_agent"
 
+const GetStorageData Topic = "get_storage_data"
 const GetNetworkMetaData Topic = "get_network_metadata"
 
 const GetAgentMetaData Topic = "get_agent_metadata"

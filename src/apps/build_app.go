@@ -203,6 +203,15 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
 	}
 
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		writeErr := sm.LogManager.Write(topicForLogStream, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err

@@ -71,7 +71,8 @@ type ContainerState struct {
 
 // Container generic interface for a Container API
 type Container interface {
-	Login(ctx context.Context, username string, password string) error
+	Login(ctx context.Context, serverAddress string, username string, password string) (string, error)
+	HandleRegistryLogins(credentials map[string]common.DockerCredential) error
 	ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)

@@ -1,11 +1,15 @@
 package container
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/docker/docker/api/types/image"
+
 	"io"
 	"os"
 	"os/exec"
@@ -73,10 +77,9 @@ func (docker *Docker) ListenForContainerEvents(ctx context.Context) (<-chan even
 //
 // ListContainers lists containers on the host
 func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error) {
-	listOptions := types.ContainerListOptions{}
+	listOptions := container.ListOptions{}
 
 	if options != nil {
-		quietKw := options["quiet"]
 		allKw := options["all"]
 		sizeKw := options["size"]
 		latestKw := options["latest"]
@@ -85,10 +88,6 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 		limitKw := options["limit"]
 		filtersKw := options["filters"]
 
-		quiet, ok := quietKw.(bool)
-		if ok {
-			listOptions.Quiet = quiet
-		}
 		all, ok := allKw.(bool)
 		if ok {
 			listOptions.All = all
@@ -130,6 +129,9 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 		exitCode := int64(-1)
 		if cont.State == "exited" {
 			exitCode, err = common.ParseExitCodeFromContainerStatus(cont.Status)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		dict := ContainerResult{
@@ -155,7 +157,7 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 func (docker *Docker) GetContainer(ctx context.Context, containerName string) (types.Container, error) {
 	filters := filters.NewArgs()
 	filters.Add("name", containerName)
-	containers, err := docker.client.ContainerList(ctx, types.ContainerListOptions{All: true, Filters: filters})
+	containers, err := docker.client.ContainerList(ctx, container.ListOptions{All: true, Filters: filters})
 	if err != nil {
 		return types.Container{}, err
 	}
@@ -178,7 +180,7 @@ func (docker *Docker) RemoveContainerByName(ctx context.Context, containerName s
 }
 
 func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID string, options map[string]interface{}) error {
-	optionStruct := types.ContainerRemoveOptions{}
+	optionStruct := container.RemoveOptions{}
 
 	removeVolumesKw := options["removeVolumes"]
 	removeLinksKw := options["removeLinks"]
@@ -220,20 +222,22 @@ func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID strin
 }
 
 func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error {
-	return docker.client.ContainerStop(ctx, containerID, &timeout)
+	timeoutInSeconds := int(timeout.Seconds())
+	return docker.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeoutInSeconds})
 }
 
 func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout time.Duration) error {
-	container, err := docker.GetContainer(ctx, containerName)
+	c, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
 		return err
 	}
 
-	return docker.client.ContainerStop(ctx, container.ID, &timeout)
+	timeoutInSeconds := int(timeout.Seconds())
+	return docker.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeoutInSeconds})
 }
 
 func (docker *Docker) GetImages(ctx context.Context, fullImageName string) ([]ImageResult, error) {
-	options := types.ImageListOptions{}
+	options := image.ListOptions{}
 
 	if fullImageName != "" {
 		filters := filters.NewArgs()
@@ -280,7 +284,7 @@ func (docker *Docker) GetImage(ctx context.Context, fullImageName string, tag st
 	fullImageNameWithTag := fmt.Sprintf("%s:%s", fullImageName, tag)
 	filters.Add("reference", fullImageNameWithTag)
 
-	options := types.ImageListOptions{Filters: filters}
+	options := image.ListOptions{Filters: filters}
 
 	images, err := docker.client.ImageList(ctx, options)
 	if err != nil {
@@ -362,7 +366,7 @@ func (docker *Docker) PruneDanglingImages() (string, error) {
 func (docker *Docker) ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error) {
 	allKw := options["all"]
 
-	rOptions := types.ImageListOptions{}
+	rOptions := image.ListOptions{}
 
 	if allKw != nil {
 		all, ok := allKw.(bool)
@@ -395,21 +399,37 @@ func (docker *Docker) ListImages(ctx context.Context, options map[string]interfa
 	return imageResults, nil
 }
 
-// Login allows user to authenticate with a specific registry
-func (docker *Docker) Login(ctx context.Context, username string, password string) error {
-	authConfig := types.AuthConfig{
-		Username:      username,
-		Password:      password,
-		ServerAddress: docker.config.ReswarmConfig.DockerRegistryURL,
-	}
+func (c *Docker) dockerCommand(ctx context.Context, providedArgs ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, "docker", providedArgs...).CombinedOutput()
 
-	authOkBody, err := docker.client.RegistryLogin(ctx, authConfig)
-	if err != nil {
-		return err
-	}
+	return string(output), err
+}
 
-	if !strings.Contains(authOkBody.Status, "Login Succeeded") {
-		return fmt.Errorf("Login failed with status: %s", authOkBody.Status)
+func (c *Docker) Login(ctx context.Context, dockerRegistryURL string, username string, password string) (string, error) {
+	return c.dockerCommand(ctx, "login", dockerRegistryURL, "-u", username, "-p", password)
+}
+
+func (c *Docker) HandleRegistryLogins(credentials map[string]common.DockerCredential) error {
+	for registryURL, credential := range credentials {
+		ctx, cancelLogin := context.WithTimeout(context.Background(), time.Second*10)
+		output, err := c.Login(ctx, registryURL, credential.Username, credential.Password)
+		if err != nil {
+			cancelLogin()
+
+			scanner := bufio.NewScanner(strings.NewReader(string(output)))
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, "Error") {
+					return errors.New(line)
+				}
+			}
+
+			return err
+		}
+
+		cancelLogin()
+
+		log.Debug().Msgf("Logged into Docker Registry: %s", registryURL)
 	}
 
 	return nil
@@ -431,7 +451,7 @@ type PushOptions struct {
 
 // Pull pulls a container image from a registry
 func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOptions) (io.ReadCloser, error) {
-	dockerAuthConfig := types.AuthConfig{
+	dockerAuthConfig := AuthConfig{
 		Username: options.AuthConfig.Username,
 		Password: options.AuthConfig.Password,
 	}
@@ -442,7 +462,7 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 	}
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
 
-	reader, err := docker.client.ImagePull(ctx, imageName, types.ImagePullOptions{RegistryAuth: authStr})
+	reader, err := docker.client.ImagePull(ctx, imageName, image.PullOptions{RegistryAuth: authStr})
 	if err != nil {
 		if reader != nil {
 			reader.Close()
@@ -468,7 +488,7 @@ func (docker *Docker) Pull(ctx context.Context, imageName string, options PullOp
 
 // Push pushes a container image to a registry
 func (docker *Docker) Push(ctx context.Context, imageName string, options PushOptions) (io.ReadCloser, error) {
-	dockerAuthConfig := types.AuthConfig{
+	dockerAuthConfig := AuthConfig{
 		Username: options.AuthConfig.Username,
 		Password: options.AuthConfig.Password,
 	}
@@ -479,7 +499,7 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 	}
 
 	authStr := base64.URLEncoding.EncodeToString(encodedJSON)
-	pushOptions := types.ImagePushOptions{
+	pushOptions := image.PushOptions{
 		RegistryAuth: authStr,
 	}
 
@@ -508,7 +528,7 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 }
 
 func (docker *Docker) Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error) {
-	containerOptions := types.ContainerLogsOptions{}
+	containerOptions := container.LogsOptions{}
 	stdoutKw := options["stdout"]
 	stderrKw := options["stderr"]
 	followKw := options["follow"]
@@ -592,7 +612,7 @@ func (docker *Docker) WaitForContainerByID(ctx context.Context, containerID stri
 }
 
 func (docker *Docker) Attach(ctx context.Context, containerName string, shell string) (HijackedResponse, error) {
-	attachOpts := types.ContainerAttachOptions{
+	attachOpts := container.AttachOptions{
 		Stream: true,
 		Stdout: true,
 		Stderr: true,
@@ -612,7 +632,7 @@ func (docker *Docker) Attach(ctx context.Context, containerName string, shell st
 }
 
 func (docker *Docker) ResizeExecContainer(ctx context.Context, execID string, dimension TtyDimension) error {
-	return docker.client.ContainerExecResize(ctx, execID, types.ResizeOptions{
+	return docker.client.ContainerExecResize(ctx, execID, container.ResizeOptions{
 		Height: dimension.Height,
 		Width:  dimension.Width,
 	})
@@ -706,7 +726,7 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 }
 
 func (docker *Docker) GetContainers(ctx context.Context) ([]types.Container, error) {
-	options := types.ContainerListOptions{All: true}
+	options := container.ListOptions{All: true}
 	return docker.client.ContainerList(ctx, options)
 }
 
@@ -809,7 +829,7 @@ func (docker *Docker) WaitForRunning(ctx context.Context, containerID string, po
 //
 // StartContainer creates and starts a specific container
 func (docker *Docker) StartContainer(ctx context.Context, containerID string) error {
-	if err := docker.client.ContainerStart(ctx, containerID, types.ContainerStartOptions{}); err != nil {
+	if err := docker.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return err
 	}
 
@@ -820,7 +840,7 @@ func (docker *Docker) RemoveImagesByName(ctx context.Context, imageName string, 
 	filters := filters.NewArgs()
 	filters.Add("reference", imageName)
 
-	images, err := docker.client.ImageList(ctx, types.ImageListOptions{Filters: filters})
+	images, err := docker.client.ImageList(ctx, image.ListOptions{Filters: filters})
 	if err != nil {
 		return err
 	}
@@ -844,7 +864,7 @@ func (docker *Docker) RemoveImageByName(ctx context.Context, imageName string, t
 
 	filters.Add("reference", fmt.Sprintf("%s:%s", imageName, tag))
 
-	images, err := docker.client.ImageList(ctx, types.ImageListOptions{Filters: filters})
+	images, err := docker.client.ImageList(ctx, image.ListOptions{Filters: filters})
 	if err != nil {
 		return err
 	}
@@ -867,7 +887,7 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 	forceKw := options["force"]
 	pruneChildrenKw := options["pruneChildren"]
 
-	rOptions := types.ImageRemoveOptions{}
+	rOptions := image.RemoveOptions{}
 	if forceKw != nil {
 		force, ok := forceKw.(bool)
 		if !ok {

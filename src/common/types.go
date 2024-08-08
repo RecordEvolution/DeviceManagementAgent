@@ -55,6 +55,11 @@ type StageBasedResult struct {
 	Prod string
 }
 
+type DockerCredential struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
 	RequestedState       AppState
@@ -69,6 +74,7 @@ type TransitionPayload struct {
 	PresentImageName     string
 	RegistryImageName    StageBasedResult
 	ContainerName        StageBasedResult
+	DockerCredentials    map[string]DockerCredential
 	EnvironmentVariables map[string]interface{}
 	EnvironmentTemplate  map[string]interface{}
 	DockerCompose        map[string]interface{}

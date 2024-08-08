@@ -146,40 +146,6 @@ func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...strin
 	return outputChan, cmd, nil
 }
 
-func (c *Compose) dockerCommand(providedArgs ...string) (chan string, *exec.Cmd, error) {
-	cmd := exec.Command("docker", providedArgs...)
-
-	stdoutChan := make(chan string)
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmd.Stderr = cmd.Stdout
-
-	err = cmd.Start()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	go func() {
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			text := scanner.Text()
-			stdoutChan <- text
-		}
-
-		close(stdoutChan)
-	}()
-
-	return stdoutChan, cmd, nil
-}
-
-func (c *Compose) Login(dockerRegistryURL string, username string, password string) (chan string, *exec.Cmd, error) {
-	return c.dockerCommand("login", dockerRegistryURL, "-u", username, "-p", password)
-}
-
 func (c *Compose) Build(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "build")
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/errdefs"
+	"reagent/messenger/topics"
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
@@ -96,7 +97,24 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 	}
 
+	am.UpdateTunnelState()
+
 	return nil
+}
+
+func (am *AppManager) UpdateTunnelState() error {
+	updateTopic := common.BuildTunnelStateUpdate(am.StateMachine.Container.GetConfig().ReswarmConfig.SerialNumber)
+	tunnelStates, err := am.tunnelManager.GetState()
+	if err != nil {
+		return err
+	}
+
+	var args []interface{}
+	for _, tunnelState := range tunnelStates {
+		args = append(args, tunnelState)
+	}
+
+	return am.AppStore.Messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 }
 
 func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
@@ -181,6 +199,8 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				return err
 			}
 
+			am.UpdateTunnelState()
+
 			return nil
 		}
 
@@ -199,6 +219,9 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				log.Error().Err(err).Msgf("failed to verify app state")
 				return err
 			}
+
+			am.UpdateTunnelState()
+
 			return nil
 		}
 
@@ -228,9 +251,15 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayload) bool {
 	app.StateLock.Lock()
+	defer app.StateLock.Unlock()
+
 	notInstalled := app.CurrentState == common.REMOVED || app.CurrentState == common.UNINSTALLED
-	app.StateLock.Unlock()
+	buildRequest := app.RequestedState == common.BUILT
 	removalRequest := payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED
+
+	if buildRequest {
+		return true
+	}
 
 	// if the app is not on the device and we do any transition that would require internet we return true
 	if notInstalled && payload.Stage == common.PROD && !removalRequest {
@@ -303,21 +332,20 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 		// transition again
 		safe.Go(func() {
-			builtOrPublishedToPresent := requestedStatePayload.RequestedState == common.PRESENT &&
-				(curAppState == common.BUILT || curAppState == common.PUBLISHED)
-
-			// we confirmed the release in the backend and can put the state to PRESENT now
-			if builtOrPublishedToPresent {
-				am.StateObserver.Notify(app, common.PRESENT)
-				return
-			}
-
 			_ = am.RequestAppState(requestedStatePayload)
 		})
 	} else {
 		err = am.syncPortState(requestedStatePayload, app)
 		if err != nil {
 			log.Error().Err(err).Msgf("failed to sync port state")
+			return err
+		}
+	}
+
+	if curAppState == common.BUILT && requestedState == common.BUILT {
+		// The build has finished and should now be put to PRESENT
+		err = am.StateObserver.Notify(app, common.PRESENT)
+		if err != nil {
 			return err
 		}
 	}

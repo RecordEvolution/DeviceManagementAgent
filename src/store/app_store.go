@@ -15,20 +15,20 @@ import (
 
 type AppStore struct {
 	database  persistence.Database
-	messenger messenger.Messenger
+	Messenger messenger.Messenger
 	apps      []*common.App
 }
 
 func NewAppStore(database persistence.Database, messenger messenger.Messenger) AppStore {
 	return AppStore{
 		database:  database,
-		messenger: messenger,
+		Messenger: messenger,
 		apps:      make([]*common.App, 0),
 	}
 }
 
 func (am *AppStore) SetMessenger(messenger messenger.Messenger) {
-	am.messenger = messenger
+	am.Messenger = messenger
 }
 
 func (am *AppStore) GetAllApps() ([]*common.App, error) {
@@ -115,7 +115,7 @@ func (am *AppStore) UpdateLocalRequestedState(payload common.TransitionPayload) 
 func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 	ctx := context.Background()
 	args := []interface{}{common.Dict{"callerID": callerID}}
-	resp, err := am.messenger.Call(ctx, topics.GetRegistryToken, args, nil, nil, nil)
+	resp, err := am.Messenger.Call(ctx, topics.GetRegistryToken, args, nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -154,7 +154,7 @@ func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppSt
 
 // UpdateRemoteAppState update sthe remote app database
 func (am *AppStore) UpdateRemoteAppState(ctx context.Context, app *common.App, stateToSet common.AppState) error {
-	config := am.messenger.GetConfig()
+	config := am.Messenger.GetConfig()
 
 	payload := []interface{}{common.Dict{
 		"app_key":               app.AppKey,
@@ -171,7 +171,7 @@ func (am *AppStore) UpdateRemoteAppState(ctx context.Context, app *common.App, s
 		"updateStatus":          app.UpdateStatus,
 	}}
 
-	_, err := am.messenger.Call(ctx, topics.SetActualAppOnDeviceState, payload, nil, nil, nil)
+	_, err := am.Messenger.Call(ctx, topics.SetActualAppOnDeviceState, payload, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -203,12 +203,12 @@ func (am *AppStore) UpdateRequestedStatesWithRemote() error {
 
 func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error) {
 	ctx := context.Background()
-	config := am.messenger.GetConfig()
+	config := am.Messenger.GetConfig()
 	args := []interface{}{common.Dict{"device_key": config.ReswarmConfig.DeviceKey}}
 
 	log.Debug().Msgf("Fetching requested states for device with key: %d", config.ReswarmConfig.DeviceKey)
 
-	result, err := am.messenger.Call(ctx, topics.GetRequestedAppStates, args, nil, nil, nil)
+	result, err := am.Messenger.Call(ctx, topics.GetRequestedAppStates, args, nil, nil, nil)
 	if err != nil {
 		return []common.TransitionPayload{}, err
 	}

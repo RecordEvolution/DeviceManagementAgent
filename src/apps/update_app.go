@@ -71,6 +71,15 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	}
 
 	// Need to authenticate to private registry to determine proper privileges to pull the app
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+
 	authConfig := container.AuthConfig{
 		Username: payload.RegisteryToken,
 		Password: config.ReswarmConfig.Secret,
@@ -188,29 +197,22 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	config := sm.Container.GetConfig()
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
 	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
 	if err != nil {
 		return err
 	}
 
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+
 	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
-	if err != nil {
-		return err
-	}
-
-	loginOutput, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
-	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(loginOutput, payload.ContainerName.Prod)
-	if err != nil {
-		return err
-	}
-
-	err = loginCmd.Wait()
 	if err != nil {
 		return err
 	}

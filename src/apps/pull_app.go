@@ -59,20 +59,12 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	config := sm.Container.GetConfig()
-
-	loginOutput, loginCmd, err := compose.Login(config.ReswarmConfig.DockerRegistryURL, payload.RegisteryToken, config.ReswarmConfig.Secret)
+	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(loginOutput, topicForLogStream)
-	if err != nil {
-		return err
-	}
-
-	err = loginCmd.Wait()
-	if err != nil {
+		writeErr := sm.LogManager.Write(topicForLogStream, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
 
@@ -129,6 +121,15 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	}
 
 	// Need to authenticate to private registry to determine proper privileges to pull the app
+	err = sm.HandleRegistryLoginsWithDefault(payload)
+	if err != nil {
+		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
+		if writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+
 	authConfig := container.AuthConfig{
 		Username: payload.RegisteryToken,
 		Password: config.ReswarmConfig.Secret,
