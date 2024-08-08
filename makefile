@@ -17,15 +17,15 @@ build-all-docker: clean ## Builds all docker images for all targets in targets f
 	docker build --platform linux/amd64 . -t agent-builder
 	docker run --name agent_builder -v ${ROOT_DIR}/build:/app/reagent/build agent-builder
 
-rollout: build-all-docker publish publish-version publish-latestVersions ## Do everythin in one step
+rollout: build-all-docker publish release ## Do everythin in one step
 
 clean:
 	docker rm -f agent_builder
 	rm -f build/*
 
-publish-all: publish publish-version publish-latestVersions ## publish the metadata and binaries from the build folder
+release: publish-version publish-latestVersions ## publish the new metadata
 
-publish:
+publish: # publish the binaries from the build folder
 	scripts/publish.sh
 
 publish-version:

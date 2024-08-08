@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/rs/zerolog/log"
+
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,5 +190,19 @@ func LoadReswarmConfig(path string) (*ReswarmConfig, error) {
 
 	var reswarmConfig ReswarmConfig
 	json.Unmarshal(byteValue, &reswarmConfig)
+
+	if reswarmConfig.DockerRegistryURL == "registry.reswarm.io/" {
+		reswarmConfig.DockerRegistryURL = "registry.ironflock.com/"
+	}
+
+	if reswarmConfig.DeviceEndpointURL == "wss://cbw.record-evolution.com/ws-re-dev" {
+		reswarmConfig.DeviceEndpointURL = "wss://cbw.ironflock.com/ws-re-dev"
+	}
+
+	err = SaveReswarmConfig(path, &reswarmConfig)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to save .flock config file")
+	}
+
 	return &reswarmConfig, nil
 }
