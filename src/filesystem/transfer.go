@@ -57,7 +57,7 @@ func (fs *Filesystem) GetActiveTransfer(containerName string) *ActiveFileTransfe
 
 // Write decodes hex encoded data chunks and writes to a file.
 //
-// Matches implementation in file_transfer.ts (Reswarm Backend)
+// Matches implementation in file_transfer.ts (IronFlock Backend)
 func (fs *Filesystem) Write(chunk FileChunk) error {
 
 	fs.activeTransfersLock.Lock()

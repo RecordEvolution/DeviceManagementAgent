@@ -200,7 +200,7 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 				duration = time.Since(requestStart)
 
 				if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") {
-					exitMessage := fmt.Sprintln("The RESWARM device no longer exists")
+					exitMessage := fmt.Sprintln("The IronFlock device no longer exists")
 					fmt.Println(exitMessage)
 					os.Exit(1)
 				}

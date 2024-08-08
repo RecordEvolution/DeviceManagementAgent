@@ -74,7 +74,7 @@ In the config package, we define various elements such as the command line argum
 
 The `main.go` and `agent.go` files are the entry points of the application. In the `main.go` file, we instantiate an `Agent` struct that serves as the API for the entire application.
 
-The `main.go` file is responsible for loading the `.reswarm` file, initializing the agent in offline mode, checking if the Docker Daemon is enabled, and initializing the connection callback for the agent itself.
+The `main.go` file is responsible for loading the `.flock` file, initializing the agent in offline mode, checking if the Docker Daemon is enabled, and initializing the connection callback for the agent itself.
 
 The `Agent` struct is initialized using the following components:
 
