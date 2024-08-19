@@ -68,16 +68,6 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		}
 	}
 
-	wg.Add(1)
-	safe.Go(func() {
-		defer wg.Done()
-
-		_, err := agent.System.UpdateSystem(nil, agent.Config.CommandLineArguments.ShouldUpdateAgent)
-		if err != nil {
-			log.Error().Err(err).Msgf("Failed to update system")
-		}
-	})
-
 	err = agent.System.UpdateDeviceMetadata()
 	if err != nil {
 		log.Error().Err(err).Msgf("update device metadata")

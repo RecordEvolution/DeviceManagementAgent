@@ -108,6 +108,15 @@ func main() {
 	agent := NewAgent(&generalConfig)
 	agent.ListenForDisconnect()
 
+	safe.Go((func() {
+		startupLogChannel <- "Checking for agent update in background..."
+
+		_, err = agent.System.UpdateSystem(nil, agent.Config.CommandLineArguments.ShouldUpdateAgent)
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to update system")
+		}
+	}))
+
 	startupLogChannel <- "Waiting for Docker Daemon to be available..."
 
 	err = agent.Container.WaitForDaemon()
