@@ -99,7 +99,7 @@ func main() {
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to load reswarm config file")
+		log.Fatal().Stack().Err(err).Msg("failed to load .flock config file")
 	}
 
 	generalConfig := config.New(cliArgs, reswarmConfig)

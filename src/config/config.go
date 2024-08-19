@@ -5,12 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/rs/zerolog/log"
+
 	"os"
 	"path/filepath"
 	"runtime"
 )
 
-// ReswarmConfig types for the .reswarm file
+// ReswarmConfig types for the .flock file
 type ReswarmConfig struct {
 	Name   string `json:"name"`
 	Secret string `json:"secret"`
@@ -132,7 +135,7 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	pingPongTimeout := flag.Uint("ppTimeout", 0, "Sets the ping pong timeout of the client in milliseconds (0 means no timeout)")
 	responseTimeout := flag.Uint("respTimeout", 5000, "Sets the response timeout of the client in milliseconds")
 	socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds. (0 means no timeout)")
-	cfgFile := flag.String("config", "", "reswarm configuration file")
+	cfgFile := flag.String("config", "", "ironflock configuration file")
 	flag.Parse()
 
 	cliArgs := CommandLineArguments{
@@ -187,5 +190,19 @@ func LoadReswarmConfig(path string) (*ReswarmConfig, error) {
 
 	var reswarmConfig ReswarmConfig
 	json.Unmarshal(byteValue, &reswarmConfig)
+
+	if reswarmConfig.DockerRegistryURL == "registry.reswarm.io/" {
+		reswarmConfig.DockerRegistryURL = "registry.ironflock.com/"
+	}
+
+	if reswarmConfig.DeviceEndpointURL == "wss://cbw.record-evolution.com/ws-re-dev" {
+		reswarmConfig.DeviceEndpointURL = "wss://cbw.ironflock.com/ws-re-dev"
+	}
+
+	err = SaveReswarmConfig(path, &reswarmConfig)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to save .flock config file")
+	}
+
 	return &reswarmConfig, nil
 }

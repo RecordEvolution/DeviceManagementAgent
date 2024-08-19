@@ -1,6 +1,6 @@
 
 <p align="center">
-  <a href="https://record-evolution.de/reswarm">
+  <a href="https://www.ironflock.com/reswarm">
     <img
       alt="reagent.svg"
       src="assets/reagent.svg"
@@ -14,7 +14,7 @@
 The _Reagent_ is a (lightweight) daemon running on IoT devices that provides
 an interface to manage containers on the device and to collect/request app logs.
 In particular, the daemon enables the
-[Record Evolution IoT Development Studio](https://record-evolution.de/reswarm)
+[IronFlock IoT Development Studio](https://www.ironflock.com/reswarm)
 to authenticate and securely connect to an IoT device in order to control apps
 running in containers on the device and retrieve their result and logs.
 
@@ -94,7 +94,7 @@ Usage of ./reagent:
 
 The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
 
-Read more on `.reswarm` files and how they work here: https://docs.record-evolution.de/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
+Read more on `.reswarm` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
 
 **Example Usage**
 ```
