@@ -94,7 +94,7 @@ Usage of ./reagent:
 
 The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
 
-Read more on `.reswarm` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/flash-your-iot-devices?id=the-reflasher-app-in-detail
+Read more on `.reswarm` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
 
 **Example Usage**
 ```
