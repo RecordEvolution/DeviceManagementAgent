@@ -80,8 +80,8 @@ func initialize(config *config.Config) TunnelConfigBuilder {
 	configBuilder.SetCommonVariable(SERVER_ADDRESS, serverAddr)
 	configBuilder.SetCommonVariable(SERVER_PORT, "7000")
 	configBuilder.SetCommonVariable(ENALBE_TLS, "true")
-	configBuilder.SetCommonVariable(ADMIN_ADDRESS, "127.0.0.1")
-	configBuilder.SetAdminPort()
+	// configBuilder.SetCommonVariable(ADMIN_ADDRESS, "127.0.0.1")
+	// configBuilder.SetAdminPort()
 
 	configBuilder.SaveConfig()
 

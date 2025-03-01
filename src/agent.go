@@ -49,6 +49,7 @@ type Agent struct {
 func (agent *Agent) OnConnect(reconnect bool) error {
 	var wg sync.WaitGroup
 
+	log.Info().Msg("Updating Remote Device Status ...")
 	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
@@ -62,38 +63,45 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 			log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
 		}
 
+		log.Info().Msg("Starting TunnelManager ...")
 		err = agent.TunnelManager.Start()
 		if err != nil {
 			log.Error().Err(err).Msgf("Failed to start tunnel manager")
 		}
 	}
 
+	log.Info().Msg("Updating Device Meta Data ...")
 	err = agent.System.UpdateDeviceMetadata()
 	if err != nil {
 		log.Error().Err(err).Msgf("update device metadata")
 	}
 
+	log.Info().Msg("Updating Device Architecture ...")
 	err = agent.updateRemoteDevice()
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
 
 	// First call this in case we don't have any app state yet, then we can start containers accordingly
+	log.Info().Msg("Syncing app states ...")
 	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to sync")
 	}
 
+	log.Info().Msg("Correcting local app states ...")
 	err = agent.StateObserver.CorrectAppStates(true)
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to CorrectLocalAndUpdateRemoteAppStates")
 	}
 
+	log.Info().Msg("Starting app state observer ...")
 	err = agent.StateObserver.ObserveAppStates()
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to init app state observers")
 	}
 
+	log.Info().Msg("Ensuring app states ...")
 	err = agent.AppManager.EnsureRemoteRequestedStates()
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("failed to EvaluateRequestedStates")

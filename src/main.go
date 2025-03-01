@@ -133,7 +133,7 @@ func main() {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
 
-	startupLogChannel <- "OnConnect handler finished"
+	startupLogChannel <- "OnConnect handler finished. Starting hearbeat."
 
 	agent.InitConnectionStatusHeartbeat()
 
