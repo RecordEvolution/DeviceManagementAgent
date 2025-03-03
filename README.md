@@ -107,8 +107,14 @@ Read more on `.reswarm` files and how they work here: https://docs.ironflock.com
 Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command in the the `src/` directory:
 
 ```
-go run . -config path/to/config.reswarm -prettyLogging
+go run . -config test-config.flock -prettyLogging -env=local
+
+# on mac
+DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run . -config test-config.flock -prettyLogging -env=local -nmw=false
 ```
+
+To test with a local test device use the test-config.flock file when connecting to the local dev environment. A few things might need to be adjusted according to your environment.
+The secret must be the one from the device's database record. Also use the insecure (ws instead of wss) endpoint and make sure the swarm_key and device_key are set.
 
 If you encounter any privilege issues, please try removing the agent home directory beforehand (by default found in `${HOME}/reagent`) or try running `go` as root.
 

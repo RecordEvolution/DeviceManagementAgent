@@ -206,6 +206,7 @@ var errMessageRegexp = regexp.MustCompile(`error: (.*)`)
 var proxyNameRegex = regexp.MustCompile(`\[(\d+)-(.*)-(\d+)-(.*)\]`)
 
 func (frpTm *FrpTunnelManager) Restart() error {
+	log.Debug().Msg("Restarting tunnel client...")
 	if frpTm.clientProcess == nil || frpTm.clientProcess.Process == nil {
 		return errors.New("frp client is not running")
 	}
@@ -437,13 +438,13 @@ func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol)
 
 func (frpTm *FrpTunnelManager) Reload() error {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
 	output, err := exec.CommandContext(ctx, frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath).CombinedOutput()
 	if err != nil {
 		// frpc service is not properly running
+		log.Error().Err(err).Msgf("Error while reloading frp client config: %s", string(output))
 		if strings.Contains(string(output), "connect: connection refused") {
 			safe.Go(func() {
 				frpTm.Restart()
@@ -589,6 +590,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 		// If no remote port is set, we will allocate one
 		remotePort, err := frpTm.reserveRemotePort(config.RemotePort, config.Protocol)
 		if err != nil {
+			log.Error().Err(err).Msg("Error while reserving remote port")
 			return TunnelConfig{}, err
 		}
 		config.RemotePort = remotePort

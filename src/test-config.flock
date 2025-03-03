@@ -1,0 +1,33 @@
+{
+ "name": "device-b",
+ "secret": "yxXGxp7zFQayH9ii4Okmlg==",
+ "board": {
+  "cpu": "cortex-a53",
+  "docs": null,
+  "board": "raspberrypi",
+  "model": "raspberrypi3-64",
+  "boardname": "Raspberry Pi",
+  "modelname": "Raspberry Pi 3",
+  "reflasher": false,
+  "architecture": "arm64"
+ },
+ "status": "DISCONNECTED",
+ "password": "",
+ "wlanssid": "",
+ "swarm_key": 2,
+ "device_key": 2,
+ "swarm_name": "demo_swarm",
+ "description": "This is a demo device",
+ "architecture": "arm64",
+ "serial_number": "c6aa09d3-3dbd-4830-a230-bf75cdd7f149",
+ "authentication": {
+  "key": "",
+  "certificate": ""
+ },
+ "swarm_owner_name": "demo",
+ "config_passphrase": "",
+ "device_endpoint_url": "ws://localhost:8080/ws-re-dev",
+ "environment": "production",
+ "docker_registry_url": "localhost:5001/",
+ "docker_main_repository": "apps/"
+}

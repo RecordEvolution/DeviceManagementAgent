@@ -851,7 +851,7 @@ func (lm *LogManager) SetupEndpoints() error {
 				subscription.Publish = false
 				subscription.subscriptionStateMutex.Unlock()
 
-				log.Print("Log Manager: Stopped publishing logs for", subscription.ContainerName)
+				log.Print("Log Manager: Stopped publishing logs for ", subscription.ContainerName)
 			}
 		})
 

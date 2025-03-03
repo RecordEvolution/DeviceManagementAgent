@@ -80,8 +80,12 @@ func initialize(config *config.Config) TunnelConfigBuilder {
 	configBuilder.SetCommonVariable(SERVER_ADDRESS, serverAddr)
 	configBuilder.SetCommonVariable(SERVER_PORT, "7000")
 	configBuilder.SetCommonVariable(ENALBE_TLS, "true")
-	// configBuilder.SetCommonVariable(ADMIN_ADDRESS, "127.0.0.1")
-	// configBuilder.SetAdminPort()
+	configBuilder.SetCommonVariable(ADMIN_ADDRESS, "127.0.0.1") // required for hot reload of the frpc.ini config
+	configBuilder.SetAdminPort()
+	configBuilder.SetCommonVariable("log_file", "/var/log/frpc.log")
+	configBuilder.SetCommonVariable("log_level", "debug")
+	configBuilder.SetCommonVariable("log_max_days", "3")
+	// configBuilder.SetCommonVariable("login_fail_exit", "false") // we have our own restart mechanism
 
 	configBuilder.SaveConfig()
 

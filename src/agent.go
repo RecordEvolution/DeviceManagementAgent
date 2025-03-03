@@ -64,10 +64,12 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		}
 
 		log.Info().Msg("Starting TunnelManager ...")
-		err = agent.TunnelManager.Start()
-		if err != nil {
-			log.Error().Err(err).Msgf("Failed to start tunnel manager")
-		}
+		safe.Go(func() {
+			err := agent.TunnelManager.Start()
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to start tunnel manager")
+			}
+		})
 	}
 
 	log.Info().Msg("Updating Device Meta Data ...")
