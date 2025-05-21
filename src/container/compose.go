@@ -159,7 +159,7 @@ func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error)
 }
 
 func (c *Compose) Up(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "up", "-d")
+	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d")
 }
 
 func (c *Compose) WaitForRunning(ctx context.Context, dockerComposePath string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {

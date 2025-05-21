@@ -20,10 +20,10 @@ func (ex *External) updateReagent(ctx context.Context, response messenger.Result
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update reagent"))
 	}
 
-	reswarmModeEnabled, _ := filesystem.PathExists("/opt/reagent/reswarm-mode")
-	if !reswarmModeEnabled {
-		return nil, errors.New("cannot update on non reswarm-mode enabled system")
-	}
+	// reswarmModeEnabled, _ := filesystem.PathExists("/opt/reagent/reswarm-mode")
+	// if !reswarmModeEnabled {
+	// 	return nil, errors.New("cannot update on non reswarm-mode enabled system")
+	// }
 
 	progressCallback := func(downloadProgress filesystem.DownloadProgress) {
 		progress := common.Dict{

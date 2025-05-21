@@ -92,13 +92,13 @@ Usage of ./reagent:
        displays the current version of the agent
 ```
 
-The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
+The `config` parameter needs to be populated with the path to a local `.flock` file. This `.flock` file contains all the neccessary device configuration and authentication data required to run the agent.
 
-Read more on `.reswarm` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
+Read more on `.flock` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
 
 **Example Usage**
 ```
-./reagent -config path/to/config.reswarm -prettyLogging
+./reagent -config path/to/config.flock -prettyLogging
 ```
 
 
@@ -185,7 +185,7 @@ The `make publish` command will publish all binaries that are found within the `
 
 ### Release
 
-Once the new binaries have been published they need to be made public for the each _Reswarm_ environment (local, production and test cloud).
+Once the new binaries have been published they need to be made public for each _IronFlock_ environment (local, production and test cloud).
 
 To update the latest available Reagent binary, the `availableVersions.json` must be updated and published.
 

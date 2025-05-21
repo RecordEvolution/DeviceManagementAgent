@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -91,6 +92,7 @@ type PortForwardRule struct {
 	Protocol              string `json:"protocol"`
 	LocalIP               string `json:"local_ip"`
 	RemotePortEnvironment string `json:"remote_port_environment"`
+	RemotePort            uint64 `json:"remote_port"`
 }
 
 func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
@@ -118,6 +120,27 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 	return portEntries, nil
 }
 
+func PortForwardRuleToInterface(portEntries []PortForwardRule) ([]interface{}, error) {
+	portEntriesInterface := make([]interface{}, 0, len(portEntries))
+
+	for _, portEntry := range portEntries {
+		jsonStr, err := json.Marshal(portEntry)
+		if err != nil {
+			return nil, err
+		}
+
+		var portEntryInterface interface{}
+		err = json.Unmarshal(jsonStr, &portEntryInterface)
+		if err != nil {
+			return nil, err
+		}
+
+		portEntriesInterface = append(portEntriesInterface, portEntryInterface)
+
+	}
+	return portEntriesInterface, nil
+}
+
 type TunnelManager interface {
 	AddTunnel(config TunnelConfig) (TunnelConfig, error)
 	GetState() ([]TunnelState, error)
@@ -128,6 +151,7 @@ type TunnelManager interface {
 	Status(tunnelID string) (TunnelStatus, error)
 	Reload() error
 	Start() error
+	SaveRemotePorts(payload common.TransitionPayload) error
 }
 
 type TunnelStatus struct {
@@ -188,6 +212,7 @@ func parseProxyStatus(text string) ([]TunnelStatus, error) {
 				remotePortStr := strings.Split(frpStatus.RemoteAddr, ":")[1]
 				remotePort, err := strconv.ParseInt(remotePortStr, 10, 64)
 				if err != nil {
+					log.Error().Msgf("frpStatus.RemoteAddr: %s", frpStatus.RemoteAddr)
 					return nil, err
 				}
 
@@ -208,16 +233,19 @@ var proxyNameRegex = regexp.MustCompile(`\[(\d+)-(.*)-(\d+)-(.*)\]`)
 func (frpTm *FrpTunnelManager) Restart() error {
 	log.Debug().Msg("Restarting tunnel client...")
 	if frpTm.clientProcess == nil || frpTm.clientProcess.Process == nil {
+		log.Error().Msg("frp client is not running")
 		return errors.New("frp client is not running")
 	}
 
 	err := frpTm.clientProcess.Process.Kill()
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to kill frp client process")
 		return err
 	}
 
 	processState, err := frpTm.clientProcess.Process.Wait()
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to wait for frp client process")
 		return err
 	}
 
@@ -241,11 +269,13 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 	stdout, err := frpCommand.StdoutPipe()
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to get stdout pipe for frp command")
 		return err
 	}
 
 	err = frpCommand.Start()
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to start frp command")
 		return err
 	}
 
@@ -585,6 +615,7 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 
 // Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
 func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, error) {
+	log.Debug().Str("subdomain", config.Subdomain).Str("protocol", string(config.Protocol)).Msg("AddTunnel called")
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if config.Protocol != HTTP && config.Protocol != HTTPS {
 		// If no remote port is set, we will allocate one
@@ -626,6 +657,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 }
 
 func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
+	log.Debug().Str("subdomain", conf.Subdomain).Str("protocol", string(conf.Protocol)).Msg("RemoveTunnel called")
 	tunnelId := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
 
 	frpTm.tunnelsLock.Lock()
@@ -634,6 +666,7 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
 		frpTm.tunnelsLock.Unlock()
 	} else {
 		frpTm.tunnelsLock.Unlock()
+		log.Warn().Str("tunnelId", tunnelId).Msg("Tunnel does not exist, cannot remove")
 		return errors.New("tunnel does not exist")
 	}
 
@@ -641,17 +674,39 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
 
 	err := frpTm.Reload()
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to reload after removing tunnel")
 		return err
 	}
 
-	// for update := range frpTm.tunnelUpdateChan {
-	// 	if update.AppName == strings.ToLower(conf.AppName) &&
-	// 		update.LocalPort == conf.LocalPort &&
-	// 		update.Protocol == conf.Protocol &&
-	// 		update.UpdateType == REMOVED {
-	// 		break
-	// 	}
-	// }
-
 	return nil
+}
+
+func (frpTm *FrpTunnelManager) SaveRemotePorts(payload common.TransitionPayload) error {
+	// log.Debug().Str("app_key", fmt.Sprintf("%v", payload.AppKey)).Interface("payload", payload).Msg("SaveRemotePort called")
+
+	update := []interface{}{common.Dict{
+		"app_key":    payload.AppKey,
+		"device_key": frpTm.config.ReswarmConfig.DeviceKey,
+		"swarm_key":  frpTm.config.ReswarmConfig.SwarmKey,
+		"stage":      payload.Stage,
+		"ports":      payload.Ports,
+		"foo":        "bar",
+	}}
+	log.Debug().Interface("update", update).Msg("Saving remote port with update payload")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	_, err := frpTm.messenger.Call(ctx, topics.SetActualAppOnDeviceState, update, nil, nil, nil)
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to save remote port")
+		return err
+	}
+
+	log.Info().Str("app_key", fmt.Sprintf("%v", payload.AppKey)).Msg("Remote port saved successfully")
+	return nil
+}
+
+func init() {
+	// Set zerolog to use a pretty console writer for human-friendly logs
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"})
 }
