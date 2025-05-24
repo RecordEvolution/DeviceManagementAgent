@@ -75,11 +75,11 @@ type TransitionPayload struct {
 	RegistryImageName    StageBasedResult
 	ContainerName        StageBasedResult
 	DockerCredentials    map[string]DockerCredential
-	EnvironmentVariables map[string]interface{}
-	EnvironmentTemplate  map[string]interface{}
-	DockerCompose        map[string]interface{}
-	NewDockerCompose     map[string]interface{}
-	Ports                []interface{}
+	EnvironmentVariables map[string]any
+	EnvironmentTemplate  map[string]any
+	DockerCompose        map[string]any
+	NewDockerCompose     map[string]any
+	Ports                []any
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string

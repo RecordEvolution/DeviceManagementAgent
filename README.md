@@ -92,27 +92,28 @@ Usage of ./reagent:
        displays the current version of the agent
 ```
 
-The `config` parameter needs to be populated with the path to a local `.reswarm` file. This `.reswarm` file contains all the neccessary device configuration and authentication data required to run the agent.
+The `config` parameter needs to be populated with the path to a local `.flock` file. This `.flock` file contains all the neccessary device configuration and authentication data required to run the agent.
 
-Read more on `.reswarm` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
+Read more on `.flock` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
 
 **Example Usage**
 ```
-./reagent -config path/to/config.reswarm -prettyLogging
+./reagent -config path/to/config.flock -prettyLogging
 ```
 
 
 ## Development
 
-Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command in the the `src/` directory:
+Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command :
 
 ```
-go run . -config test-config.flock -prettyLogging -env=local
+make run
 
-# on mac
-DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run . -config test-config.flock -prettyLogging -env=local -nmw=false
+# or on a mac
+make run_mac
+
 ```
-
+During development the `/opt/reagent` folder is used as the agent directory. There you can find additional config like the frpc.ini for the tunnel configuration.
 To test with a local test device use the test-config.flock file when connecting to the local dev environment. A few things might need to be adjusted according to your environment.
 The secret must be the one from the device's database record. Also use the insecure (ws instead of wss) endpoint and make sure the swarm_key and device_key are set.
 
@@ -185,7 +186,7 @@ The `make publish` command will publish all binaries that are found within the `
 
 ### Release
 
-Once the new binaries have been published they need to be made public for the each _Reswarm_ environment (local, production and test cloud).
+Once the new binaries have been published they need to be made public for each _IronFlock_ environment (local, production and test cloud).
 
 To update the latest available Reagent binary, the `availableVersions.json` must be updated and published.
 

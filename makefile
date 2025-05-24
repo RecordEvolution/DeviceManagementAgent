@@ -8,8 +8,12 @@ help: ## This help.
 .DEFAULT_GOAL := help
 
 run:
-	cd src && sudo go run . -config ${HOME}/git/RESWARM/agent/device-config.reswarm -prettyLogging
+	cd src && sudo go run . -config test-config.flock -prettyLogging -env=local -prettyLogging
 
+run_mac:
+	cd src && DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run . -config test-config.flock -prettyLogging -env=local -nmw=false
+
+# Not preferred. Use build-all-docker instead.
 build-all:
 	scripts/build-all.sh
 
