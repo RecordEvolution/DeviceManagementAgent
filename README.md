@@ -104,15 +104,16 @@ Read more on `.flock` files and how they work here: https://docs.ironflock.com/#
 
 ## Development
 
-Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command in the the `src/` directory:
+Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command :
 
 ```
-go run . -config test-config.flock -prettyLogging -env=local
+make run
 
-# on mac
-DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run . -config test-config.flock -prettyLogging -env=local -nmw=false
+# or on a mac
+make run_mac
+
 ```
-
+During development the `/opt/reagent` folder is used as the agent directory. There you can find additional config like the frpc.ini for the tunnel configuration.
 To test with a local test device use the test-config.flock file when connecting to the local dev environment. A few things might need to be adjusted according to your environment.
 The secret must be the one from the device's database record. Also use the insecure (ws instead of wss) endpoint and make sure the swarm_key and device_key are set.
 

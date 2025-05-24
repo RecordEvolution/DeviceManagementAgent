@@ -209,14 +209,18 @@ func parseProxyStatus(text string) ([]TunnelStatus, error) {
 			}
 
 			if frpStatus.RemoteAddr != "" {
-				remotePortStr := strings.Split(frpStatus.RemoteAddr, ":")[1]
-				remotePort, err := strconv.ParseInt(remotePortStr, 10, 64)
-				if err != nil {
-					log.Error().Msgf("frpStatus.RemoteAddr: %s", frpStatus.RemoteAddr)
-					return nil, err
+				parts := strings.Split(frpStatus.RemoteAddr, ":")
+				if len(parts) > 1 {
+					remotePortStr := parts[1]
+					remotePort, err := strconv.ParseInt(remotePortStr, 10, 64)
+					if err != nil {
+						log.Error().Msgf("frpStatus.RemoteAddr: %s", frpStatus.RemoteAddr)
+						return nil, err
+					}
+					tunnelStatus.RemotePort = uint64(remotePort)
+				} else {
+					log.Warn().Msgf("RemoteAddr does not contain port: %s", frpStatus.RemoteAddr)
 				}
-
-				tunnelStatus.RemotePort = uint64(remotePort)
 			}
 
 			frpStatuses = append(frpStatuses, tunnelStatus)
@@ -513,11 +517,13 @@ func (frpTm *FrpTunnelManager) buildURL(protocol Protocol, subdomain string, rem
 func (frpTm *FrpTunnelManager) GetState() ([]TunnelState, error) {
 	tunnelConfigs, err := frpTm.GetTunnelConfig()
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to get tunnel configs")
 		return nil, err
 	}
 
 	tunnelStatuses, err := frpTm.AllStatus()
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to get tunnel statuses")
 		return nil, err
 	}
 

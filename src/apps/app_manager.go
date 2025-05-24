@@ -97,6 +97,16 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 				}
 				// continue
 			}
+		} else {
+			// Remove tunnel when it's not active and app is not running
+			tnl := am.tunnelManager.Get(tunnelID)
+			if tnl != nil {
+				log.Info().Str("tunnelID", tunnelID).Msg("Removing tunnel as it is not active and app is not running")
+				err := am.tunnelManager.RemoveTunnel(tnl.Config)
+				if err != nil {
+					log.Error().Stack().Err(err).Msg("Failed to remove tunnel")
+				}
+			}
 		}
 
 		newPort := portRule
@@ -106,15 +116,6 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 		newPorts = append(newPorts, newPort)
 
-		// Remove tunnel when it's not active and app is not running
-		tnl := am.tunnelManager.Get(tunnelID)
-		if tnl != nil {
-			log.Info().Str("tunnelID", tunnelID).Msg("Removing tunnel as it is not active and app is not running")
-			err := am.tunnelManager.RemoveTunnel(tnl.Config)
-			if err != nil {
-				log.Error().Stack().Err(err).Msg("Failed to remove tunnel")
-			}
-		}
 	}
 
 	np, err := tunnel.PortForwardRuleToInterface(newPorts)
@@ -126,10 +127,10 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	payload.Ports = np
 	am.tunnelManager.SaveRemotePorts(payload)
 
-	err = am.AppStore.UpdateLocalRequestedState(payload)
-	if err != nil {
-		return err
-	}
+	// err = am.AppStore.UpdateLocalRequestedState(payload)
+	// if err != nil {
+	// 	return err
+	// }
 
 	am.UpdateTunnelState()
 
@@ -173,7 +174,7 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	// TODO: get rid of this ugly patch: cancel any filetransfers for this container on stop press
-	if (curAppState == common.REMOVED || curAppState == common.PRESENT || curAppState == common.FAILED) &&
+	if (curAppState == common.UNINSTALLED || curAppState == common.REMOVED || curAppState == common.PRESENT || curAppState == common.FAILED) &&
 		(requestedAppState == common.PRESENT || requestedAppState == common.BUILT) && payload.Stage == common.DEV {
 		log.Debug().Msg("Canceling file transfer due to state change")
 		am.StateMachine.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
