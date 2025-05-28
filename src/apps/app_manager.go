@@ -68,7 +68,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		return err
 	}
 
-	newPorts := make([]tunnel.PortForwardRule, 0)
+	newPorts := make([]common.PortForwardRule, 0)
 
 	for _, portRule := range portRules {
 		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(globalConfig.ReswarmConfig.DeviceKey), payload.AppName, portRule.Port)

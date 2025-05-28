@@ -60,6 +60,18 @@ type DockerCredential struct {
 	Password string `json:"password"`
 }
 
+type PortForwardRule struct {
+	Main                  bool   `json:"main"`
+	RuleName              string `json:"name"`
+	Active                bool   `json:"active"`
+	Public                bool   `json:"public"`
+	Port                  uint64 `json:"port"`
+	Protocol              string `json:"protocol"`
+	LocalIP               string `json:"local_ip"`
+	RemotePortEnvironment string `json:"remote_port_environment"`
+	RemotePort            uint64 `json:"remote_port"`
+}
+
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
 	RequestedState       AppState

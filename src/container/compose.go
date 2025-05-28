@@ -253,6 +253,10 @@ func (c *Compose) Remove(dockerComposePath string) (chan string, *exec.Cmd, erro
 	return c.composeCommand(dockerComposePath, "rm", "-f")
 }
 
+func (c *Compose) Down(dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommand(dockerComposePath, "down", "-v")
+}
+
 func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {
 	composeListEntry, err := c.List()
 	if err != nil {

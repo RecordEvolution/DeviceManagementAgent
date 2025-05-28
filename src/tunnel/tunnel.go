@@ -84,19 +84,8 @@ type AppTunnel struct {
 	Running   bool
 }
 
-type PortForwardRule struct {
-	Main                  bool   `json:"main"`
-	RuleName              string `json:"name"`
-	Active                bool   `json:"active"`
-	Port                  uint64 `json:"port"`
-	Protocol              string `json:"protocol"`
-	LocalIP               string `json:"local_ip"`
-	RemotePortEnvironment string `json:"remote_port_environment"`
-	RemotePort            uint64 `json:"remote_port"`
-}
-
-func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
-	portEntries := make([]PortForwardRule, 0, len(dat))
+func InterfaceToPortForwardRule(dat []interface{}) ([]common.PortForwardRule, error) {
+	portEntries := make([]common.PortForwardRule, 0, len(dat))
 
 	for _, portEntry := range dat {
 		jsonStr, err := json.Marshal(portEntry)
@@ -104,7 +93,7 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 			return nil, err
 		}
 
-		var portEntry PortForwardRule
+		var portEntry common.PortForwardRule
 		err = json.Unmarshal(jsonStr, &portEntry)
 		if err != nil {
 			return nil, err
@@ -120,7 +109,7 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]PortForwardRule, error) {
 	return portEntries, nil
 }
 
-func PortForwardRuleToInterface(portEntries []PortForwardRule) ([]interface{}, error) {
+func PortForwardRuleToInterface(portEntries []common.PortForwardRule) ([]interface{}, error) {
 	portEntriesInterface := make([]interface{}, 0, len(portEntries))
 
 	for _, portEntry := range portEntries {
