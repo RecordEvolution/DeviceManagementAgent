@@ -91,7 +91,7 @@ type TransitionPayload struct {
 	EnvironmentTemplate  map[string]any
 	DockerCompose        map[string]any
 	NewDockerCompose     map[string]any
-	Ports                []PortForwardRule
+	Ports                []interface{}
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string
@@ -142,7 +142,8 @@ type DeviceSyncResponse struct {
 	EnvironmentTemplate    map[string]interface{} `json:"environment_template"`
 	DockerCompose          map[string]interface{} `json:"docker_compose"`
 	NewDockerCompose       map[string]interface{} `json:"new_docker_compose"`
-	Ports                  []PortForwardRule      `json:"ports"`
+	Ports                  []interface{}          `json:"ports"`
+	CurrentState           string                 `json:"current_state"`
 	Stage                  string                 `json:"stage"`
 	ContainerName          string                 `json:"container_name"`
 	RequestUpdate          bool                   `json:"request_update"`
