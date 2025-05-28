@@ -405,7 +405,7 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 			payload.EnvironmentTemplate = environmentTemplate
 		}
 
-		var ports []interface{}
+		var ports []common.PortForwardRule
 		if portsString != nil && *portsString != "" {
 			err := json.Unmarshal([]byte(*portsString), &ports)
 			if err != nil {
@@ -516,7 +516,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 		payload.EnvironmentTemplate = environmentTemplate
 	}
 
-	ports := make([]interface{}, 0)
+	ports := make([]common.PortForwardRule, 0)
 	if portsString != nil && *portsString != "" {
 		err := json.Unmarshal([]byte(*portsString), &ports)
 		if err != nil {

@@ -60,6 +60,18 @@ type DockerCredential struct {
 	Password string `json:"password"`
 }
 
+type PortForwardRule struct {
+	Main                  bool   `json:"main"`
+	RuleName              string `json:"name"`
+	Active                bool   `json:"active"`
+	Public                bool   `json:"public"`
+	Port                  uint64 `json:"port"`
+	Protocol              string `json:"protocol"`
+	LocalIP               string `json:"local_ip"`
+	RemotePortEnvironment string `json:"remote_port_environment"`
+	RemotePort            uint64 `json:"remote_port"`
+}
+
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
 	RequestedState       AppState
@@ -79,7 +91,7 @@ type TransitionPayload struct {
 	EnvironmentTemplate  map[string]any
 	DockerCompose        map[string]any
 	NewDockerCompose     map[string]any
-	Ports                []any
+	Ports                []PortForwardRule
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string
@@ -130,8 +142,7 @@ type DeviceSyncResponse struct {
 	EnvironmentTemplate    map[string]interface{} `json:"environment_template"`
 	DockerCompose          map[string]interface{} `json:"docker_compose"`
 	NewDockerCompose       map[string]interface{} `json:"new_docker_compose"`
-	Ports                  []interface{}          `json:"ports"`
-	CurrentState           string                 `json:"current_state"`
+	Ports                  []PortForwardRule      `json:"ports"`
 	Stage                  string                 `json:"stage"`
 	ContainerName          string                 `json:"container_name"`
 	RequestUpdate          bool                   `json:"request_update"`
