@@ -91,7 +91,7 @@ type TransitionPayload struct {
 	EnvironmentTemplate  map[string]any
 	DockerCompose        map[string]any
 	NewDockerCompose     map[string]any
-	Ports                []interface{}
+	Ports                []any
 	PublishContainerName string
 	RegisteryToken       string
 	NewestVersion        string

@@ -109,7 +109,7 @@ func InterfaceToPortForwardRule(dat []interface{}) ([]common.PortForwardRule, er
 	return portEntries, nil
 }
 
-func PortForwardRuleToInterface(portEntries []interface{}) ([]interface{}, error) {
+func PortForwardRuleToInterface(portEntries []common.PortForwardRule) ([]interface{}, error) {
 	portEntriesInterface := make([]interface{}, 0, len(portEntries))
 
 	for _, portEntry := range portEntries {
