@@ -517,13 +517,14 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 	return mounts, nil
 }
 
-func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage, appKey uint64) []string {
+func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage, app *common.App) []string {
 	environmentVariables := []string{
 		fmt.Sprintf("DEVICE_SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
 		fmt.Sprintf("ENV=%s", environment),
 		fmt.Sprintf("DEVICE_KEY=%d", config.ReswarmConfig.DeviceKey),
 		fmt.Sprintf("SWARM_KEY=%d", config.ReswarmConfig.SwarmKey),
-		fmt.Sprintf("APP_KEY=%d", appKey),
+		fmt.Sprintf("APP_KEY=%d", app.AppKey),
+		fmt.Sprintf("APP_NAME=%s", app.AppName),
 		fmt.Sprintf("DEVICE_SECRET=%s", config.ReswarmConfig.Secret),
 		fmt.Sprintf("DEVICE_NAME=%s", config.ReswarmConfig.Name),
 		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", config.ReswarmConfig.DeviceEndpointURL),
@@ -540,7 +541,7 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
 	config := sm.Container.GetConfig()
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app.AppKey)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 

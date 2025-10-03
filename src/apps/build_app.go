@@ -29,7 +29,7 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App) (string, error) {
 	var dotEnvFileContents string
 
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app.AppKey)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
