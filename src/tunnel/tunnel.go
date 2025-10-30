@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -255,7 +256,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
 	ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
-	frpCommand := exec.CommandContext(ctx, frpcPath)
+	frpCommand := exec.CommandContext(ctx, frpcPath, "-c", frpTm.configBuilder.ConfigPath)
 	frpCommand.Dir = filepath.Dir(frpcPath)
 
 	frpTm.clientProcess = frpCommand
@@ -562,40 +563,88 @@ func (frpTm *FrpTunnelManager) GetTunnelConfig() ([]TunnelConfig, error) {
 }
 
 func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
-	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
+	adminPort, err := frpTm.configBuilder.GetAdminPort()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get admin port from config")
+		return []TunnelStatus{}, err
+	}
+
+	apiURL := fmt.Sprintf("http://127.0.0.1:%d/api/status", adminPort)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath, "--json").CombinedOutput()
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		if strings.Contains(string(out), "connect: connection refused") {
+		log.Error().Err(err).Msg("Failed to create HTTP request")
+		return []TunnelStatus{}, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if strings.Contains(err.Error(), "connection refused") {
 			safe.Go(func() {
 				frpTm.Restart()
 			})
 			return []TunnelStatus{}, nil
-
 		}
+		log.Error().Err(err).Msg("Failed to call frpc API")
 		return []TunnelStatus{}, nil
 	}
+	defer resp.Body.Close()
 
-	return parseProxyStatus(string(out))
+	if resp.StatusCode != http.StatusOK {
+		log.Error().Msgf("frpc API returned status code: %d", resp.StatusCode)
+		return []TunnelStatus{}, fmt.Errorf("API returned status code: %d", resp.StatusCode)
+	}
+
+	var statusResp map[string][]FrpStatus
+	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+		log.Error().Err(err).Msg("Failed to decode JSON response")
+		return []TunnelStatus{}, err
+	}
+
+	// Convert map to flat array
+	tunnelStatuses := make([]TunnelStatus, 0)
+	for _, statusArray := range statusResp {
+		for _, frpStatus := range statusArray {
+			tunnelStatus := TunnelStatus{
+				Status:     frpStatus.Status,
+				Name:       frpStatus.Name,
+				LocalAddr:  frpStatus.LocalAddr,
+				Plugin:     frpStatus.Plugin,
+				RemoteAddr: frpStatus.RemoteAddr,
+				Error:      frpStatus.Err,
+				Protocol:   Protocol(frpStatus.Type),
+			}
+
+			if frpStatus.RemoteAddr != "" {
+				parts := strings.Split(frpStatus.RemoteAddr, ":")
+				if len(parts) > 1 {
+					remotePortStr := parts[1]
+					remotePort, err := strconv.ParseInt(remotePortStr, 10, 64)
+					if err != nil {
+						log.Error().Msgf("frpStatus.RemoteAddr: %s", frpStatus.RemoteAddr)
+						return nil, err
+					}
+					tunnelStatus.RemotePort = uint64(remotePort)
+				} else {
+					log.Warn().Msgf("RemoteAddr does not contain port: %s", frpStatus.RemoteAddr)
+				}
+			}
+
+			tunnelStatuses = append(tunnelStatuses, tunnelStatus)
+		}
+	}
+
+	return tunnelStatuses, nil
 }
 
 func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
-	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, frpcPath, "status", "-c", frpTm.configBuilder.ConfigPath).Output()
+	// Use AllStatus and filter for the specific tunnel
+	tunnelStatuses, err := frpTm.AllStatus()
 	if err != nil {
 		log.Error().Err(err).Msg("Error while getting tunnel status")
-		return TunnelStatus{}, nil
-	}
-
-	tunnelStatuses, err := parseProxyStatus(string(out))
-	if err != nil {
 		return TunnelStatus{}, err
 	}
 

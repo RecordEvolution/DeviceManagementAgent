@@ -85,7 +85,10 @@ func (sqlite *AppStateDatabase) Init() error {
 		filePath := scriptsDir + "/" + fileName
 		if strings.Contains(fileName, "single-") {
 			err := sqlite.execute(filePath) // ignore error for single run scripts
-			log.Warn().Err(err).Msgf("Failed to execute %s database script, script probably already has been executed", fileName)
+			// Only log warning if it's not a "duplicate column" error (expected for already-executed scripts)
+			if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+				log.Warn().Err(err).Msgf("Failed to execute %s database script", fileName)
+			}
 		} else {
 			err := sqlite.execute(filePath)
 			if err != nil {

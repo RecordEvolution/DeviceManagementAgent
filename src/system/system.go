@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"reagent/common"
 	"reagent/config"
+	"reagent/embedded"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/messenger"
@@ -293,87 +294,42 @@ func (system *System) compareVersion(currentVersion string, latestVersion string
 }
 
 func (system *System) DownloadFrpIfNotExists() error {
-	latestVersion, err := system.GetLatestVersion("frpc")
+	frpcPath := filesystem.GetTunnelBinaryPath(system.config, "frpc")
+
+	// Check if frpc already exists
+	exists, err := filesystem.PathExists(frpcPath)
 	if err != nil {
 		return err
-	}
-
-	exists := true
-
-	_, err = system.GetFrpCurrentVersion()
-	if err != nil {
-		if errors.Is(err, errdefs.ErrNotFound) {
-			exists = false
-		} else {
-			return err
-		}
 	}
 
 	if exists {
+		log.Debug().Msg("frpc already exists, skipping extraction")
 		return nil
 	}
 
-	err = system.downloadBinary("frpc", "frpc", latestVersion, false, nil)
+	// Extract embedded frpc binary
+	log.Info().Msgf("Extracting embedded frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
+	err = embedded.ExtractFrpc(frpcPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to extract embedded frpc: %w", err)
 	}
 
 	return nil
 }
 
 func (system *System) updateFrpIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
-	latestVersion, err := system.GetLatestVersion("frpc")
+	// frpc is now embedded, no updates needed
+	// Just ensure it's extracted if not already present
+	err := system.DownloadFrpIfNotExists()
 	if err != nil {
-		return UpdateResult{}, err
-	}
-
-	exists := true
-	var shouldUpdate bool
-	var errorsArr []error
-
-	currentVersion, err := system.GetFrpCurrentVersion()
-	if err != nil {
-		if errors.Is(err, errdefs.ErrNotFound) {
-			exists = false
-			shouldUpdate = true
-		} else {
-			return UpdateResult{}, err
-		}
-	}
-
-	if exists {
-		shouldUpdate, errorsArr, err = system.compareVersion(currentVersion, latestVersion)
-		if err != nil {
-			return UpdateResult{}, err
-		}
-	}
-
-	if !shouldUpdate {
-		return UpdateResult{
-			CurrentVersion: currentVersion,
-			LatestVersion:  latestVersion,
-			Message:        fmt.Sprintf("%+v", errorsArr),
-			DidUpdate:      false,
-		}, nil
-	}
-
-	err = system.downloadBinary("frpc", "frpc", latestVersion, false, progressCallback)
-	if err != nil {
-		if errdefs.IsInProgress(err) {
-			return UpdateResult{
-				CurrentVersion: currentVersion,
-				LatestVersion:  latestVersion,
-				DidUpdate:      false,
-				InProgress:     true,
-			}, err
-		}
 		return UpdateResult{}, err
 	}
 
 	return UpdateResult{
-		CurrentVersion: currentVersion,
-		LatestVersion:  latestVersion,
-		DidUpdate:      true,
+		CurrentVersion: embedded.FRP_VERSION,
+		LatestVersion:  embedded.FRP_VERSION,
+		Message:        "frpc is embedded in binary",
+		DidUpdate:      false,
 	}, nil
 }
 

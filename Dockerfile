@@ -1,6 +1,6 @@
 FROM golang:1.22.4-alpine
 
-RUN apk add --no-cache git findutils build-base
+RUN apk add --no-cache git findutils build-base curl tar
 
 WORKDIR /app/reagent
 

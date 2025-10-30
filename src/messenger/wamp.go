@@ -205,8 +205,8 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 					os.Exit(1)
 				}
 
-				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 100ms", duration.String())
-				time.Sleep(time.Millisecond * 100)
+				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
+				time.Sleep(time.Second * 1)
 				continue
 			}
 

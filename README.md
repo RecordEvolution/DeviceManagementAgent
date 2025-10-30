@@ -104,6 +104,12 @@ Read more on `.flock` files and how they work here: https://docs.ironflock.com/#
 
 ## Development
 
+The agent embeds the frp client into the binary. For that to work locally you first have to download the frp client.
+
+```
+make download_frpc
+```
+
 Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command :
 
 ```
@@ -113,8 +119,9 @@ make run
 make run_mac
 
 ```
+
 During development the `/opt/reagent` folder is used as the agent directory. There you can find additional config like the frpc.ini for the tunnel configuration.
-To test with a local test device use the test-config.flock file when connecting to the local dev environment. A few things might need to be adjusted according to your environment.
+To test with a local test device use the `test-config.flock` file when connecting to the local dev environment. A few things might need to be adjusted according to your environment.
 The secret must be the one from the device's database record. Also use the insecure (ws instead of wss) endpoint and make sure the swarm_key and device_key are set.
 
 If you encounter any privilege issues, please try removing the agent home directory beforehand (by default found in `${HOME}/reagent`) or try running `go` as root.

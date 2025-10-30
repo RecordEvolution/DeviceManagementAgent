@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reagent/common"
+	"reagent/embedded"
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/release"
@@ -39,28 +40,15 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"canUpdate":    reswarmModeEnabled,
 	}
 
+	// frpc is now embedded in the binary
+	frpVersion := embedded.FRP_VERSION
 	frpIsLatest := true
-	frpCurrentVersion, err := ex.System.GetFrpCurrentVersion()
-	if err != nil {
-		if errors.Is(err, errdefs.ErrNotFound) {
-			frpIsLatest = false
-		} else {
-			return nil, err
-		}
-	}
-
-	latestFrpVersion, err := ex.System.GetLatestVersion("frpc")
-	if err == nil {
-		if frpIsLatest {
-			frpIsLatest = frpCurrentVersion == latestFrpVersion
-		}
-	}
 
 	lastAgentVersion, err := ex.System.GetLatestVersion("re-agent")
 	agentIsLatest := lastAgentVersion == currentAgentVersion
 	if err == nil {
 		dict["latestVersion"] = lastAgentVersion
-		dict["latestTunnelVersion"] = latestFrpVersion
+		dict["latestTunnelVersion"] = frpVersion
 		dict["latestAgentVersion"] = lastAgentVersion
 		dict["hasLatest"] = agentIsLatest && frpIsLatest
 	}
