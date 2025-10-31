@@ -303,11 +303,19 @@ func (system *System) DownloadFrpIfNotExists() error {
 	}
 
 	if exists {
-		log.Debug().Msg("frpc already exists, skipping extraction")
-		return nil
+		// Check if the existing frpc version matches the embedded version
+		currentVersion, err := system.GetFrpCurrentVersion()
+		if err != nil {
+			log.Warn().Err(err).Msg("Could not determine frpc version, will re-extract")
+		} else if currentVersion == embedded.FRP_VERSION {
+			log.Debug().Msgf("frpc v%s already exists, skipping extraction", currentVersion)
+			return nil
+		} else {
+			log.Info().Msgf("frpc version mismatch (current: %s, embedded: %s), updating...", currentVersion, embedded.FRP_VERSION)
+		}
 	}
 
-	// Extract embedded frpc binary
+	// Extract embedded frpc binary (overwrites existing if present)
 	log.Info().Msgf("Extracting embedded frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
 	err = embedded.ExtractFrpc(frpcPath)
 	if err != nil {
