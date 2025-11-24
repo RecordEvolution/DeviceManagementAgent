@@ -470,6 +470,45 @@ func buildProdEnvironmentVariables(defaultEnvironmentVariables []string, payload
 	return append(defaultEnvironmentVariables, common.EnvironmentVarsToStringArray((payloadEnvironmentVariables))...)
 }
 
+const maxEnvVarSize = 20 * 1024 // 20KB - reasonable maximum for environment variables
+
+func writeEnvironmentVariablesToFiles(appSpecificDirectory string, envVars []string) error {
+	envDir := appSpecificDirectory + "/env"
+	err := os.MkdirAll(envDir, os.ModePerm)
+	if err != nil {
+		return err
+	}
+
+	for _, envVar := range envVars {
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		varName := parts[0]
+		varValue := parts[1]
+
+		filePath := fmt.Sprintf("%s/%s.txt", envDir, varName)
+		err := os.WriteFile(filePath, []byte(varValue), 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write env var %s to file: %w", varName, err)
+		}
+	}
+
+	return nil
+}
+
+// filterLargeEnvVars returns only env vars that are below the size threshold
+// Large env vars should only be accessed via files in /data/env/
+func filterLargeEnvVars(envVars []string) []string {
+	filtered := make([]string, 0, len(envVars))
+	for _, envVar := range envVars {
+		if len(envVar) <= maxEnvVarSize {
+			filtered = append(filtered, envVar)
+		}
+	}
+	return filtered
+}
+
 func computeMounts(stage common.Stage, appName string, config *config.Config) ([]mount.Mount, error) {
 	appSpecificDirectory := strings.ToLower(config.CommandLineArguments.AppsDirectory + "/" + string(stage) + "/" + appName)
 
@@ -545,12 +584,25 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
+	// Get app-specific directory for writing env vars
+	appSpecificDirectory := strings.ToLower(config.CommandLineArguments.AppsDirectory + "/" + string(app.Stage) + "/" + app.AppName)
+
 	var containerConfig container.Config
 
 	if app.Stage == common.DEV {
+		// Write all environment variables to files
+		allEnvVars := append(systemDefaultVariables, environmentTemplateDefaults...)
+		err := writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)
+		}
+
+		// Only pass small env vars to container, large ones are available in /data/env/
+		containerEnvVars := filterLargeEnvVars(allEnvVars)
+
 		containerConfig = container.Config{
 			Image:        payload.RegistryImageName.Dev,
-			Env:          append(systemDefaultVariables, environmentTemplateDefaults...),
+			Env:          containerEnvVars,
 			Labels:       map[string]string{"real": "True"},
 			Volumes:      map[string]struct{}{},
 			AttachStdin:  true,
@@ -612,9 +664,19 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			}
 		}
 
+		// Write all environment variables to files
+		allEnvVars := append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
+		err = writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)
+		}
+
+		// Only pass small env vars to container, large ones are available in /data/env/
+		containerEnvVars := filterLargeEnvVars(allEnvVars)
+
 		containerConfig = container.Config{
 			Image:  fullImageNameWithTag,
-			Env:    append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...),
+			Env:    containerEnvVars,
 			Labels: map[string]string{"real": "True"},
 			Tty:    true,
 		}

@@ -331,13 +331,18 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 		return err
 	}
 
-	for _, rState := range rStates {
+	for idx, rState := range rStates {
 
 		// ComposeApp
 		if rState.DockerCompose != nil {
 			err = so.CorrectComposeAppState(rState, allImages, composeListEntry, updateRemote)
 			if err != nil {
 				return err
+			}
+
+			// Throttle remote updates to avoid overwhelming the backend
+			if updateRemote && idx < len(rStates)-1 {
+				time.Sleep(100 * time.Millisecond)
 			}
 
 			continue
@@ -441,6 +446,11 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 
 		if err != nil {
 			log.Error().Stack().Err(err).Msg("Failed to notify state change")
+		}
+
+		// Throttle remote updates to avoid overwhelming the backend
+		if updateRemote && idx < len(rStates)-1 {
+			time.Sleep(100 * time.Millisecond)
 		}
 
 	}
@@ -848,6 +858,20 @@ func (so *StateObserver) ObserveAppStates() error {
 	}
 
 	for _, app := range apps {
+		// Only create observers for apps that should have containers running
+		// Skip apps in REMOVED, UNINSTALLED, FAILED, BUILT, PUBLISHED states
+		app.StateLock.Lock()
+		currentState := app.CurrentState
+		app.StateLock.Unlock()
+
+		if currentState == common.REMOVED ||
+			currentState == common.UNINSTALLED ||
+			currentState == common.FAILED ||
+			currentState == common.BUILT ||
+			currentState == common.PUBLISHED {
+			continue
+		}
+
 		createdObserver := so.addObserver(app.Stage, app.AppKey, app.AppName)
 
 		if !createdObserver {

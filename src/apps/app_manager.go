@@ -11,6 +11,7 @@ import (
 	"reagent/tunnel"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -324,6 +325,7 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 		return err
 	}
 
+	// Stagger the startup to avoid overwhelming the backend
 	for idx := range rStates {
 		payload := rStates[idx]
 
@@ -345,6 +347,9 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 				}
 			}
 		})
+
+		// Add a small delay between starting each app to avoid overwhelming the backend
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	return nil
