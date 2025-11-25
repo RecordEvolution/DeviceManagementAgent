@@ -65,7 +65,7 @@ type ProxyConfig struct {
 	LocalIP    string          `yaml:"localIP,omitempty"`
 	LocalPort  int             `yaml:"localPort"`
 	RemotePort int             `yaml:"remotePort,omitempty"`
-	SubDomain  string          `yaml:"subDomain,omitempty"`
+	SubDomain  string          `yaml:"subdomain,omitempty"`
 	Transport  *ProxyTransport `yaml:"transport,omitempty"`
 }
 
@@ -219,12 +219,22 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 		}
 
 		var appName string
-		result := subdomainRegex.FindStringSubmatch(proxy.SubDomain)
-
-		if len(result) > 1 {
-			appName = result[1]
+		// For HTTP/HTTPS, parse from subdomain field
+		if proxy.SubDomain != "" {
+			result := subdomainRegex.FindStringSubmatch(proxy.SubDomain)
+			if len(result) > 1 {
+				appName = result[1]
+			} else {
+				log.Error().Str("subdomain", proxy.SubDomain).Msg("Failed to parse app name from subdomain")
+			}
 		} else {
-			log.Error().Msg("Failed to get app name from tunnel config")
+			// For TCP/UDP, parse from name field (format: {deviceKey}-{appName}-{port}-{protocol})
+			result := subdomainRegex.FindStringSubmatch(proxy.Name)
+			if len(result) > 1 {
+				appName = result[1]
+			} else {
+				log.Error().Str("name", proxy.Name).Msg("Failed to parse app name from tunnel name")
+			}
 		}
 
 		tunnelConfig.AppName = appName
@@ -237,10 +247,17 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 	tunnelID := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
 
+	// Check if this tunnel already exists in the config
+	for _, proxy := range builder.yamlConfig.Proxies {
+		if proxy.Name == tunnelID {
+			log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists in config, skipping add")
+			return
+		}
+	}
+
 	proxyConfig := ProxyConfig{
 		Name:      tunnelID,
 		Type:      string(conf.Protocol),
-		SubDomain: conf.Subdomain,
 		LocalPort: int(conf.LocalPort),
 	}
 
@@ -248,7 +265,11 @@ func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 		proxyConfig.LocalIP = conf.LocalIP
 	}
 
-	if conf.Protocol != HTTP && conf.Protocol != HTTPS {
+	// subdomain is only valid for HTTP/HTTPS protocols
+	if conf.Protocol == HTTP || conf.Protocol == HTTPS {
+		proxyConfig.SubDomain = conf.Subdomain
+	} else {
+		// For TCP/UDP, use remotePort instead
 		proxyConfig.RemotePort = int(conf.RemotePort)
 	}
 

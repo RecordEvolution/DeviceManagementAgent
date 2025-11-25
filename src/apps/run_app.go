@@ -510,7 +510,7 @@ func filterLargeEnvVars(envVars []string) []string {
 }
 
 func computeMounts(stage common.Stage, appName string, config *config.Config) ([]mount.Mount, error) {
-	appSpecificDirectory := strings.ToLower(config.CommandLineArguments.AppsDirectory + "/" + string(stage) + "/" + appName)
+	appSpecificDirectory := config.CommandLineArguments.AppsDirectory + "/" + strings.ToLower(string(stage)) + "/" + strings.ToLower(appName)
 
 	err := os.MkdirAll(appSpecificDirectory, os.ModePerm)
 	if err != nil {
@@ -585,7 +585,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
 	// Get app-specific directory for writing env vars
-	appSpecificDirectory := strings.ToLower(config.CommandLineArguments.AppsDirectory + "/" + string(app.Stage) + "/" + app.AppName)
+	appSpecificDirectory := config.CommandLineArguments.AppsDirectory + "/" + strings.ToLower(string(app.Stage)) + "/" + strings.ToLower(app.AppName)
 
 	var containerConfig container.Config
 

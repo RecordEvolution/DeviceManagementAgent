@@ -46,6 +46,9 @@ type FrpTunnelManager struct {
 	configBuilder       TunnelConfigBuilder
 	config              *config.Config
 	messenger           messenger.Messenger
+	loginChan           chan bool // Signals when frpc logs in to server
+	isLoggedIn          bool
+	loginMutex          sync.RWMutex
 }
 
 type UpdateType string
@@ -283,6 +286,18 @@ func (frpTm *FrpTunnelManager) Start() error {
 			line := scanner.Text()
 
 			if strings.Contains(line, "login to server success") {
+				// Mark as logged in
+				frpTm.loginMutex.Lock()
+				frpTm.isLoggedIn = true
+				frpTm.loginMutex.Unlock()
+
+				// Signal login (non-blocking)
+				select {
+				case frpTm.loginChan <- true:
+				default:
+				}
+
+				// Send initial ack for startup
 				ackChan <- true
 			}
 
@@ -363,6 +378,10 @@ func (frpTm *FrpTunnelManager) Start() error {
 					})
 
 					safe.Go(func() {
+						// Wait for frpc to complete login to frps server
+						// This prevents publishing "offline" state before connection is established
+						frpTm.waitForLogin()
+
 						err = frpTm.PublishTunnelState()
 						if err != nil {
 							log.Error().Err(err).Msg("Failed to publish tunnel state")
@@ -390,6 +409,29 @@ func (frpTm *FrpTunnelManager) Reset() error {
 	return frpTm.Reload()
 }
 
+// waitForLogin waits for frpc to successfully login to frps server
+// If already logged in, returns immediately
+// If not logged in, waits up to 5 seconds for login confirmation
+func (frpTm *FrpTunnelManager) waitForLogin() {
+	frpTm.loginMutex.RLock()
+	if frpTm.isLoggedIn {
+		frpTm.loginMutex.RUnlock()
+		log.Debug().Msg("frpc already logged in, publishing tunnel state immediately")
+		return
+	}
+	frpTm.loginMutex.RUnlock()
+
+	log.Debug().Msg("Waiting for frpc login confirmation before publishing tunnel state")
+
+	// Wait for login signal with timeout
+	select {
+	case <-frpTm.loginChan:
+		log.Info().Msg("frpc login confirmed, proceeding with tunnel state publication")
+	case <-time.After(5 * time.Second):
+		log.Warn().Msg("Timeout waiting for frpc login, publishing tunnel state anyway")
+	}
+}
+
 func (frpTm *FrpTunnelManager) PublishTunnelState() error {
 	updateTopic := common.BuildTunnelStateUpdate(frpTm.config.ReswarmConfig.SerialNumber)
 	tunnelStates, err := frpTm.GetState()
@@ -405,16 +447,18 @@ func (frpTm *FrpTunnelManager) PublishTunnelState() error {
 	return frpTm.messenger.Publish(topics.Topic(updateTopic), args, nil, nil)
 }
 
-func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (FrpTunnelManager, error) {
+func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (*FrpTunnelManager, error) {
 
 	configBuilder := NewTunnelConfigBuilder(config)
-	frpTunnelManager := FrpTunnelManager{
+	frpTunnelManager := &FrpTunnelManager{
 		configBuilder:       configBuilder,
 		messenger:           messenger,
 		config:              config,
 		tunnelsLock:         &sync.RWMutex{},
 		tunnelUpdateChan:    make(chan TunnelUpdate),
 		activeTunnelConfigs: make(map[string]*Tunnel),
+		loginChan:           make(chan bool, 10), // Buffered to avoid blocking
+		isLoggedIn:          false,
 	}
 
 	return frpTunnelManager, nil
@@ -469,9 +513,13 @@ func (frpTm *FrpTunnelManager) Reload() error {
 	if err != nil {
 		// frpc service is not properly running
 		log.Error().Err(err).Msgf("Error while reloading frp client config: %s", string(output))
-		if strings.Contains(string(output), "connect: connection refused") {
+		if strings.Contains(string(output), "connect: connection refused") || strings.Contains(string(output), "api status code") {
+			log.Warn().Msg("frpc appears to not be running, attempting to start it")
 			safe.Go(func() {
-				frpTm.Restart()
+				startErr := frpTm.Start()
+				if startErr != nil {
+					log.Error().Err(startErr).Msg("Failed to start frpc")
+				}
 			})
 			return err
 		}
@@ -675,6 +723,8 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 
 	err := frpTm.Reload()
 	if err != nil {
+		// Rollback the config change if reload fails
+		frpTm.configBuilder.RemoveTunnelConfig(config)
 		return TunnelConfig{}, err
 	}
 
@@ -704,16 +754,17 @@ func (frpTm *FrpTunnelManager) RemoveTunnel(conf TunnelConfig) error {
 	log.Debug().Str("subdomain", conf.Subdomain).Str("protocol", string(conf.Protocol)).Msg("RemoveTunnel called")
 	tunnelId := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
 
+	// Remove from active tunnels in memory (if exists)
 	frpTm.tunnelsLock.Lock()
 	if frpTm.activeTunnelConfigs[tunnelId] != nil {
 		delete(frpTm.activeTunnelConfigs, tunnelId)
-		frpTm.tunnelsLock.Unlock()
+		log.Debug().Str("tunnelId", tunnelId).Msg("Removed tunnel from active configs")
 	} else {
-		frpTm.tunnelsLock.Unlock()
-		log.Warn().Str("tunnelId", tunnelId).Msg("Tunnel does not exist, cannot remove")
-		return errors.New("tunnel does not exist")
+		log.Debug().Str("tunnelId", tunnelId).Msg("Tunnel not in active configs, but will remove from config file")
 	}
+	frpTm.tunnelsLock.Unlock()
 
+	// Always remove from config file regardless of whether it's in memory
 	frpTm.configBuilder.RemoveTunnelConfig(conf)
 
 	err := frpTm.Reload()

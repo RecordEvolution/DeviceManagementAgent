@@ -39,10 +39,10 @@ download-frpc: ## Download frpc binary for local development
 	@echo "Downloaded frpc to src/embedded/frpc_binary"
 
 run:
-	cd src && sudo go run . -config test-config.flock -prettyLogging -env=local -prettyLogging
+	cd src && sudo go run -ldflags="-linkmode=external" . -config test-config.flock -prettyLogging -env=local
 
 run_mac:
-	cd src && DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run . -config test-config.flock -prettyLogging -env=local -nmw=false
+	cd src && sudo DOCKER_HOST=unix://${HOME}/Library/Containers/com.docker.docker/Data/docker.raw.sock go run -ldflags="-linkmode=external" . -config test-config.flock -prettyLogging -env=local -nmw=false
 
 # Not preferred. Use build-all-docker instead.
 build-all:

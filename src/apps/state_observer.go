@@ -48,9 +48,61 @@ func (so *StateObserver) NotifyLocal(app *common.App, achievedState common.AppSt
 	// update in memory
 	app.StateLock.Lock()
 	app.CurrentState = achievedState
+	appKey := app.AppKey
+	stage := app.Stage
+	appName := app.AppName
 	app.StateLock.Unlock()
 
-	return so.AppStore.UpdateLocalAppState(app, achievedState)
+	// First update the local app state
+	err := so.AppStore.UpdateLocalAppState(app, achievedState)
+	if err != nil {
+		return err
+	}
+
+	// If app reached REMOVED state, check if backend requested removal before cleaning up database
+	if achievedState == common.REMOVED {
+		// Check what the backend requested
+		requestedState, err := so.AppStore.GetRequestedState(appKey, stage)
+		if err != nil {
+			// If there's no requested state, don't delete
+			log.Debug().
+				Str("app", appName).
+				Uint64("app_key", appKey).
+				Str("stage", string(stage)).
+				Msg("No requested state found, keeping database entries")
+			return nil
+		}
+
+		// Only delete from database if backend requested REMOVED or UNINSTALLED
+		if requestedState.RequestedState == common.REMOVED || requestedState.RequestedState == common.UNINSTALLED {
+			log.Info().
+				Str("app", appName).
+				Uint64("app_key", appKey).
+				Str("stage", string(stage)).
+				Str("requested_state", string(requestedState.RequestedState)).
+				Msg("🗑️ App reached REMOVED state and backend requested removal, cleaning up database entries")
+
+			// Delete from database
+			err = so.AppStore.DeleteAppState(appKey, stage)
+			if err != nil {
+				log.Error().Stack().Err(err).Msg("Failed to delete app state from database")
+			}
+
+			err = so.AppStore.DeleteRequestedState(appKey, stage)
+			if err != nil {
+				log.Error().Stack().Err(err).Msg("Failed to delete requested state from database")
+			}
+		} else {
+			log.Debug().
+				Str("app", appName).
+				Uint64("app_key", appKey).
+				Str("stage", string(stage)).
+				Str("requested_state", string(requestedState.RequestedState)).
+				Msg("App reached REMOVED but backend requested different state, keeping database entries")
+		}
+	}
+
+	return nil
 }
 
 func (so *StateObserver) NotifyRemote(app *common.App, achievedState common.AppState) error {

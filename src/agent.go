@@ -84,11 +84,34 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
 	}
 
-	// First call this in case we don't have any app state yet, then we can start containers accordingly
-	log.Info().Msg("Syncing app states ...")
-	err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote()
+	// Step 1: Fetch requested app states from backend
+	log.Info().Msg("Fetching requested app states from backend...")
+	remotePayloads, err := agent.AppManager.AppStore.FetchRequestedAppStates()
 	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to sync")
+		log.Error().Stack().Err(err).Msg("failed to fetch requested app states from backend")
+	} else {
+		log.Info().Interface("remotePayloads", remotePayloads).Msg("Backend returned requested app states")
+
+		// Step 2: Clean up orphaned apps from database using fetched payloads
+		log.Info().Msg("Cleaning up orphaned apps from database...")
+		err = agent.AppManager.CleanupOrphanedAppsFromDatabase(remotePayloads)
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to cleanup orphaned apps from database")
+		}
+
+		// Step 3: Update local database with remote payloads
+		log.Info().Msg("Syncing local database with backend state...")
+		err = agent.AppManager.UpdateLocalRequestedAppStatesWithRemote(remotePayloads)
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to sync app states with remote")
+		}
+
+		// Step 4: Clean up orphaned containers not in database
+		log.Info().Msg("Cleaning up orphaned containers...")
+		err = agent.AppManager.CleanupOrphanedContainers()
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to cleanup orphaned containers")
+		}
 	}
 
 	log.Info().Msg("Correcting local app states ...")
@@ -202,7 +225,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	logManager := logging.NewLogManager(container, dummyMessenger, database, appStore)
 	stateObserver := apps.NewObserver(container, &appStore, &logManager)
 	stateMachine := apps.NewStateMachine(container, &logManager, &stateObserver, &filesystem)
-	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, &tunnelManager)
+	appManager := apps.NewAppManager(&stateMachine, &appStore, &stateObserver, tunnelManager)
 	terminalManager := terminal.NewTerminalManager(dummyMessenger, container)
 
 	var networkInstance network.Network
@@ -224,6 +247,12 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	err = stateObserver.ObserveAppStates()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
+	}
+
+	// Clean up orphaned containers not in database (offline check)
+	err = appManager.CleanupOrphanedContainers()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("failed to cleanup orphaned containers")
 	}
 
 	// setup the containers on start
@@ -275,7 +304,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Network:         networkInstance,
 		Privilege:       &privilege,
 		Filesystem:      &filesystem,
-		TunnelManager:   &tunnelManager,
+		TunnelManager:   tunnelManager,
 		System:          &systemAPI,
 		AppManager:      appManager,
 		TerminalManager: &terminalManager,
@@ -290,7 +319,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogManager:      &logManager,
 		Network:         networkInstance,
 		TerminalManager: &terminalManager,
-		TunnelManager:   &tunnelManager,
+		TunnelManager:   tunnelManager,
 		AppManager:      appManager,
 		StateObserver:   &stateObserver,
 		StateMachine:    &stateMachine,

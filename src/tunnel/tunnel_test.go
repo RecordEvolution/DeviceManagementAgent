@@ -15,7 +15,7 @@ func init() {
 	logging.SetupLogger(&config.CommandLineArguments{PrettyLogging: true, Debug: true})
 }
 
-func setupTunnel() FrpTunnelManager {
+func setupTunnel() *FrpTunnelManager {
 	generalConfig := &config.Config{
 		CommandLineArguments: &config.CommandLineArguments{AgentDir: "/opt/reagent"},
 		ReswarmConfig:        &config.ReswarmConfig{Environment: string(common.PRODUCTION)},

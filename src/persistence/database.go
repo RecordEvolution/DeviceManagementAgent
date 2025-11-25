@@ -896,6 +896,38 @@ func (ast *AppStateDatabase) updateDeviceState(newStatus messenger.DeviceStatus,
 	return nil
 }
 
+func (ast *AppStateDatabase) DeleteAppState(appKey uint64, stage common.Stage) error {
+	deleteStatement, err := ast.db.Prepare(QueryDeleteAppStateByAppKeyAndStage)
+	if err != nil {
+		return err
+	}
+	defer deleteStatement.Close()
+
+	_, err = deleteStatement.Exec(appKey, stage)
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msgf("Deleted app state for app_key=%d, stage=%s from database", appKey, stage)
+	return nil
+}
+
+func (ast *AppStateDatabase) DeleteRequestedState(appKey uint64, stage common.Stage) error {
+	deleteStatement, err := ast.db.Prepare(QueryDeleteRequestedStateByAppKeyAndStage)
+	if err != nil {
+		return err
+	}
+	defer deleteStatement.Close()
+
+	_, err = deleteStatement.Exec(appKey, stage)
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msgf("Deleted requested state for app_key=%d, stage=%s from database", appKey, stage)
+	return nil
+}
+
 func (ast *AppStateDatabase) execute(fileName string) error {
 	file, err := fs.ReadFile(scriptFiles, fileName)
 

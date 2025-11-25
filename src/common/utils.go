@@ -155,7 +155,7 @@ func GetRandomFreePort() (port int, err error) {
 
 func GetFreePortFromStart(startPort int) (int, error) {
 	for port := startPort; port <= 65535; port++ {
-		addr := fmt.Sprintf(":%d", port)
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
 		listener, err := net.Listen("tcp", addr)
 		if err == nil {
 			defer listener.Close()

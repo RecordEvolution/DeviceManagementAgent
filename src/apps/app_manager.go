@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"reagent/common"
@@ -10,6 +11,7 @@ import (
 	"reagent/store"
 	"reagent/tunnel"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,14 +101,21 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 				// continue
 			}
 		} else {
-			// Remove tunnel when it's not active and app is not running
-			tnl := am.tunnelManager.Get(tunnelID)
-			if tnl != nil {
-				log.Info().Str("tunnelID", tunnelID).Msg("Removing tunnel as it is not active and app is not running")
-				err := am.tunnelManager.RemoveTunnel(tnl.Config)
-				if err != nil {
-					log.Error().Stack().Err(err).Msg("Failed to remove tunnel")
-				}
+			// Remove tunnel when it's not active (regardless of app state)
+			// Build the tunnel config to remove it from the file even if it's not in memory
+			tunnelConfig := tunnel.TunnelConfig{
+				Subdomain:  subdomain,
+				AppName:    payload.AppName,
+				Protocol:   tunnel.Protocol(portRule.Protocol),
+				LocalPort:  portRule.Port,
+				LocalIP:    portRule.LocalIP,
+				RemotePort: portRule.RemotePort,
+			}
+
+			log.Info().Str("tunnelID", tunnelID).Msg("Removing tunnel as it is not active")
+			err := am.tunnelManager.RemoveTunnel(tunnelConfig)
+			if err != nil {
+				log.Error().Stack().Err(err).Msg("Failed to remove tunnel")
 			}
 		}
 
@@ -317,6 +326,172 @@ func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayloa
 	return false
 }
 
+func (am *AppManager) CleanupOrphanedContainers() error {
+	log.Info().Msg("🧹 Cleaning up orphaned containers not in database...")
+
+	ctx := context.Background()
+	containers, err := am.StateMachine.Container.GetContainers(ctx)
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to list containers")
+		return err
+	}
+
+	// Get all apps from database
+	apps, err := am.AppStore.GetAllApps()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to get apps from database")
+		return err
+	}
+
+	// Create a map of expected container names
+	expectedContainers := make(map[string]bool)
+	for _, app := range apps {
+		// Add both single and compose container names
+		singleName := common.BuildContainerName(app.Stage, app.AppKey, app.AppName)
+		composeName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
+		expectedContainers[singleName] = true
+		expectedContainers[composeName] = true
+	}
+
+	// Check each container
+	for _, container := range containers {
+		for _, name := range container.Names {
+			// Clean leading slash from container name
+			cleanName := strings.TrimPrefix(name, "/")
+
+			// Check if it matches our naming convention
+			_, _, _, err := common.ParseContainerName(cleanName)
+			isOurContainer := err == nil
+
+			if !isOurContainer && strings.Contains(cleanName, "_compose") {
+				// Also check compose naming (only if it has _compose in the name)
+				_, _, _, err := common.ParseComposeContainerName(cleanName)
+				isOurContainer = err == nil
+			}
+
+			// If it's our container but not in database, remove it
+			if isOurContainer && !expectedContainers[cleanName] {
+				log.Warn().
+					Str("container", cleanName).
+					Str("id", container.ID[:12]).
+					Msg("❌ Removing orphaned container not in database")
+
+				removeCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+				err := am.StateMachine.Container.RemoveContainerByID(removeCtx, container.ID, map[string]interface{}{"force": true})
+				cancel()
+
+				if err != nil {
+					log.Error().Stack().Err(err).
+						Str("container", cleanName).
+						Msg("Failed to remove orphaned container")
+				} else {
+					log.Info().Str("container", cleanName).Msg("✅ Successfully removed orphaned container")
+				}
+			}
+		}
+	}
+
+	log.Info().Msg("✨ Orphaned container cleanup complete")
+	return nil
+}
+
+func (am *AppManager) CleanupOrphanedAppsFromDatabase(remotePayloads []common.TransitionPayload) error {
+	log.Info().Msg("🧹 Syncing database with backend and cleaning up orphaned apps...")
+
+	// Create a map of apps that should exist (from backend)
+	expectedApps := make(map[string]bool)
+	for _, payload := range remotePayloads {
+		key := fmt.Sprintf("%d_%s", payload.AppKey, payload.Stage)
+		expectedApps[key] = true
+	}
+
+	// Get all apps from local database
+	localApps, err := am.AppStore.GetAllApps()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to get apps from database")
+		return err
+	}
+
+	ctx := context.Background()
+
+	// Remove apps that are not in backend response
+	for _, app := range localApps {
+		key := fmt.Sprintf("%d_%s", app.AppKey, app.Stage)
+
+		if !expectedApps[key] {
+			log.Warn().
+				Str("app", app.AppName).
+				Uint64("app_key", app.AppKey).
+				Str("stage", string(app.Stage)).
+				Msg("❌ App not in backend sync, removing from database and Docker")
+
+			// Remove container if it exists
+			containerName := common.BuildContainerName(app.Stage, app.AppKey, app.AppName)
+			getContainerCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+			cont, err := am.StateMachine.Container.GetContainer(getContainerCtx, containerName)
+			cancel()
+
+			if err == nil {
+				removeCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+				err = am.StateMachine.Container.RemoveContainerByID(removeCtx, cont.ID, map[string]interface{}{"force": true})
+				cancel()
+				if err != nil && !errdefs.IsContainerNotFound(err) {
+					log.Error().Stack().Err(err).Str("container", containerName).Msg("Failed to remove container")
+				}
+			}
+
+			// Remove compose containers if they exist
+			composeName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
+			getComposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+			composeCont, err := am.StateMachine.Container.GetContainer(getComposeCtx, composeName)
+			cancel()
+
+			if err == nil {
+				removeCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+				err = am.StateMachine.Container.RemoveContainerByID(removeCtx, composeCont.ID, map[string]interface{}{"force": true})
+				cancel()
+				if err != nil && !errdefs.IsContainerNotFound(err) {
+					log.Error().Stack().Err(err).Str("container", composeName).Msg("Failed to remove compose container")
+				}
+			}
+
+			// Remove images
+			if app.Stage == common.DEV {
+				imageName := common.BuildImageName(app.Stage, "amd64", app.AppKey, app.AppName) // Simplified - should get actual arch
+				removeImageCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+				err = am.StateMachine.Container.RemoveImagesByName(removeImageCtx, imageName, map[string]interface{}{"force": true})
+				cancel()
+				if err != nil {
+					log.Debug().Err(err).Str("image", imageName).Msg("Could not remove image (might not exist)")
+				}
+			} else {
+				// For PROD, try to remove versioned images
+				log.Debug().Str("app", app.AppName).Msg("Skipping image removal for PROD app (versioned images)")
+			}
+
+			// Remove from database
+			err = am.AppStore.DeleteAppState(app.AppKey, app.Stage)
+			if err != nil {
+				log.Error().Stack().Err(err).Msg("Failed to delete app state from database")
+			}
+
+			err = am.AppStore.DeleteRequestedState(app.AppKey, app.Stage)
+			if err != nil {
+				log.Error().Stack().Err(err).Msg("Failed to delete requested state from database")
+			}
+
+			log.Info().
+				Str("app", app.AppName).
+				Uint64("app_key", app.AppKey).
+				Str("stage", string(app.Stage)).
+				Msg("✅ Successfully removed orphaned app")
+		}
+	}
+
+	log.Info().Msg("✨ Database cleanup complete")
+	return nil
+}
+
 func (am *AppManager) EnsureLocalRequestedStates() error {
 	log.Debug().Msg("Ensuring local requested states")
 	rStates, err := am.AppStore.GetRequestedStates()
@@ -495,14 +670,10 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 	return nil
 }
 
-// UpdateLocalRequestedAppStatesWithRemote is responsible for fetching any requested app states from the remote database.
-// The local database will be updated with the fetched requested states. In case an app state does exist yet locally, one will be created.
-func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote() error {
+// UpdateLocalRequestedAppStatesWithRemote is responsible for updating the local database with fetched requested states.
+// The local database will be updated with the fetched requested states. In case an app state does not exist yet locally, one will be created.
+func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote(newestPayloads []common.TransitionPayload) error {
 	log.Debug().Msg("Updating local requested app states with remote")
-	newestPayloads, err := am.AppStore.FetchRequestedAppStates()
-	if err != nil {
-		return err
-	}
 
 	log.Info().Msgf("Found %d app states, updating local database with new requested states..", len(newestPayloads))
 	for i := range newestPayloads {

@@ -16,4 +16,4 @@ for element in "${array[@]}"; do
     gsutil cp "build/$element" $GCLOUD
 done
 
-gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent
+gsutil -m setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent

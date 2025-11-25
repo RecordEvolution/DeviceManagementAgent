@@ -248,3 +248,11 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 
 	return appPayloads, nil
 }
+
+func (am *AppStore) DeleteAppState(appKey uint64, stage common.Stage) error {
+	return am.database.DeleteAppState(appKey, stage)
+}
+
+func (am *AppStore) DeleteRequestedState(appKey uint64, stage common.Stage) error {
+	return am.database.DeleteRequestedState(appKey, stage)
+}

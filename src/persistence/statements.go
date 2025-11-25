@@ -37,3 +37,6 @@ new_release_key = excluded.new_release_key,
 manually_requested_state=excluded.manually_requested_state,
 current_state=excluded.current_state,
 request_update=excluded.request_update`
+
+const QueryDeleteAppStateByAppKeyAndStage = `DELETE FROM AppStates WHERE app_key = ? AND stage = ?`
+const QueryDeleteRequestedStateByAppKeyAndStage = `DELETE FROM RequestedAppStates WHERE app_key = ? AND stage = ?`
