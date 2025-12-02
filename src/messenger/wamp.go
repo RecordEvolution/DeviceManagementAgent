@@ -50,14 +50,34 @@ func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
 }
 
 func (wl wampLogWrapper) Print(v ...interface{}) {
+	// Check for connection errors that indicate the connection is broken
+	for _, val := range v {
+		if str, ok := val.(string); ok {
+			if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") {
+				log.Warn().Msgf("WAMP connection error detected: %v", str)
+			}
+		}
+	}
 	wl.logger.Print(v...)
 }
 
 func (wl wampLogWrapper) Println(v ...interface{}) {
+	// Check for connection errors
+	for _, val := range v {
+		if str, ok := val.(string); ok {
+			if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") {
+				log.Warn().Msgf("WAMP connection error detected: %v", str)
+			}
+		}
+	}
 	wl.logger.Print(v, "\n")
 }
 
 func (wl wampLogWrapper) Printf(format string, v ...interface{}) {
+	// Check for connection errors in formatted strings
+	if strings.Contains(format, "broken pipe") || strings.Contains(format, "connection reset") || strings.Contains(format, "write tcp") {
+		log.Warn().Msgf("WAMP connection error detected: "+format, v...)
+	}
 	wl.logger.Printf(format, v...)
 }
 
@@ -158,7 +178,11 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 		return ErrNotConnected
 	}
 
-	return wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
+	err := wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
+	if err != nil {
+		log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
+	}
+	return err
 }
 
 func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketConfig, container container.Container) chan *client.Client {
