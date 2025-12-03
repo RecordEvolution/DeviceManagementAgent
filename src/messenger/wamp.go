@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"reagent/common"
@@ -29,6 +30,8 @@ type WampSession struct {
 	container    container.Container
 	agentConfig  *config.Config
 	socketConfig *SocketConfig
+	done         chan struct{}
+	mu           sync.Mutex
 }
 
 type wampLogWrapper struct {
@@ -138,32 +141,88 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 
 // New creates a new wamp session from a ReswarmConfig file
 func NewWamp(config *config.Config, socketConfig *SocketConfig, container container.Container) (*WampSession, error) {
-	session := &WampSession{agentConfig: config, socketConfig: socketConfig, container: container}
-	clientChannel := EstablishSocketConnection(config, socketConfig, container)
-
-	select {
-	case client := <-clientChannel:
-		session.client = client
+	session := &WampSession{
+		agentConfig:  config,
+		socketConfig: socketConfig,
+		container:    container,
+		done:         make(chan struct{}),
 	}
 
-	if session.socketConfig.SetupTestament {
-		err := session.SetupTestament()
-		if err != nil {
-			return nil, err
-		}
+	err := session.connect()
+	if err != nil {
+		return nil, err
 	}
 
 	return session, nil
 }
 
-func (wampSession *WampSession) Reconnect() {
-	wampSession.Close()
-
+// connect establishes the WAMP connection and sets up disconnect monitoring
+func (wampSession *WampSession) connect() error {
 	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig, wampSession.container)
-	select {
-	case client := <-clientChannel:
-		wampSession.client = client
+	wampSession.client = <-clientChannel
+
+	// Monitor for disconnection from the underlying client
+	// Capture the current done channel to avoid signaling a replaced channel
+	clientDone := wampSession.client.Done()
+	doneChan := wampSession.done
+	go func() {
+		<-clientDone
+		wampSession.mu.Lock()
+		defer wampSession.mu.Unlock()
+		// Only signal if this is still the active done channel
+		if wampSession.done == doneChan {
+			select {
+			case <-doneChan:
+				// already closed
+			default:
+				close(doneChan)
+			}
+		}
+	}()
+
+	if wampSession.socketConfig.SetupTestament {
+		err := wampSession.SetupTestament()
+		if err != nil {
+			return err
+		}
 	}
+
+	return nil
+}
+
+func (wampSession *WampSession) Reconnect() {
+	wampSession.mu.Lock()
+	// Close existing client
+	if wampSession.client != nil {
+		wampSession.client.Close()
+		wampSession.client = nil
+	}
+	// Create fresh done channel for the new connection
+	wampSession.done = make(chan struct{})
+	wampSession.mu.Unlock()
+
+	// Establish new connection
+	clientChannel := EstablishSocketConnection(wampSession.agentConfig, wampSession.socketConfig, wampSession.container)
+	wampSession.client = <-clientChannel
+
+	// Monitor for disconnection from the new client
+	// Capture the current done channel to avoid signaling a replaced channel
+	clientDone := wampSession.client.Done()
+	doneChan := wampSession.done
+	go func() {
+		<-clientDone
+		wampSession.mu.Lock()
+		defer wampSession.mu.Unlock()
+		// Only signal if this is still the active done channel
+		if wampSession.done == doneChan {
+			select {
+			case <-doneChan:
+				// already closed
+			default:
+				close(doneChan)
+			}
+		}
+	}()
 
 	if wampSession.socketConfig.SetupTestament {
 		err := wampSession.SetupTestament()
@@ -279,13 +338,19 @@ func EstablishSocketConnection(agentConfig *config.Config, socketConfig *SocketC
 }
 
 func (wampSession *WampSession) Connected() bool {
-	if wampSession.client == nil {
+	wampSession.mu.Lock()
+	client := wampSession.client
+	wampSession.mu.Unlock()
+	if client == nil {
 		return false
 	}
-	return wampSession.client.Connected()
+	return client.Connected()
 }
+
 func (wampSession *WampSession) Done() <-chan struct{} {
-	return wampSession.client.Done()
+	wampSession.mu.Lock()
+	defer wampSession.mu.Unlock()
+	return wampSession.done
 }
 
 func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
@@ -441,9 +506,19 @@ func (wampSession *WampSession) SetupTestament() error {
 }
 
 func (wampSession *WampSession) Close() {
+	wampSession.mu.Lock()
+	defer wampSession.mu.Unlock()
+
 	if wampSession.client != nil {
-		wampSession.client.Close() // only possible error is if it's already closed
+		wampSession.client.Close()
 		wampSession.client = nil
+	}
+	// Signal the done channel if not already closed
+	select {
+	case <-wampSession.done:
+		// already closed
+	default:
+		close(wampSession.done)
 	}
 }
 

@@ -1,4 +1,4 @@
-.PHONY: build
+.PHONY: build test test-verbose test-coverage test-race
 
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 FRP_VERSION:=0.65.0
@@ -28,6 +28,29 @@ help: ## This help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .DEFAULT_GOAL := help
+
+test: ## Run unit tests (packages without embedded binary dependency)
+	cd src && go test -short reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe
+
+test-all: download-frpc ## Run all unit tests (requires frpc binary)
+	cd src && go test -short ./...
+
+test-verbose: ## Run unit tests with verbose output
+	cd src && go test -v -short reagent/messenger reagent/testutil
+
+test-coverage: download-frpc ## Run tests with coverage report (requires frpc binary)
+	cd src && go test -short -coverprofile=coverage.out -covermode=atomic ./...
+	cd src && go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated at src/coverage.html"
+
+test-race: ## Run tests with race detector
+	cd src && go test -short -race reagent/messenger reagent/testutil
+
+test-messenger: ## Run messenger package tests only
+	cd src && go test -v reagent/messenger
+
+test-tunnel: ## Run tunnel package tests only
+	cd src && go test -v reagent/tunnel
 
 download-frpc: ## Download frpc binary for local development
 	@echo "Downloading frpc v$(FRP_VERSION) for $(FRP_OS)/$(FRP_ARCH)..."
