@@ -31,6 +31,7 @@ type WampSession struct {
 	agentConfig  *config.Config
 	socketConfig *SocketConfig
 	done         chan struct{}
+	closeOnce    sync.Once
 	mu           sync.Mutex
 }
 
@@ -197,8 +198,9 @@ func (wampSession *WampSession) Reconnect() {
 		wampSession.client.Close()
 		wampSession.client = nil
 	}
-	// Create fresh done channel for the new connection
+	// Create fresh done channel and reset closeOnce for the new connection
 	wampSession.done = make(chan struct{})
+	wampSession.closeOnce = sync.Once{}
 	wampSession.mu.Unlock()
 
 	// Establish new connection
@@ -507,19 +509,19 @@ func (wampSession *WampSession) SetupTestament() error {
 
 func (wampSession *WampSession) Close() {
 	wampSession.mu.Lock()
-	defer wampSession.mu.Unlock()
+	clientToClose := wampSession.client
+	wampSession.client = nil
+	wampSession.mu.Unlock()
 
-	if wampSession.client != nil {
-		wampSession.client.Close()
-		wampSession.client = nil
+	// Close the client outside the lock to avoid deadlock with the monitor goroutine
+	if clientToClose != nil {
+		clientToClose.Close()
 	}
-	// Signal the done channel if not already closed
-	select {
-	case <-wampSession.done:
-		// already closed
-	default:
+
+	// Signal the done channel exactly once, safe for concurrent calls
+	wampSession.closeOnce.Do(func() {
 		close(wampSession.done)
-	}
+	})
 }
 
 func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) {
