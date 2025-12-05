@@ -2,12 +2,12 @@
 package testutil
 
 import (
-"context"
-"reagent/common"
-"reagent/config"
-"reagent/messenger"
-"reagent/messenger/topics"
-"sync"
+	"context"
+	"reagent/common"
+	"reagent/config"
+	"reagent/messenger"
+	"reagent/messenger/topics"
+	"sync"
 )
 
 // MockMessenger is a configurable mock implementation of the Messenger interface
@@ -93,11 +93,11 @@ func (m *MockMessenger) Publish(topic topics.Topic, args []interface{}, kwargs c
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.PublishCalls = append(m.PublishCalls, PublishCall{
-Topic:   topic,
-Args:    args,
-Kwargs:  kwargs,
-Options: options,
-})
+		Topic:   topic,
+		Args:    args,
+		Kwargs:  kwargs,
+		Options: options,
+	})
 	return nil
 }
 
@@ -113,11 +113,11 @@ func (m *MockMessenger) Call(ctx context.Context, topic topics.Topic, args []int
 	defer m.mu.Unlock()
 
 	m.CallCalls = append(m.CallCalls, CallCall{
-Topic:   topic,
-Args:    args,
-Kwargs:  kwargs,
-Options: options,
-})
+		Topic:   topic,
+		Args:    args,
+		Kwargs:  kwargs,
+		Options: options,
+	})
 
 	// Check for configured error
 	if err, ok := m.CallErrors[string(topic)]; ok {
@@ -174,16 +174,8 @@ func (m *MockMessenger) Connected() bool {
 	return m.connected
 }
 
-func (m *MockMessenger) Reconnect() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	select {
-	case <-m.done:
-	default:
-		close(m.done)
-	}
-	m.done = make(chan struct{})
-	m.connected = true
+func (m *MockMessenger) SetOnConnect(cb func(reconnect bool)) {
+	// Mock implementation - store callback if needed for testing
 }
 
 func (m *MockMessenger) Close() {

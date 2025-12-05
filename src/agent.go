@@ -167,44 +167,6 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 	return err
 }
 
-func (agent *Agent) InitConnectionStatusHeartbeat() {
-	safe.Go(func() {
-		consecutiveFailures := 0
-		const maxConsecutiveFailures = 2 // Trigger reconnect after 2 failures (1 minute)
-
-		for {
-			time.Sleep(time.Second * 30)
-
-			// Check if connection is still alive
-			if !agent.Messenger.Connected() {
-				log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
-				consecutiveFailures = 0
-				continue
-			}
-
-			err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
-			if err != nil {
-				consecutiveFailures++
-				log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
-
-				// If we've failed multiple times, the connection is likely broken
-				// Force a reconnection by closing the client
-				if consecutiveFailures >= maxConsecutiveFailures {
-					log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), forcing reconnection...")
-					agent.Messenger.Close()
-					consecutiveFailures = 0
-				}
-			} else {
-				// Reset counter on success
-				if consecutiveFailures > 0 {
-					log.Info().Msg("Heartbeat successful, connection restored")
-				}
-				consecutiveFailures = 0
-			}
-		}
-	})
-}
-
 func (agent *Agent) updateRemoteDevice() error {
 	config := agent.Config
 	ctx := context.Background()
@@ -305,7 +267,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	benchmark.OnConnectInitAfterConnection = time.Now()
 	benchmark.SocketConnectionInit = time.Now()
 
-	mainSession, err := messenger.NewWamp(generalConfig, &mainSocketConfig, container)
+	mainSession, err := messenger.NewWampSession(generalConfig, &mainSocketConfig, container, nil)
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to setup wamp connection")
 	}
@@ -341,7 +303,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Config:          generalConfig,
 	}
 
-	return &Agent{
+	agent = &Agent{
 		Config:          generalConfig,
 		System:          &systemAPI,
 		External:        &external,
@@ -358,52 +320,16 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		LogMessenger:    mainSession,
 		Database:        database,
 	}
-}
 
-func (agent *Agent) ListenForDisconnect() {
-	safe.Go(func() {
-	reconnect:
-		select {
-		case <-agent.Messenger.Done():
-			log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")
-
-			err := agent.Container.CancelAllStreams()
+	// Set up the onConnect callback - messenger will call this after each reconnection
+	mainSession.SetOnConnect(func(reconnect bool) {
+		if reconnect {
+			err := agent.OnConnect(true)
 			if err != nil {
-				log.Error().Err(err).Msg("error closing stream")
+				log.Fatal().Stack().Err(err).Msg("failed to run on connect handler after reconnection")
 			}
-
-			reconnectAttempt := 0
-			for {
-				reconnectAttempt++
-				log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
-
-				agent.Messenger.Reconnect()
-
-				// did we reconnect successfully? new internal client should be set now
-				if agent.Messenger.Connected() {
-					log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
-
-					safe.Go(func() {
-						log.Info().Msg("Re-initializing agent after reconnection...")
-						err := agent.OnConnect(true)
-						if err != nil {
-							log.Fatal().Stack().Err(err).Msg("failed to run on connect handler after reconnection")
-						}
-
-						agent.ListenForDisconnect()
-
-						log.Info().Msg("Agent successfully re-initialized and monitoring for disconnects")
-					})
-					break reconnect
-				}
-
-				log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
-				time.Sleep(time.Second * 1)
-			}
-
 		}
-		log.Debug().Msg("Reconnect: Reconnect signal goroutine has exited")
 	})
 
-	log.Debug().Msg("Reconnect: Setup Reconnect loop")
+	return agent
 }

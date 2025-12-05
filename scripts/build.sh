@@ -55,52 +55,69 @@ if [ "$target_arch" == "arm" ]; then
 fi
 
 # Map Go arch to FRP arch
+# FRP releases: linux_arm (soft float, ARMv5/v6), linux_arm_hf (hard float, ARMv7+), linux_arm64
 frp_arch="$target_arch"
-frp_variant=""
+frp_suffix=""
 if [ "$target_arch" == "arm" ]; then
-    frp_arch="arm"
-    frp_variant="v${target_arch_variant}"
+    if [ "$target_arch_variant" -ge 7 ]; then
+        # ARMv7+ uses hard float
+        frp_suffix="_hf"
+    fi
+    # frp_arch stays as "arm", suffix differentiates
 elif [ "$target_arch" == "amd64" ]; then
     frp_arch="amd64"
 fi
 
-# Download frpc binary for the target architecture
-echo "Downloading frpc v${FRP_VERSION} for ${target_os}/${frp_arch}${frp_variant}..."
-frpc_url="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_${target_os}_${frp_arch}${frp_variant}.tar.gz"
-frpc_tar="/tmp/frp_${target_os}_${frp_arch}${frp_variant}.tar.gz"
-frpc_dir="/tmp/frp_${FRP_VERSION}_${target_os}_${frp_arch}${frp_variant}"
+# Cache directory for frpc binaries
+cache_dir="${src_path}/../.cache/frp"
+cached_binary="${cache_dir}/frpc_${FRP_VERSION}_${target_os}_${frp_arch}${frp_suffix}"
 embedded_dir="${src_path}/embedded"
+mkdir -p "$cache_dir" "$embedded_dir"
 
-# Download and extract
-curl -L "$frpc_url" -o "$frpc_tar" || {
-    echo "Failed to download frpc from $frpc_url"
-    exit 1
-}
-
-mkdir -p "$frpc_dir"
-tar -xzf "$frpc_tar" -C "$frpc_dir" --strip-components=1 || {
-    echo "Failed to extract frpc"
-    exit 1
-}
-
-# Copy frpc binary to embedded directory
-mkdir -p "$embedded_dir"
+# Skip frpc for Windows - tunnels are not supported on Windows
 if [ "$target_os" == "windows" ]; then
-    cp "$frpc_dir/frpc.exe" "$embedded_dir/frpc_binary" || {
-        echo "Failed to copy frpc binary"
-        exit 1
-    }
+    echo "Skipping frpc for Windows (tunnels not supported)"
+    # Create empty placeholder for go:embed directive
+    touch "$embedded_dir/frpc_binary"
+    echo "Created empty frpc_binary placeholder for Windows build"
 else
-    cp "$frpc_dir/frpc" "$embedded_dir/frpc_binary" || {
-        echo "Failed to copy frpc binary"
-        exit 1
-    }
+    # Check if cached binary exists
+    if [ -f "$cached_binary" ]; then
+        echo "Using cached frpc v${FRP_VERSION} for ${target_os}/${frp_arch}${frp_suffix}"
+        cp "$cached_binary" "$embedded_dir/frpc_binary"
+    else
+        # Download frpc binary for the target architecture
+        echo "Downloading frpc v${FRP_VERSION} for ${target_os}/${frp_arch}${frp_suffix}..."
+        frpc_url="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_${target_os}_${frp_arch}${frp_suffix}.tar.gz"
+        frpc_tar="/tmp/frp_${target_os}_${frp_arch}${frp_suffix}.tar.gz"
+        frpc_dir="/tmp/frp_${FRP_VERSION}_${target_os}_${frp_arch}${frp_suffix}"
+
+        # Download and extract
+        curl -L "$frpc_url" -o "$frpc_tar" || {
+            echo "Failed to download frpc from $frpc_url"
+            exit 1
+        }
+
+        mkdir -p "$frpc_dir"
+        tar -xzf "$frpc_tar" -C "$frpc_dir" --strip-components=1 || {
+            echo "Failed to extract frpc"
+            exit 1
+        }
+
+        # Copy frpc binary to cache and embedded directory
+        cp "$frpc_dir/frpc" "$cached_binary" || {
+            echo "Failed to cache frpc binary"
+            exit 1
+        }
+        cp "$cached_binary" "$embedded_dir/frpc_binary"
+        echo "Downloaded and cached frpc to $cached_binary"
+
+        # Cleanup
+        rm -rf "$frpc_tar" "$frpc_dir"
+    fi
+
+    echo "Embedded frpc binary at ${embedded_dir}/frpc_binary (size: $(wc -c < ${embedded_dir}/frpc_binary) bytes)"
 fi
-
-echo "Embedded frpc binary at ${embedded_dir}/frpc_binary (size: $(wc -c < ${embedded_dir}/frpc_binary) bytes)"
-
-# Cleanup
-rm -rf "$frpc_tar" "$frpc_dir"
 
 prefix="reagent"
 binary_name="$prefix-$target_os-$target_arch"

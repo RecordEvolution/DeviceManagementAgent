@@ -1,0 +1,2789 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>common: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">reagent/common/constants.go (0.0%)</option>
+				
+				<option value="file1">reagent/common/types.go (0.0%)</option>
+				
+				<option value="file2">reagent/common/utils.go (0.0%)</option>
+				
+				<option value="file3">reagent/config/config.go (0.0%)</option>
+				
+				<option value="file4">reagent/debounce/debounce.go (0.0%)</option>
+				
+				<option value="file5">reagent/errdefs/helpers.go (0.0%)</option>
+				
+				<option value="file6">reagent/errdefs/is.go (0.0%)</option>
+				
+				<option value="file7">reagent/messenger/dummy.go (53.3%)</option>
+				
+				<option value="file8">reagent/messenger/mock_nexus_client.go (58.3%)</option>
+				
+				<option value="file9">reagent/messenger/test_helpers.go (100.0%)</option>
+				
+				<option value="file10">reagent/messenger/wamp.go (63.6%)</option>
+				
+				<option value="file11">reagent/safe/utils.go (0.0%)</option>
+				
+				<option value="file12">reagent/testutil/config.go (0.0%)</option>
+				
+				<option value="file13">reagent/testutil/mock_messenger.go (0.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package common
+
+import (
+        "errors"
+)
+
+// AppState states
+type AppState string
+type Stage string
+type UpdateStatus string
+type Environment string
+
+func IsCancelableState(appState AppState) bool <span class="cov0" title="0">{
+        switch appState </span>{
+        case BUILDING, PUBLISHING, DOWNLOADING:<span class="cov0" title="0">
+                return true</span>
+        }
+        <span class="cov0" title="0">return false</span>
+}
+
+type LogType string
+
+const (
+        PULL  LogType = "PULL"
+        PUSH  LogType = "PUSH"
+        BUILD LogType = "BUILD"
+        APP   LogType = "APP"
+)
+
+func GetCurrentLogType(currentState AppState) LogType <span class="cov0" title="0">{
+        var logType LogType
+        if currentState == DOWNLOADING || currentState == UPDATING </span><span class="cov0" title="0">{
+                logType = PULL
+        }</span> else<span class="cov0" title="0"> if currentState == PUBLISHING </span><span class="cov0" title="0">{
+                logType = PUSH
+        }</span> else<span class="cov0" title="0"> if currentState == BUILDING </span><span class="cov0" title="0">{
+                logType = BUILD
+        }</span> else<span class="cov0" title="0"> {
+                logType = APP
+        }</span>
+        <span class="cov0" title="0">return logType</span>
+}
+
+func TransientToActualState(appState AppState) AppState <span class="cov0" title="0">{
+        switch appState </span>{
+        case BUILDING,
+                TRANSFERED,
+                DOWNLOADING,
+                TRANSFERING,
+                PUBLISHING,
+                UPDATING,
+                STOPPING:<span class="cov0" title="0">
+                return PRESENT</span>
+        case DELETING:<span class="cov0" title="0">
+                return REMOVED</span>
+        case STARTING:<span class="cov0" title="0">
+                return RUNNING</span>
+        }
+
+        <span class="cov0" title="0">return appState</span>
+}
+
+func IsTransientState(appState AppState) bool <span class="cov0" title="0">{
+        switch appState </span>{
+        case BUILDING,
+                BUILT,
+                TRANSFERED,
+                DELETING,
+                TRANSFERING,
+                PUBLISHING,
+                PUBLISHED,
+                DOWNLOADING,
+                STOPPING,
+                UPDATING,
+                STARTING:<span class="cov0" title="0">
+                return true</span>
+        }
+        <span class="cov0" title="0">return false</span>
+}
+
+func ContainerStateToAppState(containerState string, exitCode int) (AppState, error) <span class="cov0" title="0">{
+        unknownStateErr := errors.New("unkown state")
+
+        switch containerState </span>{
+        case "running":<span class="cov0" title="0">
+                return RUNNING, nil</span>
+        case "created":<span class="cov0" title="0">
+                return PRESENT, nil</span>
+        case "removing":<span class="cov0" title="0">
+                return STOPPING, nil</span>
+        case "paused":<span class="cov0" title="0"> // won't occur (as of writing)
+                return "", unknownStateErr</span>
+        case "restarting":<span class="cov0" title="0">
+                return FAILED, nil</span>
+        case "exited":<span class="cov0" title="0">
+                // 137 = SIGKILL received
+                // 0 = Normal exit without error
+                // if exitCode == 0 || exitCode == 137 {
+                //         return PRESENT, nil
+                // }
+
+                // for now it's more clear to the user, that their container exited if we set it to failed
+                return FAILED, nil</span>
+        case "dead":<span class="cov0" title="0">
+                return FAILED, nil</span>
+        }
+
+        <span class="cov0" title="0">return "", unknownStateErr</span>
+}
+
+const (
+        PRESENT     AppState = "PRESENT"
+        REMOVED     AppState = "REMOVED"
+        UNINSTALLED AppState = "UNINSTALLED"
+        FAILED      AppState = "FAILED"
+        BUILT       AppState = "BUILT"
+        BUILDING    AppState = "BUILDING"
+        TRANSFERED  AppState = "TRANSFERED"
+        TRANSFERING AppState = "TRANSFERING"
+        PUBLISHING  AppState = "PUBLISHING"
+        PUBLISHED   AppState = "PUBLISHED"
+        DOWNLOADING AppState = "DOWNLOADING"
+        STARTING    AppState = "STARTING"
+        STOPPING    AppState = "STOPPING"
+        STOPPED     AppState = "STOPPED"
+        UPDATING    AppState = "UPDATING"
+        DELETING    AppState = "DELETING"
+        RUNNING     AppState = "RUNNING"
+)
+
+const (
+        PRODUCTION Environment = "production"
+        TEST       Environment = "test"
+        LOCAL      Environment = "local"
+)
+
+const (
+        COMPLETED                   UpdateStatus = "completed"
+        CANCELED                    UpdateStatus = "canceled"
+        PENDING_REMOTE_CONFIRMATION UpdateStatus = "pending_remote_confirmation"
+)
+
+const (
+        DEV  Stage = "DEV"
+        PROD Stage = "PROD"
+)
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package common
+
+import (
+        "errors"
+        "reagent/config"
+        "sync"
+
+        "github.com/rs/zerolog/log"
+        "golang.org/x/sync/semaphore"
+)
+
+type Dict map[string]interface{}
+type Timestamp string
+
+type App struct {
+        AppKey              uint64
+        DeviceToAppKey      uint64
+        RequestorAccountKey uint64
+        ReleaseKey          uint64
+        AppName             string
+        RequestedState      AppState
+        CurrentState        AppState
+        UpdateStatus        UpdateStatus
+        Stage               Stage
+        RequestUpdate       bool
+        ReleaseBuild        bool
+        Version             string
+        LastUpdated         Timestamp
+        TransitionLock      *semaphore.Weighted
+        StateLock           sync.Mutex
+}
+
+func (app *App) SecureTransition() bool <span class="cov0" title="0">{
+        if app.TransitionLock == nil </span><span class="cov0" title="0">{
+                log.Error().Err(errors.New("no semaphore initialized"))
+                return false
+        }</span>
+        <span class="cov0" title="0">return !app.TransitionLock.TryAcquire(1)</span>
+}
+
+func (app *App) UnlockTransition() <span class="cov0" title="0">{
+        app.TransitionLock.Release(1)
+}</span>
+
+func (app *App) IsCancelable() bool <span class="cov0" title="0">{
+        app.StateLock.Lock()
+        currAppState := app.CurrentState
+        app.StateLock.Unlock()
+
+        return IsCancelableState(currAppState)
+}</span>
+
+type StageBasedResult struct {
+        Dev  string
+        Prod string
+}
+
+type DockerCredential struct {
+        Username string `json:"username"`
+        Password string `json:"password"`
+}
+
+type PortForwardRule struct {
+        Main                  bool   `json:"main"`
+        RuleName              string `json:"name"`
+        Active                bool   `json:"active"`
+        Public                bool   `json:"public"`
+        Port                  uint64 `json:"port"`
+        Protocol              string `json:"protocol"`
+        LocalIP               string `json:"local_ip"`
+        RemotePortEnvironment string `json:"remote_port_environment"`
+        RemotePort            uint64 `json:"remote_port"`
+}
+
+// TransitionPayload provides the data used by the StateMachine to transition between states.
+type TransitionPayload struct {
+        RequestedState       AppState
+        CurrentState         AppState
+        Stage                Stage
+        RequestorAccountKey  uint64
+        DeviceToAppKey       uint64
+        AppKey               uint64
+        CallerAuthID         int
+        AppName              string
+        ImageName            StageBasedResult
+        PresentImageName     string
+        RegistryImageName    StageBasedResult
+        ContainerName        StageBasedResult
+        DockerCredentials    map[string]DockerCredential
+        EnvironmentVariables map[string]any
+        EnvironmentTemplate  map[string]any
+        DockerCompose        map[string]any
+        NewDockerCompose     map[string]any
+        Ports                []any
+        PublishContainerName string
+        RegisteryToken       string
+        NewestVersion        string
+        PresentVersion       string
+        ReleaseKey           uint64
+        NewReleaseKey        uint64
+        Version              string
+        RequestUpdate        bool
+        Retrying             bool
+        CancelTransition     bool
+}
+
+func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,
+        stage Stage, currentState AppState, requestedState AppState, releaseKey uint64, newReleaseKey uint64,
+        config *config.Config,
+) TransitionPayload <span class="cov0" title="0">{
+
+        payload := TransitionPayload{
+                Stage:               stage,
+                RequestedState:      requestedState,
+                AppName:             appName,
+                AppKey:              appKey,
+                CurrentState:        currentState,
+                ReleaseKey:          releaseKey,
+                NewReleaseKey:       newReleaseKey,
+                RequestorAccountKey: requestorAccountKey,
+        }
+
+        payload.initContainerData(appKey, appName, config)
+
+        return payload
+}</span>
+
+type DeviceSyncResponse struct {
+        DeviceKey              int                    `json:"device_key"`
+        SwarmKey               int                    `json:"swarm_key"`
+        AccountKey             int                    `json:"account_key"`
+        SerialNumber           string                 `json:"serial_number"`
+        AppName                string                 `json:"app_name"`
+        Name                   string                 `json:"name"` // device name
+        Status                 string                 `json:"status"`
+        Architecture           string                 `json:"architecture"`
+        Address                string                 `json:"address"`
+        ReleaseKey             int                    `json:"release_key"`
+        NewReleaseKey          int                    `json:"new_release_key"`
+        DeviceToAppKey         int                    `json:"device_to_app_key"`
+        Environment            map[string]interface{} `json:"environment"`
+        EnvironmentTemplate    map[string]interface{} `json:"environment_template"`
+        DockerCompose          map[string]interface{} `json:"docker_compose"`
+        NewDockerCompose       map[string]interface{} `json:"new_docker_compose"`
+        Ports                  []interface{}          `json:"ports"`
+        CurrentState           string                 `json:"current_state"`
+        Stage                  string                 `json:"stage"`
+        ContainerName          string                 `json:"container_name"`
+        RequestUpdate          bool                   `json:"request_update"`
+        TargetState            string                 `json:"target_state"`
+        ManuallyRequestedState string                 `json:"manually_requested_state"`
+        InheritFromGroup       interface{}            `json:"inherit_from_group"`
+        RequestorAccountKey    int                    `json:"requestor_account_key"`
+        PresentVersion         string                 `json:"present_version"`
+        PresentImageName       string                 `json:"present_image_name"`
+        NewImageName           string                 `json:"new_image_name"`
+        NewestVersion          string                 `json:"newest_version"`
+        Description            string                 `json:"description"`
+        AppKey                 uint64                 `json:"app_key"`
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package common
+
+import (
+        "encoding/json"
+        "errors"
+        "fmt"
+        "net"
+        "os"
+        "reagent/config"
+        "reagent/messenger/topics"
+        "reagent/release"
+        "regexp"
+        "strconv"
+        "strings"
+        "unicode/utf8"
+
+        "github.com/rs/zerolog/log"
+)
+
+func BuildContainerName(stage Stage, appKey uint64, appName string) string <span class="cov0" title="0">{
+        return strings.ToLower(fmt.Sprintf("%s_%d_%s", stage, appKey, appName))
+}</span>
+
+func BuildComposeContainerName(stage Stage, appKey uint64, appName string) string <span class="cov0" title="0">{
+        return strings.ToLower(fmt.Sprintf("%s_%d_%s_compose", stage, appKey, appName))
+}</span>
+
+func BuildImageName(stage Stage, arch string, appKey uint64, appName string) string <span class="cov0" title="0">{
+        return strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, arch, appKey, appName))
+}</span>
+
+func BuildRegistryImageName(registryURL string, mainRepositoryName string, imageName string) string <span class="cov0" title="0">{
+        return strings.ToLower(fmt.Sprintf("%s%s%s", registryURL, mainRepositoryName, imageName))
+}</span>
+
+func BuildAgentUpdateProgress(serialNumber string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.AgentProgress)
+}</span>
+
+func BuildDownloadOSUpdateProgress(serialNumber string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.DownloadOSUpdateProgress)
+}</span>
+
+func BuildInstallOSUpdateProgress(serialNumber string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.InstallOSUpdateProgress)
+}</span>
+
+func BuildPerformOSUpdateProgress(serialNumber string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.PerformOSUpdateProgress)
+}</span>
+
+func BuildTunnelStateUpdate(serialNumber string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s/onreload", topicPrefix, serialNumber, topics.TunnelStateUpdate)
+}</span>
+
+const topicPrefix = "re.mgmt"
+
+func BuildLogTopic(serialNumber string, containerName string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
+}</span>
+
+func BuildExternalApiTopic(serialNumber string, topic string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topic)
+}</span>
+
+func BuildDockerBuildID(appKey uint64, appName string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("build_%d_%s", appKey, appName)
+}</span>
+
+func BuildDockerPullID(appKey uint64, appName string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("pull_%d_%s", appKey, appName)
+}</span>
+
+func BuildDockerPushID(appKey uint64, appName string) string <span class="cov0" title="0">{
+        return fmt.Sprintf("push_%d_%s", appKey, appName)
+}</span>
+
+func EscapeNewlineCharacters(input string) string <span class="cov0" title="0">{
+        input = strings.ReplaceAll(input, "\n", "\\n")
+        input = strings.ReplaceAll(input, "\t", "\\t")
+        input = strings.ReplaceAll(input, "\r", "\\r")
+        return input
+}</span>
+
+func EnvironmentTemplateToStringArray(environmentsTemplateMap map[string]interface{}) []string <span class="cov0" title="0">{
+        stringArray := make([]string, 0)
+
+        for key, entry := range environmentsTemplateMap </span><span class="cov0" title="0">{
+                value := entry.(map[string]interface{})["defaultValue"]
+                if value != nil </span><span class="cov0" title="0">{
+                        stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, EscapeNewlineCharacters(fmt.Sprint(value))))
+                }</span>
+        }
+
+        <span class="cov0" title="0">return stringArray</span>
+}
+
+func ListDirectories(path string) ([]string, error) <span class="cov0" title="0">{
+        folder, err := os.Open(path)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">defer folder.Close()
+
+        subfolders, err := folder.Readdir(-1)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">var directories []string
+        for _, item := range subfolders </span><span class="cov0" title="0">{
+                if item.IsDir() </span><span class="cov0" title="0">{
+                        directories = append(directories, item.Name())
+                }</span>
+        }
+
+        <span class="cov0" title="0">return directories, nil</span>
+}
+
+func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []string <span class="cov0" title="0">{
+        stringArray := make([]string, 0)
+
+        for key, entry := range environmentsMap </span><span class="cov0" title="0">{
+                value := entry.(map[string]interface{})["value"]
+                stringArray = append(stringArray, fmt.Sprintf("%s=%s", key, EscapeNewlineCharacters(fmt.Sprint(value))))
+        }</span>
+
+        <span class="cov0" title="0">return stringArray</span>
+}
+
+var StatusRegex = regexp.MustCompile(`\((.*?)\)`)
+
+func ParseExitCodeFromContainerStatus(status string) (int64, error) <span class="cov0" title="0">{
+        statusString := StatusRegex.FindString(status)
+        exitCodeString := strings.TrimRight(strings.TrimLeft(statusString, "("), ")")
+        exitCodeInt, err := strconv.ParseInt(exitCodeString, 10, 64)
+        if err != nil </span><span class="cov0" title="0">{
+                return -1, err
+        }</span>
+
+        <span class="cov0" title="0">return exitCodeInt, nil</span>
+}
+
+func GetRandomFreePort() (port int, err error) <span class="cov0" title="0">{
+        var a *net.TCPAddr
+        if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil </span><span class="cov0" title="0">{
+                var l *net.TCPListener
+                if l, err = net.ListenTCP("tcp", a); err == nil </span><span class="cov0" title="0">{
+                        defer l.Close()
+                        return l.Addr().(*net.TCPAddr).Port, nil
+                }</span>
+        }
+        <span class="cov0" title="0">return</span>
+}
+
+func GetFreePortFromStart(startPort int) (int, error) <span class="cov0" title="0">{
+        for port := startPort; port &lt;= 65535; port++ </span><span class="cov0" title="0">{
+                addr := fmt.Sprintf("127.0.0.1:%d", port)
+                listener, err := net.Listen("tcp", addr)
+                if err == nil </span><span class="cov0" title="0">{
+                        defer listener.Close()
+                        return listener.Addr().(*net.TCPAddr).Port, nil
+                }</span>
+        }
+        <span class="cov0" title="0">return 0, fmt.Errorf("no free port available")</span>
+}
+
+// Ordinal gives you the input number in a rank/ordinal format.
+//
+// Ordinal(3) -&gt; 3rd
+func Ordinal(x uint) string <span class="cov0" title="0">{
+        suffix := "th"
+        switch x % 10 </span>{
+        case 1:<span class="cov0" title="0">
+                if x%100 != 11 </span><span class="cov0" title="0">{
+                        suffix = "st"
+                }</span>
+        case 2:<span class="cov0" title="0">
+                if x%100 != 12 </span><span class="cov0" title="0">{
+                        suffix = "nd"
+                }</span>
+        case 3:<span class="cov0" title="0">
+                if x%100 != 13 </span><span class="cov0" title="0">{
+                        suffix = "rd"
+                }</span>
+        }
+        <span class="cov0" title="0">return strconv.Itoa(int(x)) + suffix</span>
+}
+
+func ParseContainerName(containerName string) (Stage, uint64, string, error) <span class="cov0" title="0">{
+        if containerName == "" </span><span class="cov0" title="0">{
+                return "", 0, "", errors.New("container name is empty")
+        }</span>
+
+        // cleanup container name
+        <span class="cov0" title="0">if string([]rune(containerName)[0]) == "/" </span><span class="cov0" title="0">{
+                // get index of the rune that == /
+                _, i := utf8.DecodeRuneInString(containerName)
+                // remove that rune from the string
+                containerName = containerName[i:]
+        }</span>
+
+        <span class="cov0" title="0">var stage Stage
+        var appKey uint64
+        var name string
+
+        containerSplit := strings.Split(containerName, "_")
+        if len(containerSplit) &lt; 3 </span><span class="cov0" title="0">{
+                return "", 0, "", errors.New("invalid container name")
+        }</span>
+
+        <span class="cov0" title="0">if containerSplit[0] == "dev" </span><span class="cov0" title="0">{
+                stage = DEV
+        }</span> else<span class="cov0" title="0"> if containerSplit[0] == "prod" </span><span class="cov0" title="0">{
+                stage = PROD
+        }</span> else<span class="cov0" title="0"> if containerSplit[0] == "pub" </span><span class="cov0" title="0">{
+                stage = DEV
+        }</span> else<span class="cov0" title="0"> {
+                stage = ""
+        }</span>
+
+        <span class="cov0" title="0">parsedAppKey, err := strconv.ParseUint(containerSplit[1], 10, 64)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", err
+        }</span>
+        <span class="cov0" title="0">appKey = parsedAppKey
+
+        // also handles names like dev_6_net_data, aka 2 _'s at the end
+        name = strings.Join(containerSplit[2:], "_")
+
+        return stage, appKey, name, nil</span>
+}
+
+func ParseComposeContainerName(containerName string) (Stage, uint64, string, error) <span class="cov0" title="0">{
+        if containerName == "" </span><span class="cov0" title="0">{
+                return "", 0, "", errors.New("container name is empty")
+        }</span>
+
+        // cleanup container name
+        <span class="cov0" title="0">if string([]rune(containerName)[0]) == "/" </span><span class="cov0" title="0">{
+                // get index of the rune that == /
+                _, i := utf8.DecodeRuneInString(containerName)
+                // remove that rune from the string
+                containerName = containerName[i:]
+        }</span>
+
+        <span class="cov0" title="0">var stage Stage
+        var appKey uint64
+        var name string
+
+        containerSplit := strings.Split(containerName, "_")
+        if containerSplit[3] != "compose" </span><span class="cov0" title="0">{
+                return "", 0, "", errors.New("invalid compose container name")
+        }</span>
+
+        <span class="cov0" title="0">if containerSplit[0] == "dev" </span><span class="cov0" title="0">{
+                stage = DEV
+        }</span> else<span class="cov0" title="0"> if containerSplit[0] == "prod" </span><span class="cov0" title="0">{
+                stage = PROD
+        }</span> else<span class="cov0" title="0"> if containerSplit[0] == "pub" </span><span class="cov0" title="0">{
+                stage = DEV
+        }</span> else<span class="cov0" title="0"> {
+                stage = ""
+        }</span>
+
+        <span class="cov0" title="0">parsedAppKey, err := strconv.ParseUint(containerSplit[1], 10, 64)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", err
+        }</span>
+        <span class="cov0" title="0">appKey = parsedAppKey
+
+        name = containerSplit[2]
+
+        return stage, appKey, name, nil</span>
+}
+
+func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, config *config.Config) <span class="cov0" title="0">{
+        publishContainer := BuildContainerName("pub", appKey, appName)
+        devContainerName := BuildContainerName(DEV, appKey, appName)
+        prodContainerName := BuildContainerName(PROD, appKey, appName)
+
+        _, arch, variant := release.GetSystemInfo()
+        imageArchName := arch + variant
+
+        devImageName := BuildImageName(DEV, imageArchName, appKey, appName)
+        devRegImageName := BuildRegistryImageName(config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, devImageName)
+
+        prodImageName := BuildImageName(PROD, imageArchName, appKey, appName)
+        prodRegImageName := BuildRegistryImageName(config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, prodImageName)
+
+        tp.PublishContainerName = publishContainer
+        tp.ContainerName = StageBasedResult{
+                Dev:  devContainerName,
+                Prod: prodContainerName,
+        }
+        tp.ImageName = StageBasedResult{
+                Dev:  devImageName,
+                Prod: prodImageName,
+        }
+        tp.RegistryImageName = StageBasedResult{
+                Dev:  devRegImageName,
+                Prod: prodRegImageName,
+        }
+}</span>
+
+func PrettyPrintDebug(data interface{}) <span class="cov0" title="0">{
+        pretty, err := PrettyFormat(data)
+        if err != nil </span><span class="cov0" title="0">{
+                pretty = fmt.Sprintf("%+v", pretty)
+        }</span>
+
+        <span class="cov0" title="0">log.Debug().Msg(pretty)</span>
+}
+
+func Min(a int64, b int64) int64 <span class="cov0" title="0">{
+        if a &lt; b </span><span class="cov0" title="0">{
+                return a
+        }</span>
+        <span class="cov0" title="0">return b</span>
+}
+
+func Log(format string, stdout bool, logLevel string, val ...interface{}) <span class="cov0" title="0">{
+        levelMsg := strings.ToUpper(logLevel)
+
+        if stdout </span><span class="cov0" title="0">{
+                args := make([]interface{}, 0)
+                args = append(args, fmt.Sprintf("%s:", levelMsg))
+                args = append(args, val...)
+
+                if format == "" </span><span class="cov0" title="0">{
+                        fmt.Println(args)
+                        return
+                }</span> else<span class="cov0" title="0"> {
+                        fmt.Printf(format, args)
+                        return
+                }</span>
+        }
+
+        <span class="cov0" title="0">event := log.Debug()
+        switch logLevel </span>{
+        case "error":<span class="cov0" title="0">
+                event = log.Error()</span>
+        case "info":<span class="cov0" title="0">
+                event = log.Info()</span>
+        case "warning":<span class="cov0" title="0">
+                event = log.Warn()</span>
+        }
+
+        <span class="cov0" title="0">if format == "" </span><span class="cov0" title="0">{
+                event.Msg(fmt.Sprint(val...))
+                return
+        }</span> else<span class="cov0" title="0"> {
+                event.Msgf(format, val...)
+                return
+        }</span>
+}
+
+func PrettyFormat(data interface{}) (string, error) <span class="cov0" title="0">{
+        var p []byte
+        //    var err := error
+        p, err := json.MarshalIndent(data, "", "\t")
+        if err != nil </span><span class="cov0" title="0">{
+                return "", err
+        }</span>
+
+        <span class="cov0" title="0">return string(p), nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package config
+
+import (
+        "encoding/json"
+        "flag"
+        "fmt"
+        "io/ioutil"
+
+        "github.com/rs/zerolog/log"
+
+        "os"
+        "path/filepath"
+        "runtime"
+)
+
+// ReswarmConfig types for the .flock file
+type ReswarmConfig struct {
+        Name   string `json:"name"`
+        Secret string `json:"secret"`
+        Board  struct {
+                CPU          string      `json:"cpu"`
+                Docs         interface{} `json:"docs"`
+                Board        string      `json:"board"`
+                Model        string      `json:"model"`
+                Boardname    string      `json:"boardname"`
+                Modelname    string      `json:"modelname"`
+                Reflasher    bool        `json:"reflasher"`
+                Architecture string      `json:"architecture"`
+        } `json:"board"`
+        Status         string      `json:"status"`
+        Password       string      `json:"password"`
+        Wlanssid       string      `json:"wlanssid"`
+        SwarmKey       int         `json:"swarm_key"`
+        DeviceKey      int         `json:"device_key"`
+        SwarmName      string      `json:"swarm_name"`
+        Description    interface{} `json:"description"` // can be null --&gt; interface{}
+        Architecture   string      `json:"architecture"`
+        SerialNumber   string      `json:"serial_number"`
+        Authentication struct {
+                Key         string `json:"key"`
+                Certificate string `json:"certificate"`
+        } `json:"authentication"`
+        SwarmOwnerName       string `json:"swarm_owner_name"`
+        ConfigPassphrase     string `json:"config_passphrase"`
+        DeviceEndpointURL    string `json:"device_endpoint_url"`
+        Environment          string `json:"environment,omitempty"`
+        DockerRegistryURL    string `json:"docker_registry_url"`
+        InsecureRegistries   string `json:"insecure-registries,omitempty"`
+        DockerMainRepository string `json:"docker_main_repository"`
+        ReswarmBaseURL       string `json:"-"`
+}
+
+type CommandLineArguments struct {
+        AppsDirectory              string
+        AppsComposeDir             string
+        AppsBuildDir               string
+        AppsSharedDir              string
+        AgentDir                   string
+        DownloadDir                string
+        CompressedBuildExtension   string
+        RemoteUpdateURL            string
+        Environment                string
+        Debug                      bool
+        DebugMessaging             bool
+        Version                    bool
+        Arch                       bool
+        Offline                    bool
+        Profiling                  bool
+        ProfilingPort              uint
+        ShouldUpdateAgent          bool
+        PrettyLogging              bool
+        UseNetworkManager          bool
+        LogFileLocation            string
+        ConfigFileLocation         string
+        DatabaseFileName           string
+        PingPongTimeout            uint
+        ResponseTimeout            uint
+        ConnectionEstablishTimeout uint
+}
+
+type Config struct {
+        ReswarmConfig        *ReswarmConfig
+        CommandLineArguments *CommandLineArguments
+        StartupLogChannel    chan string
+}
+
+func New(cliArgs *CommandLineArguments, reswarmConfig *ReswarmConfig) Config <span class="cov0" title="0">{
+        return Config{
+                ReswarmConfig:        reswarmConfig,
+                CommandLineArguments: cliArgs,
+        }
+}</span>
+
+func GetCliArguments() (*CommandLineArguments, error) <span class="cov0" title="0">{
+        defaultAgentDir := "/opt/reagent"
+        defaultLogFilePath := "/var/log/reagent.log"
+
+        // fallback for when reagent is ran on mac/windows
+        if runtime.GOOS != "linux" </span><span class="cov0" title="0">{
+                homeDir, err := os.UserHomeDir()
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                <span class="cov0" title="0">defaultLogFilePath = fmt.Sprintf("%s/%s", homeDir, "reagent/reagent.log")
+                defaultAgentDir = fmt.Sprintf("%s/%s", homeDir, "reagent")</span>
+        }
+
+        // By default apps are stored inside the default agent directory, as well, to
+        // support a variety of distributions/systems with a rootfs only. However,
+        // for the agent running on actual embedded linux we tend to use a separate
+        // dedicated (update-)persistent partition mounted at "/apps"
+        <span class="cov0" title="0">defaultAppsDir := filepath.Join(defaultAgentDir, "apps")
+
+        // sqlite database files go into the default agent directory as well
+        defaultDatabaseFileName := filepath.Join(defaultAgentDir, "reagent.db")
+
+        logFile := flag.String("logFile", defaultLogFilePath, "log file used by the reagent")
+        debug := flag.Bool("debug", true, "sets the log level to debug")
+        shouldUpdate := flag.Bool("update", true, "determines if the agent should update on start")
+        offline := flag.Bool("offline", false, "starts the agent without establishing a socket connection. meant for debugging")
+        env := flag.String("env", "production", "determines in which environment the agent will operate. Possible values: (production, test, local)")
+        arch := flag.Bool("arch", false, "displays the architecture for which the binary was built")
+        version := flag.Bool("version", false, "displays the current version of the agent")
+        profiling := flag.Bool("profiling", false, "spins up a pprof webserver on the defined port")
+        profilingPort := flag.Uint("profilingPort", 80, "port of the profiling service")
+        prettyLogging := flag.Bool("prettyLogging", false, "enables the pretty console writing, intended for debugging")
+        remoteUpdateURL := flag.String("remoteUpdateURL", "https://storage.googleapis.com", "bucket to be used to download updates")
+        agentDir := flag.String("agentDir", defaultAgentDir, "default location of the agent binary")
+        appsDir := flag.String("appsDir", defaultAppsDir, "default path for apps and app-data")
+        databaseFileName := flag.String("dbFileName", defaultDatabaseFileName, "defines the name used to persist the database file")
+        debugMessaging := flag.Bool("debugMessaging", false, "enables debug logs for messenging layer")
+        nmw := flag.Bool("nmw", true, "enables the agent to use the NetworkManager API on Linux machines")
+        compressedBuildExtension := flag.String("compressedBuildExtension", "tgz", "sets the extension in which the compressed build files will be provided")
+        pingPongTimeout := flag.Uint("ppTimeout", 5000, "Sets the ping pong timeout of the client in milliseconds (0 means no timeout)")
+        responseTimeout := flag.Uint("respTimeout", 7000, "Sets the response timeout of the client in milliseconds")
+        socketConnectionEstablishTimeout := flag.Uint("connTimeout", 1250, "Sets the connection timeout for the socket connection in milliseconds. (0 means no timeout)")
+        cfgFile := flag.String("config", "", "ironflock configuration file")
+        flag.Parse()
+
+        cliArgs := CommandLineArguments{
+                AppsDirectory:              *appsDir,
+                AppsBuildDir:               (*appsDir) + "/build",
+                AppsComposeDir:             (*appsDir) + "/compose",
+                AppsSharedDir:              (*appsDir) + "/shared",
+                DownloadDir:                (*agentDir) + "/downloads",
+                AgentDir:                   *agentDir,
+                RemoteUpdateURL:            *remoteUpdateURL,
+                CompressedBuildExtension:   *compressedBuildExtension,
+                Debug:                      *debug,
+                Version:                    *version,
+                Offline:                    *offline,
+                Environment:                *env,
+                PrettyLogging:              *prettyLogging,
+                DebugMessaging:             *debugMessaging,
+                LogFileLocation:            *logFile,
+                ConfigFileLocation:         *cfgFile,
+                Profiling:                  *profiling,
+                ProfilingPort:              *profilingPort,
+                ShouldUpdateAgent:          *shouldUpdate,
+                DatabaseFileName:           *databaseFileName,
+                PingPongTimeout:            *pingPongTimeout,
+                ResponseTimeout:            *responseTimeout,
+                ConnectionEstablishTimeout: *socketConnectionEstablishTimeout,
+                Arch:                       *arch,
+                UseNetworkManager:          *nmw,
+        }
+
+        return &amp;cliArgs, nil</span>
+}
+
+func SaveReswarmConfig(path string, reswarmConfig *ReswarmConfig) error <span class="cov0" title="0">{
+        file, err := json.MarshalIndent(reswarmConfig, "", " ")
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ioutil.WriteFile(path, file, os.ModePerm)</span>
+}
+
+// LoadReswarmConfig populates a ReswarmConfig struct from a given path
+func LoadReswarmConfig(path string) (*ReswarmConfig, error) <span class="cov0" title="0">{
+        jsonFile, err := os.Open(path)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">defer jsonFile.Close()
+        byteValue, _ := ioutil.ReadAll(jsonFile)
+
+        var reswarmConfig ReswarmConfig
+        json.Unmarshal(byteValue, &amp;reswarmConfig)
+
+        if reswarmConfig.DockerRegistryURL == "registry.reswarm.io/" </span><span class="cov0" title="0">{
+                reswarmConfig.DockerRegistryURL = "registry.ironflock.com/"
+        }</span>
+
+        <span class="cov0" title="0">if reswarmConfig.DeviceEndpointURL == "wss://cbw.record-evolution.com/ws-re-dev" </span><span class="cov0" title="0">{
+                reswarmConfig.DeviceEndpointURL = "wss://cbw.ironflock.com/ws-re-dev"
+        }</span>
+
+        <span class="cov0" title="0">err = SaveReswarmConfig(path, &amp;reswarmConfig)
+        if err != nil </span><span class="cov0" title="0">{
+                log.Fatal().Stack().Err(err).Msg("failed to save .flock config file")
+        }</span>
+
+        <span class="cov0" title="0">return &amp;reswarmConfig, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package debounce
+
+import (
+        "sync"
+        "time"
+)
+
+// New returns a debounced function that takes another functions as its argument.
+// This function will be called when the debounced function stops being called
+// for the given duration.
+// The debounced function can be invoked with different functions, if needed,
+// the last one will win.
+func New(after time.Duration) func(f func()) <span class="cov0" title="0">{
+        d := &amp;debouncer{after: after}
+
+        return func(f func()) </span><span class="cov0" title="0">{
+                d.add(f)
+        }</span>
+}
+
+type debouncer struct {
+        mu    sync.Mutex
+        after time.Duration
+        timer *time.Timer
+}
+
+func (d *debouncer) add(f func()) <span class="cov0" title="0">{
+        d.mu.Lock()
+        defer d.mu.Unlock()
+
+        if d.timer != nil </span><span class="cov0" title="0">{
+                d.timer.Stop()
+        }</span>
+        <span class="cov0" title="0">d.timer = time.AfterFunc(d.after, f)</span>
+}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package errdefs
+
+import "errors"
+
+var ErrNotYetImplemented = errors.New("not yet implemented")
+var ErrNotFound = errors.New("not found")
+var ErrAlreadyExists = errors.New("already exists")
+var ErrFailedToParse = errors.New("failed to parse")
+var ErrMissingFromPayload = errors.New("missing from payload")
+var ErrConfigNotProvided = errors.New("no config file provided")
+
+/*------------*/
+
+type ErrBuildFailed struct{ error }
+
+func (e ErrBuildFailed) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrBuildFailed) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func BuildFailed(err error) error <span class="cov0" title="0">{
+        if err == nil || IsBuildFailed(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">return ErrBuildFailed{err}</span>
+}
+
+/*------------*/
+
+type ErrContainerNameAlreadyInUse struct{ error }
+
+func (e ErrContainerNameAlreadyInUse) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrContainerNameAlreadyInUse) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func ContainerNameAlreadyInUse(err error) error <span class="cov0" title="0">{
+        if err == nil || IsContainerNameAlreadyInUse(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrContainerNameAlreadyInUse{err}</span>
+}
+
+/*------------*/
+
+type ErrContainerNotFound struct{ error }
+
+func (e ErrContainerNotFound) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrContainerNotFound) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func ContainerNotFound(err error) error <span class="cov0" title="0">{
+        if err == nil || IsContainerNotFound(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrContainerNotFound{err}</span>
+}
+
+/*------------*/
+
+type ErrImageNotFound struct{ error }
+
+func (e ErrImageNotFound) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrImageNotFound) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func ImageNotFound(err error) error <span class="cov0" title="0">{
+        if err == nil || IsImageNotFound(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrImageNotFound{err}</span>
+}
+
+/*------------*/
+
+type ErrInsufficientPrivileges struct{ error }
+
+func (e ErrInsufficientPrivileges) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrInsufficientPrivileges) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func InsufficientPrivileges(err error) error <span class="cov0" title="0">{
+        if err == nil || IsInsufficientPrivileges(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrInsufficientPrivileges{err}</span>
+}
+
+/*------------*/
+
+type ErrContainerRemovalAlreadyInProgress struct{ error }
+
+func (e ErrContainerRemovalAlreadyInProgress) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrContainerRemovalAlreadyInProgress) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func ContainerRemovalAlreadyInProgress(err error) error <span class="cov0" title="0">{
+        if err == nil || IsContainerRemovalAlreadyInProgress(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrContainerRemovalAlreadyInProgress{err}</span>
+}
+
+/*-----------*/
+
+type ErrRegistrationHandlerFailed struct {
+        err error
+        URI string
+}
+
+func (e ErrRegistrationHandlerFailed) Error() string <span class="cov0" title="0">{
+        return e.err.Error()
+}</span>
+
+func (e ErrRegistrationHandlerFailed) Cause() error <span class="cov0" title="0">{
+        return e.err
+}</span>
+
+func (e ErrRegistrationHandlerFailed) Unwrap() error <span class="cov0" title="0">{
+        return e.err
+}</span>
+
+func RegistrationHandlerFailed(err error, URI string) error <span class="cov0" title="0">{
+        if err == nil || IsRegistrationHandlerFailed(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrRegistrationHandlerFailed{err, URI}</span>
+}
+
+/*-----------*/
+
+type ErrDockerfileCannotBeEmpty struct {
+        error
+}
+
+func (e ErrDockerfileCannotBeEmpty) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrDockerfileCannotBeEmpty) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func DockerfileCannotBeEmpty(err error) error <span class="cov0" title="0">{
+        if err == nil || IsDockerfileCannotBeEmpty(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrDockerfileCannotBeEmpty{err}</span>
+}
+
+/*-----------*/
+
+type ErrDockerfileIsMissing struct {
+        error
+}
+
+func (e ErrDockerfileIsMissing) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrDockerfileIsMissing) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func DockerfileIsMissing(err error) error <span class="cov0" title="0">{
+        if err == nil || IsDockerfileIsMissing(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrDockerfileIsMissing{err}</span>
+}
+
+/*-----------*/
+
+type ErrDockerBuildFilesNotFound struct {
+        error
+}
+
+func (e ErrDockerBuildFilesNotFound) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrDockerBuildFilesNotFound) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func DockerBuildFilesNotFound(err error) error <span class="cov0" title="0">{
+        if err == nil || IsDockerBuildFilesNotFound(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrDockerBuildFilesNotFound{err}</span>
+}
+
+/*-----------*/
+
+type ErrDockerStreamCanceled struct {
+        error
+}
+
+func (e ErrDockerStreamCanceled) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrDockerStreamCanceled) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func DockerStreamCanceled(err error) error <span class="cov0" title="0">{
+        if err == nil || IsDockerStreamCanceled(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrDockerStreamCanceled{err}</span>
+}
+
+/*-----------*/
+
+type ErrNoActionTransition struct {
+        error
+}
+
+func (e ErrNoActionTransition) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrNoActionTransition) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func NoActionTransition() error <span class="cov0" title="0">{
+        return ErrNoActionTransition{errors.New("no action")}
+}</span>
+
+/*-----------*/
+
+type ErrInProgress struct {
+        error
+}
+
+func (e ErrInProgress) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrInProgress) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func InProgress(err error) error <span class="cov0" title="0">{
+        return ErrInProgress{err}
+}</span>
+
+/*-----------*/
+
+type ErrDockerComposeNotSupported struct {
+        error
+}
+
+func (e ErrDockerComposeNotSupported) Cause() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func (e ErrDockerComposeNotSupported) Unwrap() error <span class="cov0" title="0">{
+        return e.error
+}</span>
+
+func DockerComposeNotSupported(err error) error <span class="cov0" title="0">{
+        if err == nil || IsDockerComposeNotSupported(err) </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return ErrDockerComposeNotSupported{err}</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package errdefs
+
+func IsBuildFailed(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrBuildFailed)
+        return ok
+}</span>
+
+func IsContainerNameAlreadyInUse(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrContainerNameAlreadyInUse)
+        return ok
+}</span>
+
+func IsContainerNotFound(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrContainerNotFound)
+        return ok
+}</span>
+
+func IsImageNotFound(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrImageNotFound)
+        return ok
+}</span>
+
+func IsContainerRemovalAlreadyInProgress(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrContainerRemovalAlreadyInProgress)
+        return ok
+}</span>
+
+func IsRegistrationHandlerFailed(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrContainerRemovalAlreadyInProgress)
+        return ok
+}</span>
+
+func IsDockerfileCannotBeEmpty(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrDockerfileCannotBeEmpty)
+        return ok
+}</span>
+
+func IsDockerfileIsMissing(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrDockerfileIsMissing)
+        return ok
+}</span>
+
+func IsDockerStreamCanceled(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrDockerStreamCanceled)
+        return ok
+}</span>
+
+func IsDockerComposeNotSupported(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrDockerComposeNotSupported)
+        return ok
+}</span>
+
+func IsNoActionTransition(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrNoActionTransition)
+        return ok
+}</span>
+
+func IsDockerBuildFilesNotFound(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrDockerBuildFilesNotFound)
+        return ok
+}</span>
+
+func IsInProgress(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrInProgress)
+        return ok
+}</span>
+
+func IsInsufficientPrivileges(err error) bool <span class="cov0" title="0">{
+        _, ok := err.(ErrInsufficientPrivileges)
+        return ok
+}</span>
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package messenger
+
+import (
+        "context"
+        "reagent/common"
+        "reagent/config"
+        "reagent/messenger/topics"
+)
+
+type OfflineMessenger struct {
+        config *config.Config
+}
+
+func NewOffline(config *config.Config) *OfflineMessenger <span class="cov10" title="7">{
+        return &amp;OfflineMessenger{config}
+}</span>
+
+func (om OfflineMessenger) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error <span class="cov1" title="1">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov1" title="1">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error <span class="cov1" title="1">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) Call(ctx context.Context, topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict, progCb func(Result)) (Result, error) <span class="cov0" title="0">{
+        return Result{}, nil
+}</span>
+
+func (om OfflineMessenger) SubscriptionID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        return 0, true
+}</span>
+
+func (om OfflineMessenger) RegistrationID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        return 0, true
+}</span>
+
+func (om OfflineMessenger) Unregister(topic topics.Topic) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) Unsubscribe(topic topics.Topic) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) SetupTestament() error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) GetSessionID() uint64 <span class="cov1" title="1">{
+        return 0
+}</span>
+
+func (om OfflineMessenger) GetConfig() *config.Config <span class="cov1" title="1">{
+        return om.config
+}</span>
+
+func (om OfflineMessenger) Done() &lt;-chan struct{} <span class="cov1" title="1">{
+        return nil
+}</span>
+
+func (om OfflineMessenger) Connected() bool <span class="cov1" title="1">{
+        return false
+}</span>
+
+func (om OfflineMessenger) SetOnConnect(cb func(reconnect bool)) {<span class="cov0" title="0">
+}</span>
+
+func (om OfflineMessenger) Close() {<span class="cov0" title="0">
+
+}</span>
+
+func (om OfflineMessenger) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov0" title="0">{
+        return nil
+}</span>
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package messenger
+
+import (
+        "context"
+        "sync"
+
+        "github.com/gammazero/nexus/v3/client"
+        "github.com/gammazero/nexus/v3/wamp"
+)
+
+// MockNexusClient is a mock implementation of NexusClient for testing.
+// It allows simulating various connection states and failures.
+type MockNexusClient struct {
+        mu sync.Mutex
+
+        // Connection state
+        connected  bool
+        done       chan struct{}
+        closeError error
+
+        // Call tracking
+        CallCount      int
+        CallError      error
+        CallResult     *wamp.Result
+        PublishCount   int
+        PublishError   error
+        RegisterCount  int
+        RegisterError  error
+        SubscribeCount int
+        SubscribeError error
+
+        // Callbacks for custom behavior
+        OnCall    func(procedure string) (*wamp.Result, error)
+        OnPublish func(topic string) error
+}
+
+// NewMockNexusClient creates a new mock client in connected state
+func NewMockNexusClient() *MockNexusClient <span class="cov5" title="12">{
+        return &amp;MockNexusClient{
+                connected: true,
+                done:      make(chan struct{}),
+        }
+}</span>
+
+// NewMockNexusClientDisconnected creates a new mock client in disconnected state
+func NewMockNexusClientDisconnected() *MockNexusClient <span class="cov0" title="0">{
+        done := make(chan struct{})
+        close(done) // Already closed = disconnected
+        return &amp;MockNexusClient{
+                connected: false,
+                done:      done,
+        }
+}</span>
+
+// SimulateConnectionDrop simulates the server dropping the connection
+// by closing the done channel and setting connected to false
+func (m *MockNexusClient) SimulateConnectionDrop() <span class="cov3" title="4">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        if m.connected </span><span class="cov3" title="4">{
+                m.connected = false
+                close(m.done)
+        }</span>
+}
+
+// SimulateReconnect simulates a successful reconnection
+func (m *MockNexusClient) SimulateReconnect() <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.connected = true
+        m.done = make(chan struct{})
+}</span>
+
+// SetCallError sets an error to be returned on next Call
+func (m *MockNexusClient) SetCallError(err error) <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.CallError = err
+}</span>
+
+// SetCallResult sets the result to be returned on next Call
+func (m *MockNexusClient) SetCallResult(result *wamp.Result) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.CallResult = result
+}</span>
+
+// NexusClient interface implementation
+
+func (m *MockNexusClient) Close() error <span class="cov4" title="6">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        if m.connected </span><span class="cov1" title="1">{
+                m.connected = false
+                close(m.done)
+        }</span>
+        <span class="cov4" title="6">return m.closeError</span>
+}
+
+func (m *MockNexusClient) Connected() bool <span class="cov10" title="100">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.connected
+}</span>
+
+func (m *MockNexusClient) Done() &lt;-chan struct{} <span class="cov4" title="7">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.done
+}</span>
+
+func (m *MockNexusClient) ID() wamp.ID <span class="cov7" title="27">{
+        return wamp.ID(12345)
+}</span>
+
+func (m *MockNexusClient) Publish(topic string, options wamp.Dict, args wamp.List, kwargs wamp.Dict) error <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.PublishCount++
+
+        if m.OnPublish != nil </span><span class="cov0" title="0">{
+                return m.OnPublish(topic)
+        }</span>
+        <span class="cov0" title="0">return m.PublishError</span>
+}
+
+func (m *MockNexusClient) Subscribe(topic string, fn client.EventHandler, options wamp.Dict) error <span class="cov4" title="7">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.SubscribeCount++
+        return m.SubscribeError
+}</span>
+
+func (m *MockNexusClient) SubscriptionID(topic string) (wamp.ID, bool) <span class="cov0" title="0">{
+        return wamp.ID(100), true
+}</span>
+
+func (m *MockNexusClient) Unsubscribe(topic string) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) <span class="cov7" title="27">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.CallCount++
+
+        if m.OnCall != nil </span><span class="cov5" title="9">{
+                return m.OnCall(procedure)
+        }</span>
+
+        <span class="cov6" title="18">if m.CallError != nil </span><span class="cov2" title="2">{
+                return nil, m.CallError
+        }</span>
+
+        <span class="cov6" title="16">if m.CallResult != nil </span><span class="cov0" title="0">{
+                return m.CallResult, nil
+        }</span>
+
+        <span class="cov6" title="16">return &amp;wamp.Result{}, nil</span>
+}
+
+func (m *MockNexusClient) Register(procedure string, fn client.InvocationHandler, options wamp.Dict) error <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.RegisterCount++
+        return m.RegisterError
+}</span>
+
+func (m *MockNexusClient) RegistrationID(procedure string) (wamp.ID, bool) <span class="cov0" title="0">{
+        return wamp.ID(200), true
+}</span>
+
+func (m *MockNexusClient) Unregister(procedure string) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+// Ensure MockNexusClient implements NexusClient
+var _ NexusClient = (*MockNexusClient)(nil)
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package messenger
+
+import (
+        "reagent/common"
+        "reagent/config"
+)
+
+// testConfig returns a minimal test configuration for messenger tests
+func testConfig() *config.Config <span class="cov10" title="23">{
+        return &amp;config.Config{
+                CommandLineArguments: &amp;config.CommandLineArguments{
+                        AgentDir:      "/opt/reagent",
+                        PrettyLogging: true,
+                        Debug:         true,
+                        Offline:       false,
+                },
+                ReswarmConfig: &amp;config.ReswarmConfig{
+                        Environment:       string(common.PRODUCTION),
+                        SwarmKey:          1,
+                        DeviceKey:         1,
+                        SerialNumber:      "test-serial-001",
+                        Secret:            "test-secret",
+                        DeviceEndpointURL: "ws://localhost:8080/ws",
+                        ReswarmBaseURL:    "https://app.ironflock.com",
+                },
+        }
+}</span>
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package messenger
+
+import (
+        "context"
+        "crypto/tls"
+        "errors"
+        "fmt"
+        "os"
+        "regexp"
+        "strings"
+        "sync"
+        "time"
+
+        "reagent/common"
+        "reagent/config"
+        "reagent/container"
+        "reagent/messenger/topics"
+        "reagent/safe"
+
+        "github.com/gammazero/nexus/v3/client"
+        "github.com/gammazero/nexus/v3/transport"
+        "github.com/gammazero/nexus/v3/wamp"
+        "github.com/gammazero/nexus/v3/wamp/crsign"
+        "github.com/rs/zerolog"
+        "github.com/rs/zerolog/log"
+)
+
+type WampSession struct {
+        client         NexusClient
+        container      container.Container
+        agentConfig    *config.Config
+        socketConfig   *SocketConfig
+        clientProvider ClientProvider // nil means use default client.ConnectNet
+        mu             sync.Mutex
+        onConnect      func(reconnect bool) // Callback invoked after successful connection/reconnection
+}
+
+type wampLogWrapper struct {
+        logger *zerolog.Logger
+}
+
+type DeviceStatus string
+
+const (
+        CONNECTED    DeviceStatus = "CONNECTED"
+        DISCONNECTED DeviceStatus = "DISCONNECTED"
+        CONFIGURING  DeviceStatus = "CONFIGURING"
+)
+
+var ErrNotConnected = errors.New("not connected")
+
+func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper <span class="cov7" title="93">{
+        return wampLogWrapper{logger: zeroLogger}
+}</span>
+
+func (wl wampLogWrapper) Print(v ...interface{}) <span class="cov0" title="0">{
+        // Check for connection errors that indicate the connection is broken
+        for _, val := range v </span><span class="cov0" title="0">{
+                if str, ok := val.(string); ok </span><span class="cov0" title="0">{
+                        if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") </span><span class="cov0" title="0">{
+                                log.Warn().Msgf("WAMP connection error detected: %v", str)
+                        }</span>
+                }
+        }
+        <span class="cov0" title="0">wl.logger.Print(v...)</span>
+}
+
+func (wl wampLogWrapper) Println(v ...interface{}) <span class="cov0" title="0">{
+        // Check for connection errors
+        for _, val := range v </span><span class="cov0" title="0">{
+                if str, ok := val.(string); ok </span><span class="cov0" title="0">{
+                        if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") </span><span class="cov0" title="0">{
+                                log.Warn().Msgf("WAMP connection error detected: %v", str)
+                        }</span>
+                }
+        }
+        <span class="cov0" title="0">wl.logger.Print(v, "\n")</span>
+}
+
+func (wl wampLogWrapper) Printf(format string, v ...interface{}) <span class="cov0" title="0">{
+        // Check for connection errors in formatted strings
+        if strings.Contains(format, "broken pipe") || strings.Contains(format, "connection reset") || strings.Contains(format, "write tcp") </span><span class="cov0" title="0">{
+                log.Warn().Msgf("WAMP connection error detected: "+format, v...)
+        }</span>
+        <span class="cov0" title="0">wl.logger.Printf(format, v...)</span>
+}
+
+func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper <span class="cov7" title="93">{
+        wrapper := newWampLogger(&amp;zeroLogger)
+        return wrapper
+}</span>
+
+type SocketConfig struct {
+        PingPongTimeout   time.Duration
+        ResponseTimeout   time.Duration
+        ConnectionTimeout time.Duration
+        HeartbeatInterval time.Duration // Default: 30 seconds if zero
+        SetupTestament    bool
+}
+
+// DefaultHeartbeatInterval is the default interval between heartbeat checks
+const DefaultHeartbeatInterval = 30 * time.Second
+
+// ClientProvider is a function that attempts to connect and returns a NexusClient.
+// It's used to allow mocking the connection in tests.
+type ClientProvider func(ctx context.Context, url string, cfg client.Config) (NexusClient, error)
+
+var legacyEndpointRegex = regexp.MustCompile(`devices.*\.(com|io):8080`)
+
+func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) <span class="cov7" title="93">{
+        reswarmConfig := config.ReswarmConfig
+
+        cfg := client.Config{
+                Realm: "realm1",
+                HelloDetails: wamp.Dict{
+                        "authid": fmt.Sprintf("%d-%d", reswarmConfig.SwarmKey, reswarmConfig.DeviceKey),
+                },
+                AuthHandlers: map[string]client.AuthFunc{
+                        "wampcra": clientAuthFunc(reswarmConfig.Secret),
+                },
+                Debug:  config.CommandLineArguments.DebugMessaging,
+                Logger: wrapZeroLogger(log.Logger),
+        }
+
+        isLegacyEndpoint := legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL))
+        if isLegacyEndpoint </span><span class="cov0" title="0">{
+                tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                <span class="cov0" title="0">cfg.TlsCfg = &amp;tls.Config{
+                        Certificates:       []tls.Certificate{tlscert},
+                        InsecureSkipVerify: true,
+                }</span>
+        }
+
+        <span class="cov7" title="93">if socketConfig.PingPongTimeout != 0 </span><span class="cov0" title="0">{
+                cfg.WsCfg = transport.WebsocketConfig{
+                        KeepAlive: socketConfig.PingPongTimeout,
+                }
+        }</span>
+
+        <span class="cov7" title="93">if socketConfig.ResponseTimeout != 0 </span><span class="cov4" title="14">{
+                cfg.ResponseTimeout = socketConfig.ResponseTimeout
+        }</span>
+
+        <span class="cov7" title="93">return &amp;cfg, nil</span>
+}
+
+// SetOnConnect sets the callback that will be invoked after each successful connection or reconnection.
+// The callback receives a boolean indicating whether this is a reconnection (true) or initial connection (false).
+func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) <span class="cov3" title="5">{
+        wampSession.mu.Lock()
+        defer wampSession.mu.Unlock()
+        wampSession.onConnect = cb
+}</span>
+
+// NewWampSession creates a new WampSession from a ReswarmConfig file.
+// If clientProvider is nil, the default client.ConnectNet is used.
+func NewWampSession(config *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) <span class="cov0" title="0">{
+        session := &amp;WampSession{
+                agentConfig:    config,
+                socketConfig:   socketConfig,
+                container:      container,
+                clientProvider: clientProvider,
+        }
+
+        err := session.connect()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">return session, nil</span>
+}
+
+// connect establishes the WAMP connection
+func (wampSession *WampSession) connect() error <span class="cov1" title="1">{
+        clientChannel := wampSession.establishSocketConnection()
+        wampSession.client = &lt;-clientChannel
+
+        if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
+                err := wampSession.SetupTestament()
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        }
+
+        // Start connection monitoring
+        <span class="cov1" title="1">wampSession.listenForDisconnect()
+        wampSession.startHeartbeat()
+
+        return nil</span>
+}
+
+// reconnect attempts to re-establish the WAMP connection.
+// Returns true if reconnection was successful, false otherwise.
+func (wampSession *WampSession) reconnect() bool <span class="cov2" title="3">{
+        wampSession.mu.Lock()
+        // Close existing client
+        if wampSession.client != nil </span><span class="cov2" title="3">{
+                wampSession.client.Close()
+                wampSession.client = nil
+        }</span>
+        <span class="cov2" title="3">wampSession.mu.Unlock()
+
+        // Establish new connection
+        clientChannel := wampSession.establishSocketConnection()
+
+        wampSession.mu.Lock()
+        wampSession.client = &lt;-clientChannel
+        wampSession.mu.Unlock()
+
+        // Check if we actually connected
+        if !wampSession.Connected() </span><span class="cov0" title="0">{
+                return false
+        }</span>
+
+        <span class="cov2" title="3">if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
+                err := wampSession.SetupTestament()
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Fatal().Stack().Err(err).Msg("failed to setup testament")
+                }</span>
+        }
+
+        <span class="cov2" title="3">return true</span>
+}
+
+// listenForDisconnect starts a goroutine that monitors for disconnection
+// and automatically handles reconnection. When reconnection succeeds,
+// it invokes the onConnect callback (if set) with reconnect=true.
+func (wampSession *WampSession) listenForDisconnect() <span class="cov3" title="7">{
+        // Get the current client's done channel
+        wampSession.mu.Lock()
+        client := wampSession.client
+        wampSession.mu.Unlock()
+
+        if client == nil </span><span class="cov0" title="0">{
+                log.Warn().Msg("ListenForDisconnect called but client is nil")
+                return
+        }</span>
+
+        <span class="cov3" title="7">clientDone := client.Done()
+
+        safe.Go(func() </span><span class="cov3" title="7">{
+                select </span>{
+                case &lt;-clientDone:<span class="cov2" title="3">
+                        log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")
+
+                        // Cancel any active container streams
+                        if wampSession.container != nil </span><span class="cov0" title="0">{
+                                err := wampSession.container.CancelAllStreams()
+                                if err != nil </span><span class="cov0" title="0">{
+                                        log.Error().Err(err).Msg("error closing stream")
+                                }</span>
+                        }
+
+                        <span class="cov2" title="3">reconnectAttempt := 0
+                        for </span><span class="cov2" title="3">{
+                                reconnectAttempt++
+                                log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
+
+                                if wampSession.reconnect() </span><span class="cov2" title="3">{
+                                        log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
+
+                                        // Invoke onConnect callback if set
+                                        wampSession.mu.Lock()
+                                        cb := wampSession.onConnect
+                                        wampSession.mu.Unlock()
+
+                                        if cb != nil </span><span class="cov1" title="1">{
+                                                safe.Go(func() </span><span class="cov1" title="1">{
+                                                        log.Info().Msg("Re-initializing after reconnection...")
+                                                        cb(true) // reconnect = true
+                                                        log.Info().Msg("Successfully re-initialized after reconnection")
+                                                }</span>)
+                                        }
+
+                                        // Start listening for the next disconnect
+                                        <span class="cov2" title="3">wampSession.listenForDisconnect()
+                                        return</span>
+                                }
+
+                                <span class="cov0" title="0">log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
+                                time.Sleep(time.Second * 1)</span>
+                        }
+                }
+        })
+
+        <span class="cov3" title="7">log.Debug().Msg("Messenger: Setup disconnect listener")</span>
+}
+
+// startHeartbeat starts a goroutine that periodically sends a heartbeat to verify
+// the connection is alive. If the heartbeat fails consecutively, it forces a reconnection.
+func (wampSession *WampSession) startHeartbeat() <span class="cov3" title="5">{
+        heartbeatInterval := wampSession.socketConfig.HeartbeatInterval
+        if heartbeatInterval == 0 </span><span class="cov1" title="1">{
+                heartbeatInterval = DefaultHeartbeatInterval
+        }</span>
+
+        <span class="cov3" title="5">safe.Go(func() </span><span class="cov3" title="5">{
+                consecutiveFailures := 0
+                const maxConsecutiveFailures = 2 // Trigger reconnect after 2 failures
+
+                for </span><span class="cov6" title="47">{
+                        time.Sleep(heartbeatInterval)
+
+                        // Check if connection is still alive
+                        if !wampSession.Connected() </span><span class="cov4" title="15">{
+                                log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
+                                consecutiveFailures = 0
+                                continue</span>
+                        }
+
+                        <span class="cov5" title="27">err := wampSession.UpdateRemoteDeviceStatus(CONNECTED)
+                        if err != nil </span><span class="cov2" title="3">{
+                                consecutiveFailures++
+                                log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
+
+                                // If we've failed multiple times, the connection is likely broken
+                                // Force a reconnection by closing the client
+                                if consecutiveFailures &gt;= maxConsecutiveFailures </span><span class="cov1" title="1">{
+                                        log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), forcing reconnection...")
+                                        wampSession.Close()
+                                        consecutiveFailures = 0
+                                }</span>
+                        } else<span class="cov5" title="24"> {
+                                // Reset counter on success
+                                if consecutiveFailures &gt; 0 </span><span class="cov1" title="1">{
+                                        log.Info().Msg("Heartbeat successful, connection restored")
+                                }</span>
+                                <span class="cov5" title="24">consecutiveFailures = 0</span>
+                        }
+                }
+        })
+
+        <span class="cov3" title="5">log.Debug().Msg("Messenger: Started heartbeat")</span>
+}
+
+func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov0" title="0">{
+        if !wampSession.Connected() </span><span class="cov0" title="0">{
+                return ErrNotConnected
+        }</span>
+
+        <span class="cov0" title="0">err := wampSession.client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
+        if err != nil </span><span class="cov0" title="0">{
+                log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
+        }</span>
+        <span class="cov0" title="0">return err</span>
+}
+
+// establishSocketConnection establishes a WAMP connection using the session's ClientProvider.
+// If clientProvider is nil, client.ConnectNet is used directly.
+func (wampSession *WampSession) establishSocketConnection() chan NexusClient <span class="cov4" title="12">{
+        agentConfig := wampSession.agentConfig
+        socketConfig := wampSession.socketConfig
+        container := wampSession.container
+        provider := wampSession.clientProvider
+
+        resChan := make(chan NexusClient)
+
+        // never returns a established connection
+        if agentConfig.CommandLineArguments.Offline </span><span class="cov1" title="1">{
+                log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
+                return resChan
+        }</span>
+
+        <span class="cov4" title="11">log.Debug().Msg("Attempting to establish a socket connection...")
+
+        safe.Go(func() </span><span class="cov4" title="11">{
+                for </span><span class="cov7" title="93">{
+                        connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
+                        if err != nil </span><span class="cov0" title="0">{
+                                log.Error().Err(err).Msg("failed to create connect config...")
+                                continue</span>
+                        }
+
+                        <span class="cov7" title="93">var ctx context.Context
+                        var cancelFunc context.CancelFunc
+
+                        if socketConfig.ConnectionTimeout == 0 </span><span class="cov4" title="13">{
+                                ctx = context.Background()
+                        }</span> else<span class="cov7" title="80"> {
+                                ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
+                        }</span>
+
+                        <span class="cov7" title="93">var duration time.Duration
+                        requestStart := time.Now() // time request
+                        var wClient NexusClient
+                        if provider != nil </span><span class="cov7" title="93">{
+                                wClient, err = provider(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+                        }</span> else<span class="cov0" title="0"> {
+                                wClient, err = client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+                        }</span>
+                        <span class="cov7" title="93">if err != nil </span><span class="cov7" title="86">{
+                                if cancelFunc != nil </span><span class="cov6" title="73">{
+                                        cancelFunc()
+                                }</span>
+
+                                <span class="cov7" title="86">duration = time.Since(requestStart)
+
+                                if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") </span><span class="cov0" title="0">{
+                                        exitMessage := fmt.Sprintln("The IronFlock device connect authentication failed")
+                                        fmt.Println(exitMessage)
+                                        os.Exit(1)
+                                }</span>
+
+                                <span class="cov7" title="86">log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
+                                time.Sleep(time.Second * 1)
+                                continue</span>
+                        }
+
+                        <span class="cov3" title="7">if cancelFunc != nil </span><span class="cov3" title="7">{
+                                cancelFunc()
+                        }</span>
+
+                        // add a dummy topic that will be used as a means to check if a client has an existing session or not
+                        // topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+                        // invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult {
+                        //         return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
+                        // }
+
+                        // err = wClient.Register(topic, invokeHandler, nil)
+                        // if err != nil &amp;&amp; strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) {
+                        //         exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
+                        //         fmt.Println(exitMessage)
+                        //         os.Exit(1)
+                        // }
+
+                        <span class="cov3" title="7">onDestroyListener := func(event *wamp.Event) </span><span class="cov0" title="0">{
+                                container.PruneSystem()
+                                os.Exit(1)
+                        }</span>
+
+                        <span class="cov3" title="7">wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
+
+                        if wClient.Connected() </span><span class="cov3" title="5">{
+                                duration = time.Since(requestStart)
+                                log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
+                                resChan &lt;- wClient
+                                close(resChan)
+                                return
+                        }</span>
+
+                        <span class="cov1" title="2">duration = time.Since(requestStart)
+                        if wClient != nil </span><span class="cov1" title="2">{
+                                wClient.Close()
+                        }</span>
+
+                        <span class="cov1" title="2">log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())</span>
+                }
+        })
+
+        <span class="cov4" title="11">return resChan</span>
+}
+
+func (wampSession *WampSession) Connected() bool <span class="cov10" title="706">{
+        wampSession.mu.Lock()
+        client := wampSession.client
+        wampSession.mu.Unlock()
+        if client == nil </span><span class="cov9" title="614">{
+                return false
+        }</span>
+        <span class="cov7" title="92">return client.Connected()</span>
+}
+
+func (wampSession *WampSession) Done() &lt;-chan struct{} <span class="cov9" title="601">{
+        wampSession.mu.Lock()
+        client := wampSession.client
+        wampSession.mu.Unlock()
+        if client == nil </span><span class="cov9" title="601">{
+                // Return a closed channel if no client
+                ch := make(chan struct{})
+                close(ch)
+                return ch
+        }</span>
+        <span class="cov0" title="0">return client.Done()</span>
+}
+
+func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error <span class="cov0" title="0">{
+        handler := func(event *wamp.Event) </span><span class="cov0" title="0">{
+                cbEventMap := Result{
+                        Subscription: uint64(event.Subscription),
+                        Publication:  uint64(event.Publication),
+                        Details:      common.Dict(event.Details),
+                        Arguments:    []interface{}(event.Arguments),
+                        ArgumentsKw:  common.Dict(event.ArgumentsKw),
+                }
+                err := cb(cbEventMap)
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
+                }</span>
+        }
+
+        <span class="cov0" title="0">return wampSession.client.Subscribe(string(topic), handler, wamp.Dict(options))</span>
+}
+
+func (wampSession *WampSession) GetConfig() *config.Config <span class="cov5" title="27">{
+        return wampSession.agentConfig
+}</span>
+
+func (wampSession *WampSession) SubscriptionID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        subID, ok := wampSession.client.SubscriptionID(string(topic))
+        return uint64(subID), ok
+}</span>
+func (wampSession *WampSession) RegistrationID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        subID, ok := wampSession.client.RegistrationID(string(topic))
+        return uint64(subID), ok
+}</span>
+
+func (wampSession *WampSession) Call(
+        ctx context.Context,
+        topic topics.Topic,
+        args []interface{},
+        kwargs common.Dict,
+        options common.Dict,
+        progCb func(Result)) (Result, error) <span class="cov5" title="27">{
+
+        if !wampSession.Connected() </span><span class="cov0" title="0">{
+                return Result{}, ErrNotConnected
+        }</span>
+
+        <span class="cov5" title="27">var handler func(result *wamp.Result)
+        if progCb != nil </span><span class="cov0" title="0">{
+                handler = func(result *wamp.Result) </span><span class="cov0" title="0">{
+                        cbResultMap := Result{
+                                Request:     uint64(result.Request),
+                                Details:     common.Dict(result.Details),
+                                Arguments:   []interface{}(result.Arguments),
+                                ArgumentsKw: common.Dict(result.ArgumentsKw),
+                        }
+                        progCb(cbResultMap)
+                }</span>
+        }
+
+        <span class="cov5" title="27">result, err := wampSession.client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+        if err != nil </span><span class="cov2" title="3">{
+                return Result{}, err
+        }</span>
+
+        <span class="cov5" title="24">callResultMap := Result{
+                Request:     uint64(result.Request),
+                Details:     common.Dict(result.Details),
+                Arguments:   []interface{}(result.Arguments),
+                ArgumentsKw: common.Dict(result.ArgumentsKw),
+        }
+
+        return callResultMap, nil</span>
+}
+
+func (wampSession *WampSession) GetSessionID() uint64 <span class="cov5" title="27">{
+        if !wampSession.Connected() </span><span class="cov0" title="0">{
+                return 0
+        }</span>
+
+        <span class="cov5" title="27">return uint64(wampSession.client.ID())</span>
+}
+
+func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error <span class="cov0" title="0">{
+
+        invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult </span><span class="cov0" title="0">{
+                cbInvocationMap := Result{
+                        Request:      uint64(invocation.Request),
+                        Registration: uint64(invocation.Registration),
+                        Details:      common.Dict(invocation.Details),
+                        Arguments:    invocation.Arguments,
+                        ArgumentsKw:  common.Dict(invocation.ArgumentsKw),
+                }
+
+                resultMap, invokeErr := cb(ctx, cbInvocationMap)
+                if invokeErr != nil </span><span class="cov0" title="0">{
+                        // Global error logging for any Registered WAMP topics
+                        log.Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
+
+                        return client.InvokeResult{
+                                Err: wamp.URI("wamp.error.canceled"), // TODO: parse Error URI from error
+                                Args: wamp.List{
+                                        wamp.Dict{"error": invokeErr.Error()},
+                                },
+                        }
+                }</span>
+
+                <span class="cov0" title="0">kwargs := resultMap.ArgumentsKw
+
+                return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs)}</span>
+        }
+
+        <span class="cov0" title="0">err := wampSession.client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (wampSession *WampSession) Unregister(topic topics.Topic) error <span class="cov0" title="0">{
+        return wampSession.client.Unregister(string(topic))
+}</span>
+
+func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error <span class="cov0" title="0">{
+        return wampSession.client.Unsubscribe(string(topic))
+}</span>
+
+// SetupTestament will setup the device's crossbar testament
+func (wampSession *WampSession) SetupTestament() error <span class="cov0" title="0">{
+        ctx := context.Background()
+
+        config := wampSession.GetConfig()
+
+        // https://github.com/gammazero/nexus/blob/v3/router/realm.go#L1042 on how to form payload
+        args := []interface{}{
+                topics.SetDeviceTestament,
+                []interface{}{
+                        common.Dict{
+                                "swarm_key":       config.ReswarmConfig.SwarmKey,
+                                "device_key":      config.ReswarmConfig.DeviceKey,
+                                "serial_number":   config.ReswarmConfig.SerialNumber,
+                                "wamp_session_id": wampSession.GetSessionID(),
+                        },
+                },
+                common.Dict{},
+        }
+
+        _, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (wampSession *WampSession) Close() <span class="cov7" title="106">{
+        wampSession.mu.Lock()
+        clientToClose := wampSession.client
+        wampSession.client = nil
+        wampSession.mu.Unlock()
+
+        // Close the client - this will close its Done() channel
+        if clientToClose != nil </span><span class="cov1" title="1">{
+                clientToClose.Close()
+        }</span>
+}
+
+func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) <span class="cov7" title="93">{
+        return func(c *wamp.Challenge) (string, wamp.Dict) </span><span class="cov0" title="0">{
+                return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
+        }</span>
+}
+
+func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov5" title="27">{
+        config := wampSession.GetConfig()
+        ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
+        defer cancelFunc()
+
+        payload := common.Dict{
+                "swarm_key":       config.ReswarmConfig.SwarmKey,
+                "device_key":      config.ReswarmConfig.DeviceKey,
+                "status":          string(status),
+                "wamp_session_id": wampSession.GetSessionID(),
+        }
+
+        res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+        if err != nil </span><span class="cov2" title="3">{
+                return err
+        }</span>
+
+        <span class="cov5" title="24">if res.Arguments == nil || res.Arguments[0] == nil </span><span class="cov5" title="24">{
+                return nil
+        }</span>
+
+        <span class="cov0" title="0">args, ok := res.Arguments[0].(map[string]interface{})
+        if !ok </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+
+        <span class="cov0" title="0">reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"])
+        if reswarmBaseURL != "" </span><span class="cov0" title="0">{
+                wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package safe
+
+import (
+        "runtime/debug"
+
+        "github.com/rs/zerolog/log"
+)
+
+func Go(f func()) <span class="cov0" title="0">{
+        go func() </span><span class="cov0" title="0">{
+                defer func() </span><span class="cov0" title="0">{
+                        err := recover()
+
+                        if err != nil </span><span class="cov0" title="0">{
+                                log.Fatal().Msgf("Panic: %+v \n Stack Trace: %s", err, debug.Stack())
+                        }</span>
+                }()
+
+                <span class="cov0" title="0">f()</span>
+        }()
+}
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package testutil
+
+import (
+"reagent/common"
+"reagent/config"
+)
+
+// DefaultTestConfig returns a minimal test configuration
+func DefaultTestConfig() *config.Config <span class="cov0" title="0">{
+        return &amp;config.Config{
+                CommandLineArguments: &amp;config.CommandLineArguments{
+                        AgentDir:      "/opt/reagent",
+                        PrettyLogging: true,
+                        Debug:         true,
+                },
+                ReswarmConfig: &amp;config.ReswarmConfig{
+                        Environment:       string(common.PRODUCTION),
+                        SwarmKey:          1,
+                        DeviceKey:         1,
+                        SerialNumber:      "test-serial-001",
+                        Secret:            "test-secret",
+                        DeviceEndpointURL: "ws://localhost:8080/ws",
+                        ReswarmBaseURL:    "https://app.ironflock.com",
+                },
+        }
+}</span>
+
+// TestConfigBuilder provides a fluent interface for building test configs
+type TestConfigBuilder struct {
+        config *config.Config
+}
+
+// NewTestConfigBuilder creates a new builder with default values
+func NewTestConfigBuilder() *TestConfigBuilder <span class="cov0" title="0">{
+        return &amp;TestConfigBuilder{
+                config: DefaultTestConfig(),
+        }
+}</span>
+
+// WithSwarmKey sets the swarm key
+func (b *TestConfigBuilder) WithSwarmKey(key int) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.ReswarmConfig.SwarmKey = key
+        return b
+}</span>
+
+// WithDeviceKey sets the device key
+func (b *TestConfigBuilder) WithDeviceKey(key int) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.ReswarmConfig.DeviceKey = key
+        return b
+}</span>
+
+// WithSerialNumber sets the serial number
+func (b *TestConfigBuilder) WithSerialNumber(serial string) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.ReswarmConfig.SerialNumber = serial
+        return b
+}</span>
+
+// WithEnvironment sets the environment
+func (b *TestConfigBuilder) WithEnvironment(env string) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.ReswarmConfig.Environment = env
+        return b
+}</span>
+
+// WithEndpointURL sets the device endpoint URL
+func (b *TestConfigBuilder) WithEndpointURL(url string) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.ReswarmConfig.DeviceEndpointURL = url
+        return b
+}</span>
+
+// WithOfflineMode sets the offline mode flag
+func (b *TestConfigBuilder) WithOfflineMode(offline bool) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.CommandLineArguments.Offline = offline
+        return b
+}</span>
+
+// WithAgentDir sets the agent directory
+func (b *TestConfigBuilder) WithAgentDir(dir string) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.CommandLineArguments.AgentDir = dir
+        return b
+}</span>
+
+// WithDebug sets debug mode
+func (b *TestConfigBuilder) WithDebug(debug bool) *TestConfigBuilder <span class="cov0" title="0">{
+        b.config.CommandLineArguments.Debug = debug
+        return b
+}</span>
+
+// Build returns the configured config
+func (b *TestConfigBuilder) Build() *config.Config <span class="cov0" title="0">{
+        return b.config
+}</span>
+</pre>
+		
+		<pre class="file" id="file13" style="display: none">// Package testutil provides common test utilities and mock implementations
+package testutil
+
+import (
+        "context"
+        "reagent/common"
+        "reagent/config"
+        "reagent/messenger"
+        "reagent/messenger/topics"
+        "sync"
+)
+
+// MockMessenger is a configurable mock implementation of the Messenger interface
+type MockMessenger struct {
+        mu        sync.RWMutex
+        config    *config.Config
+        connected bool
+        done      chan struct{}
+        sessionID uint64
+
+        // Call tracking
+        PublishCalls   []PublishCall
+        CallCalls      []CallCall
+        RegisterCalls  []RegisterCall
+        SubscribeCalls []SubscribeCall
+
+        // Configurable responses
+        CallResponses map[string]CallResponse
+        CallErrors    map[string]error
+}
+
+// PublishCall records a Publish call
+type PublishCall struct {
+        Topic   topics.Topic
+        Args    []interface{}
+        Kwargs  common.Dict
+        Options common.Dict
+}
+
+// CallCall records a Call invocation
+type CallCall struct {
+        Topic   topics.Topic
+        Args    []interface{}
+        Kwargs  common.Dict
+        Options common.Dict
+}
+
+// RegisterCall records a Register call
+type RegisterCall struct {
+        Topic   topics.Topic
+        Options common.Dict
+}
+
+// SubscribeCall records a Subscribe call
+type SubscribeCall struct {
+        Topic   topics.Topic
+        Options common.Dict
+}
+
+// CallResponse holds a configured response for Call
+type CallResponse struct {
+        Result messenger.Result
+        Err    error
+}
+
+// NewMockMessenger creates a new mock messenger with default configuration
+func NewMockMessenger() *MockMessenger <span class="cov0" title="0">{
+        return &amp;MockMessenger{
+                config:        DefaultTestConfig(),
+                connected:     true,
+                done:          make(chan struct{}),
+                sessionID:     12345,
+                CallResponses: make(map[string]CallResponse),
+                CallErrors:    make(map[string]error),
+        }
+}</span>
+
+// NewMockMessengerWithConfig creates a mock messenger with custom config
+func NewMockMessengerWithConfig(cfg *config.Config) *MockMessenger <span class="cov0" title="0">{
+        m := NewMockMessenger()
+        m.config = cfg
+        return m
+}</span>
+
+func (m *MockMessenger) Register(topic topics.Topic, cb func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error), options common.Dict) error <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.RegisterCalls = append(m.RegisterCalls, RegisterCall{Topic: topic, Options: options})
+        return nil
+}</span>
+
+func (m *MockMessenger) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.PublishCalls = append(m.PublishCalls, PublishCall{
+                Topic:   topic,
+                Args:    args,
+                Kwargs:  kwargs,
+                Options: options,
+        })
+        return nil
+}</span>
+
+func (m *MockMessenger) Subscribe(topic topics.Topic, cb func(messenger.Result) error, options common.Dict) error <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.SubscribeCalls = append(m.SubscribeCalls, SubscribeCall{Topic: topic, Options: options})
+        return nil
+}</span>
+
+func (m *MockMessenger) Call(ctx context.Context, topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict, progCb func(messenger.Result)) (messenger.Result, error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        m.CallCalls = append(m.CallCalls, CallCall{
+                Topic:   topic,
+                Args:    args,
+                Kwargs:  kwargs,
+                Options: options,
+        })
+
+        // Check for configured error
+        if err, ok := m.CallErrors[string(topic)]; ok </span><span class="cov0" title="0">{
+                return messenger.Result{}, err
+        }</span>
+
+        // Check for configured response
+        <span class="cov0" title="0">if resp, ok := m.CallResponses[string(topic)]; ok </span><span class="cov0" title="0">{
+                return resp.Result, resp.Err
+        }</span>
+
+        <span class="cov0" title="0">return messenger.Result{}, nil</span>
+}
+
+func (m *MockMessenger) SubscriptionID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        return 0, true
+}</span>
+
+func (m *MockMessenger) RegistrationID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
+        return 0, true
+}</span>
+
+func (m *MockMessenger) Unregister(topic topics.Topic) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (m *MockMessenger) Unsubscribe(topic topics.Topic) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (m *MockMessenger) SetupTestament() error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func (m *MockMessenger) GetSessionID() uint64 <span class="cov0" title="0">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+        return m.sessionID
+}</span>
+
+func (m *MockMessenger) GetConfig() *config.Config <span class="cov0" title="0">{
+        return m.config
+}</span>
+
+func (m *MockMessenger) Done() &lt;-chan struct{} <span class="cov0" title="0">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+        return m.done
+}</span>
+
+func (m *MockMessenger) Connected() bool <span class="cov0" title="0">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+        return m.connected
+}</span>
+
+func (m *MockMessenger) SetOnConnect(cb func(reconnect bool)) {<span class="cov0" title="0">
+        // Mock implementation - store callback if needed for testing
+}</span>
+
+func (m *MockMessenger) Close() <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connected = false
+        select </span>{
+        case &lt;-m.done:<span class="cov0" title="0"></span>
+        default:<span class="cov0" title="0">
+                close(m.done)</span>
+        }
+}
+
+func (m *MockMessenger) UpdateRemoteDeviceStatus(status messenger.DeviceStatus) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+// SetConnected sets the connection state
+func (m *MockMessenger) SetConnected(connected bool) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connected = connected
+}</span>
+
+// SimulateDisconnect simulates a connection drop
+func (m *MockMessenger) SimulateDisconnect() <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connected = false
+        select </span>{
+        case &lt;-m.done:<span class="cov0" title="0"></span>
+        default:<span class="cov0" title="0">
+                close(m.done)</span>
+        }
+}
+
+// SetCallResponse configures a response for a specific topic
+func (m *MockMessenger) SetCallResponse(topic string, result messenger.Result, err error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.CallResponses[topic] = CallResponse{Result: result, Err: err}
+}</span>
+
+// SetCallError configures an error for a specific topic
+func (m *MockMessenger) SetCallError(topic string, err error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.CallErrors[topic] = err
+}</span>
+
+// GetPublishCount returns the number of publish calls
+func (m *MockMessenger) GetPublishCount() int <span class="cov0" title="0">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+        return len(m.PublishCalls)
+}</span>
+
+// GetCallCount returns the number of call invocations
+func (m *MockMessenger) GetCallCount() int <span class="cov0" title="0">{
+        m.mu.RLock()
+        defer m.mu.RUnlock()
+        return len(m.CallCalls)
+}</span>
+
+// Reset clears all recorded calls
+func (m *MockMessenger) Reset() <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.PublishCalls = nil
+        m.CallCalls = nil
+        m.RegisterCalls = nil
+        m.SubscribeCalls = nil
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

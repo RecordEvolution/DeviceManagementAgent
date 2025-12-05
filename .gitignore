@@ -23,4 +23,5 @@ reagent.db-wal
 # *.flock
 *.tar
 build
+.cache/
 
