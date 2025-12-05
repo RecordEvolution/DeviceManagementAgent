@@ -106,7 +106,6 @@ func main() {
 	generalConfig.StartupLogChannel = startupLogChannel
 
 	agent := NewAgent(&generalConfig)
-	agent.ListenForDisconnect()
 
 	safe.Go((func() {
 		startupLogChannel <- "Checking for agent update in background..."
@@ -132,10 +131,6 @@ func main() {
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("failed to init")
 	}
-
-	startupLogChannel <- "OnConnect handler finished. Starting hearbeat."
-
-	agent.InitConnectionStatusHeartbeat()
 
 	benchmark.TimeTillOnConnectAfterConnection = time.Since(benchmark.OnConnectInitAfterConnection)
 	benchmark.TimeTillOnConnect = time.Since(benchmark.OnConnectInit)

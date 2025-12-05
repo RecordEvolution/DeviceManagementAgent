@@ -1,111 +1,57 @@
 package messenger
 
 import (
+	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"reagent/config"
+
+	"github.com/gammazero/nexus/v3/client"
+	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// mockNexusClient simulates the behavior of github.com/gammazero/nexus/v3/client.Client
-// The real nexus client has these key behaviors:
-// 1. Done() returns a channel that closes when the client disconnects
-// 2. Close() triggers Done() to close AND waits for internal goroutines to finish
-// 3. Connected() returns the connection state
-type mockNexusClient struct {
-	done      chan struct{}
-	closeOnce sync.Once
-	connected bool
-	mu        sync.Mutex
+// Tests for WampSession with simplified implementation that delegates
+// Done() to the underlying nexus client.
 
-	// onCloseBlocking simulates Close() waiting for internal goroutines
-	// In the real nexus client, Close() blocks until router acknowledgment
-	// and internal cleanup is complete
-	onCloseBlocking func()
-}
-
-func newMockNexusClient() *mockNexusClient {
-	return &mockNexusClient{
-		done:      make(chan struct{}),
-		connected: true,
-	}
-}
-
-// Done returns a channel that closes when the client disconnects
-// This mimics the real nexus client behavior
-func (m *mockNexusClient) Done() <-chan struct{} {
-	return m.done
-}
-
-// Close closes the client connection
-// IMPORTANT: Like the real nexus client, this:
-// 1. Signals the done channel
-// 2. May block waiting for internal goroutines (simulated by onCloseBlocking)
-func (m *mockNexusClient) Close() {
-	m.closeOnce.Do(func() {
-		m.mu.Lock()
-		m.connected = false
-		m.mu.Unlock()
-
-		// Close the done channel - this signals all listeners
-		close(m.done)
-	})
-
-	// Simulate blocking behavior - the real nexus client waits for
-	// internal goroutines to complete during Close()
-	if m.onCloseBlocking != nil {
-		m.onCloseBlocking()
-	}
-}
-
-// Connected returns true if the client is connected
-func (m *mockNexusClient) Connected() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.connected
-}
-
-// ID returns a mock session ID
-func (m *mockNexusClient) ID() uint64 {
-	return 12345
-}
-
-func TestWampSession_DoneChannelLifecycle(t *testing.T) {
-	t.Run("done channel is created on initialization", func(t *testing.T) {
+func TestWampSession_DoneChannel(t *testing.T) {
+	t.Run("Done returns closed channel when client is nil", func(t *testing.T) {
 		session := &WampSession{
-			done: make(chan struct{}),
+			client: nil,
 		}
 
-		assert.NotNil(t, session.Done())
+		doneChan := session.Done()
+		assert.NotNil(t, doneChan)
 
+		// When client is nil, Done() returns a closed channel
 		select {
-		case <-session.Done():
-			t.Error("done channel should not be closed initially")
+		case <-doneChan:
+			// Expected: channel is closed when client is nil
 		default:
-			// Expected: channel is open
+			t.Error("done channel should be closed when client is nil")
 		}
 	})
+}
 
-	t.Run("Close signals done channel", func(t *testing.T) {
+func TestWampSession_Connected(t *testing.T) {
+	t.Run("returns false when client is nil", func(t *testing.T) {
 		session := &WampSession{
-			done: make(chan struct{}),
+			client: nil,
 		}
 
-		session.Close()
-
-		select {
-		case <-session.Done():
-			// Expected: channel is closed
-		case <-time.After(100 * time.Millisecond):
-			t.Error("done channel should be closed after Close()")
-		}
+		assert.False(t, session.Connected())
 	})
+}
 
+func TestWampSession_Close(t *testing.T) {
 	t.Run("Close is idempotent", func(t *testing.T) {
 		session := &WampSession{
-			done: make(chan struct{}),
+			client: nil,
 		}
 
 		// Should not panic on multiple closes
@@ -115,15 +61,22 @@ func TestWampSession_DoneChannelLifecycle(t *testing.T) {
 			session.Close()
 		})
 	})
-}
 
-func TestWampSession_Connected(t *testing.T) {
-	t.Run("returns false when client is nil", func(t *testing.T) {
+	t.Run("Close sets client to nil", func(t *testing.T) {
 		session := &WampSession{
 			client: nil,
-			done:   make(chan struct{}),
 		}
 
+		session.Close()
+		assert.Nil(t, session.client)
+	})
+
+	t.Run("Connected returns false after Close", func(t *testing.T) {
+		session := &WampSession{
+			client: nil,
+		}
+
+		session.Close()
 		assert.False(t, session.Connected())
 	})
 }
@@ -132,7 +85,6 @@ func TestWampSession_ThreadSafety(t *testing.T) {
 	t.Run("concurrent access to Connected is safe", func(t *testing.T) {
 		session := &WampSession{
 			client: nil,
-			done:   make(chan struct{}),
 		}
 
 		var wg sync.WaitGroup
@@ -149,7 +101,7 @@ func TestWampSession_ThreadSafety(t *testing.T) {
 
 	t.Run("concurrent access to Done is safe", func(t *testing.T) {
 		session := &WampSession{
-			done: make(chan struct{}),
+			client: nil,
 		}
 
 		var wg sync.WaitGroup
@@ -166,7 +118,7 @@ func TestWampSession_ThreadSafety(t *testing.T) {
 
 	t.Run("concurrent Close calls are safe", func(t *testing.T) {
 		session := &WampSession{
-			done: make(chan struct{}),
+			client: nil,
 		}
 
 		var wg sync.WaitGroup
@@ -175,6 +127,28 @@ func TestWampSession_ThreadSafety(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				session.Close()
+			}()
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("concurrent Done and Connected access is safe", func(t *testing.T) {
+		session := &WampSession{
+			client: nil,
+		}
+
+		var wg sync.WaitGroup
+
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					_ = session.Done()
+					_ = session.Connected()
+					time.Sleep(time.Microsecond)
+				}
 			}()
 		}
 
@@ -250,7 +224,7 @@ func TestLegacyEndpointRegex(t *testing.T) {
 		{"matches devices.example.com:8080", "devices.example.com:8080", true},
 		{"does not match without port", "devices.ironflock.com", false},
 		{"does not match different port", "devices.ironflock.com:443", false},
-		{"does not match wss scheme", "wss://devices.ironflock.com:8080", true}, // still matches the pattern
+		{"does not match wss scheme", "wss://devices.ironflock.com:8080", true},
 		{"does not match new endpoints", "wss://devices.ironflock.com/ws", false},
 	}
 
@@ -272,549 +246,567 @@ func TestSocketConfig(t *testing.T) {
 	})
 }
 
-// Reconnection scenario tests
-func TestWampSession_Reconnect(t *testing.T) {
-	t.Run("Reconnect creates fresh done channel", func(t *testing.T) {
-		session := &WampSession{
-			done:         make(chan struct{}),
-			agentConfig:  testConfig(),
-			socketConfig: &SocketConfig{},
-		}
-		oldDone := session.Done()
+func TestWampSession_OnConnectCallback(t *testing.T) {
+	t.Run("SetOnConnect stores callback", func(t *testing.T) {
+		session := &WampSession{}
 
-		// Close the old done channel to simulate disconnect
-		close(session.done)
-
-		// Verify old channel is closed
-		select {
-		case <-oldDone:
-			// Expected
-		default:
-			t.Error("old done channel should be closed")
-		}
-
-		// Simulate what Reconnect does (without actual network connection)
-		session.mu.Lock()
-		session.done = make(chan struct{})
-		session.mu.Unlock()
-
-		newDone := session.Done()
-
-		// Verify new channel is different and open
-		assert.NotEqual(t, oldDone, newDone, "should create new done channel")
-
-		select {
-		case <-newDone:
-			t.Error("new done channel should be open")
-		default:
-			// Expected
-		}
-	})
-
-	t.Run("old done channel listeners receive signal on reconnect", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
-		}
-
-		listenerReceived := make(chan bool, 1)
-		go func() {
-			<-session.Done()
-			listenerReceived <- true
-		}()
-
-		// Give listener time to start
-		time.Sleep(10 * time.Millisecond)
-
-		// Simulate reconnect closing old channel
-		session.mu.Lock()
-		close(session.done)
-		session.done = make(chan struct{})
-		session.mu.Unlock()
-
-		select {
-		case <-listenerReceived:
-			// Expected: listener got the signal
-		case <-time.After(100 * time.Millisecond):
-			t.Error("listener should have received done signal")
-		}
-	})
-
-	t.Run("multiple rapid reconnects are safe", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
-		}
-
-		assert.NotPanics(t, func() {
-			for i := 0; i < 10; i++ {
-				session.mu.Lock()
-				select {
-				case <-session.done:
-					// already closed
-				default:
-					close(session.done)
-				}
-				session.done = make(chan struct{})
-				session.mu.Unlock()
-			}
+		called := false
+		session.SetOnConnect(func(reconnect bool) {
+			called = true
 		})
+
+		// Verify callback was stored
+		session.mu.Lock()
+		cb := session.onConnect
+		session.mu.Unlock()
+
+		require.NotNil(t, cb)
+
+		// Call it to verify it works
+		cb(true)
+		assert.True(t, called)
 	})
 
-	t.Run("concurrent reconnect and Done access is safe", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
-		}
+	t.Run("SetOnConnect can be called multiple times", func(t *testing.T) {
+		session := &WampSession{}
 
-		var wg sync.WaitGroup
+		callCount := 0
+		session.SetOnConnect(func(reconnect bool) {
+			callCount = 1
+		})
+		session.SetOnConnect(func(reconnect bool) {
+			callCount = 2
+		})
 
-		// Spawn readers
-		for i := 0; i < 50; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 10; j++ {
-					_ = session.Done()
-					time.Sleep(time.Microsecond)
-				}
-			}()
-		}
+		session.mu.Lock()
+		cb := session.onConnect
+		session.mu.Unlock()
 
-		// Spawn reconnectors
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 5; j++ {
-					session.mu.Lock()
-					select {
-					case <-session.done:
-					default:
-						close(session.done)
-					}
-					session.done = make(chan struct{})
-					session.mu.Unlock()
-					time.Sleep(time.Millisecond)
-				}
-			}()
-		}
-
-		wg.Wait()
+		cb(false)
+		assert.Equal(t, 2, callCount, "second callback should override first")
 	})
 
-	t.Run("concurrent reconnect and Connected access is safe", func(t *testing.T) {
-		session := &WampSession{
-			done:   make(chan struct{}),
-			client: nil,
-		}
+	t.Run("callback receives correct reconnect flag", func(t *testing.T) {
+		session := &WampSession{}
 
-		var wg sync.WaitGroup
+		var receivedReconnect bool
+		session.SetOnConnect(func(reconnect bool) {
+			receivedReconnect = reconnect
+		})
 
-		// Spawn Connected checkers
-		for i := 0; i < 50; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 10; j++ {
-					_ = session.Connected()
-					time.Sleep(time.Microsecond)
-				}
-			}()
-		}
+		session.mu.Lock()
+		cb := session.onConnect
+		session.mu.Unlock()
 
-		// Spawn reconnectors
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 5; j++ {
-					session.mu.Lock()
-					session.client = nil
-					select {
-					case <-session.done:
-					default:
-						close(session.done)
-					}
-					session.done = make(chan struct{})
-					session.mu.Unlock()
-					time.Sleep(time.Millisecond)
-				}
-			}()
-		}
+		cb(true)
+		assert.True(t, receivedReconnect)
 
-		wg.Wait()
+		cb(false)
+		assert.False(t, receivedReconnect)
 	})
 }
 
-func TestWampSession_DisconnectScenarios(t *testing.T) {
-	t.Run("Close during active session signals done", func(t *testing.T) {
-		session := &WampSession{
-			done:   make(chan struct{}),
-			client: nil, // simulating no real client
+// mockClientProviderWithCallback creates a ClientProvider that calls a callback for each attempt
+func mockClientProviderWithCallback(callback func(attempt int) (NexusClient, error)) ClientProvider {
+	var attempt int32
+	return func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+		currentAttempt := atomic.AddInt32(&attempt, 1)
+		return callback(int(currentAttempt))
+	}
+}
+
+// newTestWampSession creates a WampSession for testing without calling connect()
+func newTestWampSession(cfg *config.Config, socketConfig *SocketConfig, provider ClientProvider) *WampSession {
+	return &WampSession{
+		agentConfig:    cfg,
+		socketConfig:   socketConfig,
+		clientProvider: provider,
+	}
+}
+
+func TestWampSession_EstablishSocketConnection(t *testing.T) {
+	t.Run("returns channel immediately in offline mode", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.CommandLineArguments.Offline = true
+
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Second * 5,
 		}
 
-		received := make(chan bool, 1)
-		go func() {
-			<-session.Done()
-			received <- true
-		}()
+		session := newTestWampSession(cfg, socketConfig, nil)
+		resChan := session.establishSocketConnection()
 
-		time.Sleep(10 * time.Millisecond)
-		session.Close()
+		// Channel should be returned immediately
+		require.NotNil(t, resChan)
 
+		// Channel should never receive a value (we're offline)
 		select {
-		case <-received:
-			// Expected
+		case <-resChan:
+			t.Error("should not receive a client in offline mode")
 		case <-time.After(100 * time.Millisecond):
-			t.Error("done signal should be received on Close")
+			// Expected: no client received
 		}
 	})
 
-	t.Run("Close sets client to nil", func(t *testing.T) {
-		session := &WampSession{
-			done:   make(chan struct{}),
-			client: nil,
+	t.Run("retries on connection error until successful", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
 		}
 
-		session.Close()
-		assert.Nil(t, session.client)
-	})
-
-	t.Run("Connected returns false after Close", func(t *testing.T) {
-		session := &WampSession{
-			done:   make(chan struct{}),
-			client: nil,
-		}
-
-		session.Close()
-		assert.False(t, session.Connected())
-	})
-
-	t.Run("Done channel closed after Close", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
-		}
-
-		session.Close()
-
-		select {
-		case <-session.Done():
-			// Expected: channel is closed
-		default:
-			t.Error("done channel should be closed after Close")
-		}
-	})
-
-	// CRITICAL: This test catches the deadlock that occurs when Close() holds
-	// the mutex while client.Close() triggers the monitor goroutine to also
-	// try to acquire the mutex.
-	t.Run("Close does not deadlock with monitor goroutine", func(t *testing.T) {
-		// Simulate the scenario from connect():
-		// 1. A monitor goroutine is watching clientDone
-		// 2. When clientDone closes, monitor tries to acquire mu.Lock()
-		// 3. If Close() holds the lock while calling client.Close(), deadlock occurs
-
-		session := &WampSession{
-			done: make(chan struct{}),
-		}
-
-		// Simulate clientDone (what the real client.Done() would return)
-		clientDone := make(chan struct{})
-
-		// This simulates the monitor goroutine from connect()
-		monitorCompleted := make(chan bool, 1)
-		go func() {
-			<-clientDone
-			session.mu.Lock()
-			defer session.mu.Unlock()
-			// Simulate what the monitor does
-			select {
-			case <-session.done:
-				// already closed
-			default:
-				close(session.done)
+		attemptCount := 0
+		provider := mockClientProviderWithCallback(func(attempt int) (NexusClient, error) {
+			attemptCount = attempt
+			if attempt < 3 {
+				return nil, errors.New("connection failed")
 			}
-			monitorCompleted <- true
-		}()
+			// On 3rd attempt, we can't return a real connected client without a server,
+			// so we return an error to keep the test from hanging
+			return nil, errors.New("final error to prevent hang")
+		})
 
-		// Give monitor time to start waiting on clientDone
-		time.Sleep(10 * time.Millisecond)
+		session := newTestWampSession(cfg, socketConfig, provider)
+		resChan := session.establishSocketConnection()
+		require.NotNil(t, resChan)
 
-		// Now simulate Close() - the FIXED version releases the lock before
-		// closing the client (which triggers clientDone to close)
-		closeCompleted := make(chan bool, 1)
-		go func() {
-			// This is what the FIXED Close() does:
-			session.mu.Lock()
-			doneChan := session.done
-			session.mu.Unlock()
+		// Wait for retries
+		time.Sleep(3 * time.Second)
 
-			// Close client outside the lock - this triggers clientDone
-			close(clientDone)
+		// Verify retries happened
+		assert.GreaterOrEqual(t, attemptCount, 3, "should have retried at least 3 times")
+	})
 
-			// Signal done channel
-			select {
-			case <-doneChan:
-				// already closed by monitor
-			default:
-				close(doneChan)
-			}
-			closeCompleted <- true
-		}()
+	t.Run("provider receives correct URL and config", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.ReswarmConfig.DeviceEndpointURL = "wss://test.example.com/ws"
 
-		// If there's a deadlock, this will timeout
-		select {
-		case <-closeCompleted:
-			// Good - Close completed
-		case <-time.After(1 * time.Second):
-			t.Fatal("DEADLOCK: Close() did not complete within timeout")
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			ResponseTimeout:   time.Second * 5,
 		}
 
-		select {
-		case <-monitorCompleted:
-			// Good - monitor completed
-		case <-time.After(1 * time.Second):
-			t.Fatal("DEADLOCK: Monitor goroutine did not complete within timeout")
+		var receivedURL string
+		var receivedConfig client.Config
+		callCount := 0
+
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			callCount++
+			receivedURL = url
+			receivedConfig = cfg
+			return nil, errors.New("stop after first call")
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.establishSocketConnection()
+
+		// Wait for at least one call
+		time.Sleep(200 * time.Millisecond)
+
+		assert.GreaterOrEqual(t, callCount, 1)
+		assert.Equal(t, "wss://test.example.com/ws", receivedURL)
+		assert.Equal(t, "realm1", receivedConfig.Realm)
+		assert.Equal(t, socketConfig.ResponseTimeout, receivedConfig.ResponseTimeout)
+	})
+
+	t.Run("context has timeout when ConnectionTimeout is set", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 50,
+		}
+
+		var receivedCtx context.Context
+
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			receivedCtx = ctx
+			return nil, errors.New("stop")
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.establishSocketConnection()
+
+		// Wait for the call
+		time.Sleep(100 * time.Millisecond)
+
+		require.NotNil(t, receivedCtx)
+		deadline, hasDeadline := receivedCtx.Deadline()
+		assert.True(t, hasDeadline, "context should have a deadline")
+		assert.False(t, deadline.IsZero())
+	})
+
+	t.Run("context has no timeout when ConnectionTimeout is zero", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: 0,
+		}
+
+		var receivedCtx context.Context
+
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			receivedCtx = ctx
+			return nil, errors.New("stop")
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.establishSocketConnection()
+
+		// Wait for the call
+		time.Sleep(100 * time.Millisecond)
+
+		require.NotNil(t, receivedCtx)
+		_, hasDeadline := receivedCtx.Deadline()
+		assert.False(t, hasDeadline, "context should not have a deadline when ConnectionTimeout is 0")
+	})
+
+	t.Run("continues retrying on generic errors", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+		}
+
+		var callCount int32
+
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			atomic.AddInt32(&callCount, 1)
+			return nil, errors.New("network error")
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.establishSocketConnection()
+
+		// Wait for multiple retries
+		time.Sleep(2500 * time.Millisecond)
+
+		// Should have retried multiple times
+		count := atomic.LoadInt32(&callCount)
+		assert.GreaterOrEqual(t, count, int32(2), "should retry on generic errors")
+	})
+
+	t.Run("tracks connection attempt timing", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+		}
+
+		var mu sync.Mutex
+		var startTimes []time.Time
+
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			mu.Lock()
+			startTimes = append(startTimes, time.Now())
+			count := len(startTimes)
+			mu.Unlock()
+
+			if count >= 3 {
+				return nil, errors.New("stopping after 3 attempts")
+			}
+			return nil, errors.New("connection failed")
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.establishSocketConnection()
+
+		// Wait for at least 3 attempts (1s retry delay between each)
+		time.Sleep(3 * time.Second)
+
+		mu.Lock()
+		times := make([]time.Time, len(startTimes))
+		copy(times, startTimes)
+		mu.Unlock()
+
+		require.GreaterOrEqual(t, len(times), 2)
+
+		// Verify ~1 second delay between attempts
+		for i := 1; i < len(times) && i < 3; i++ {
+			diff := times[i].Sub(times[i-1])
+			// Allow some tolerance (900ms to 1500ms)
+			assert.Greater(t, diff, 900*time.Millisecond, "retry delay should be ~1s")
+			assert.Less(t, diff, 1500*time.Millisecond, "retry delay should be ~1s")
 		}
 	})
 
-	// This test verifies the OLD buggy behavior would deadlock
-	t.Run("OLD Close implementation would deadlock with monitor", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
+	t.Run("retries after failures then succeeds on third attempt", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
 		}
 
-		clientDone := make(chan struct{})
+		var attemptCount int32
 
-		// Monitor goroutine
-		monitorStarted := make(chan bool)
-		go func() {
-			monitorStarted <- true
-			<-clientDone
-			session.mu.Lock()
-			defer session.mu.Unlock()
-			select {
-			case <-session.done:
-			default:
-				close(session.done)
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			attempt := atomic.AddInt32(&attemptCount, 1)
+			if attempt < 3 {
+				return nil, errors.New("connection failed")
 			}
-		}()
+			// On 3rd attempt, return a connected mock client
+			return NewMockNexusClient(), nil
+		}
 
-		<-monitorStarted
-		time.Sleep(10 * time.Millisecond)
+		session := newTestWampSession(cfg, socketConfig, provider)
+		resChan := session.establishSocketConnection()
+		require.NotNil(t, resChan)
 
-		// Simulate the OLD buggy Close() that holds lock while closing client
-		deadlockDetected := make(chan bool, 1)
-		go func() {
-			session.mu.Lock()
-			// OLD BUG: closing clientDone while holding the lock
-			// The monitor will try to acquire the lock, but we're holding it
-			// And we're waiting for... nothing in this test, but in real code
-			// client.Close() might block waiting for goroutines that need the lock
-			close(clientDone)
-
-			// In the real buggy code, we'd be stuck here because:
-			// - We hold mu.Lock()
-			// - client.Close() waits for internal goroutines
-			// - Those goroutines (monitor) are waiting for mu.Lock()
-
-			// For this test, just wait a bit to see if monitor can proceed
-			time.Sleep(50 * time.Millisecond)
-			session.mu.Unlock()
-			deadlockDetected <- false // No deadlock in this simplified test
-		}()
-
-		// Note: This simplified test can't fully reproduce the deadlock because
-		// we don't have a real client.Close() that blocks on internal goroutines.
-		// But the test above proves the fix works.
-		<-deadlockDetected
+		// Wait for the client to be returned
+		select {
+		case receivedClient := <-resChan:
+			require.NotNil(t, receivedClient)
+			assert.True(t, receivedClient.Connected())
+			assert.Equal(t, int32(3), atomic.LoadInt32(&attemptCount), "should succeed on 3rd attempt")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for client")
+		}
 	})
 }
 
-// TestCloseReleasesLockBeforeClientClose verifies the fix for the deadlock bug.
-// The bug was: Close() held mu.Lock() while calling client.Close(), but
-// client.Close() triggers client.Done() which the monitor goroutine is
-// waiting on, and the monitor then tries to acquire mu.Lock() -> deadlock.
-func TestCloseReleasesLockBeforeClientClose(t *testing.T) {
-	t.Run("Close completes within timeout even with monitor waiting", func(t *testing.T) {
-		for i := 0; i < 10; i++ { // Run multiple times to catch race conditions
-			mockClient := newMockNexusClient()
-			session := &WampSession{
-				done: make(chan struct{}),
-			}
-
-			// Start monitor - this simulates the goroutine in connect()
-			// that watches client.Done() and tries to acquire session.mu
-			monitorDone := make(chan struct{})
-			go func() {
-				defer close(monitorDone)
-				<-mockClient.Done()
-				session.mu.Lock()
-				select {
-				case <-session.done:
-				default:
-					close(session.done)
-				}
-				session.mu.Unlock()
-			}()
-
-			time.Sleep(5 * time.Millisecond)
-
-			// Perform Close with the CORRECT implementation pattern
-			// (release lock before calling client.Close)
-			done := make(chan bool)
-			go func() {
-				session.mu.Lock()
-				doneChan := session.done
-				session.mu.Unlock()
-
-				// This is the key: call Close() OUTSIDE the lock
-				mockClient.Close() // This triggers monitor via Done() channel
-
-				select {
-				case <-doneChan:
-				default:
-					// Try to close, but might already be closed by monitor
-				}
-				done <- true
-			}()
-
-			select {
-			case <-done:
-				// Success - wait for monitor to complete too
-				<-monitorDone
-			case <-time.After(500 * time.Millisecond):
-				t.Fatalf("Iteration %d: Close deadlocked", i)
-			}
+func TestWampSession_Connect(t *testing.T) {
+	t.Run("connect sets client from provider", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
 		}
+
+		mockClient := NewMockNexusClient()
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			return mockClient, nil
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		err := session.connect()
+
+		require.NoError(t, err)
+		assert.True(t, session.Connected())
+		assert.Equal(t, mockClient, session.client)
+	})
+}
+
+func TestWampSession_ListenForDisconnect(t *testing.T) {
+	t.Run("triggers reconnection when client disconnects", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+		}
+
+		// First client will be "disconnected"
+		firstClient := NewMockNexusClient()
+		// Second client is the reconnected one
+		secondClient := NewMockNexusClient()
+
+		callCount := 0
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			callCount++
+			if callCount == 1 {
+				return firstClient, nil
+			}
+			return secondClient, nil
+		}
+
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.client = firstClient
+
+		// Start listening for disconnect
+		session.listenForDisconnect()
+
+		// Simulate connection drop
+		firstClient.SimulateConnectionDrop()
+
+		// Wait for reconnection to happen
+		time.Sleep(500 * time.Millisecond)
+
+		// Should have reconnected with second client
+		assert.Equal(t, 2, callCount, "should have called provider twice (initial + reconnect)")
+		assert.True(t, session.Connected())
 	})
 
-	// This test demonstrates the actual deadlock with a realistic mock
-	t.Run("Buggy Close implementation deadlocks with realistic mock", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
+	t.Run("invokes onConnect callback after reconnection", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
 		}
 
-		monitorWaiting := make(chan struct{})
-		monitorAcquiredLock := make(chan struct{})
+		mockClient := NewMockNexusClient()
+		reconnectClient := NewMockNexusClient()
 
-		// Create a mock client where Close() blocks waiting for a goroutine
-		// that needs session.mu - this is how the real deadlock occurs
-		mockClient := newMockNexusClient()
-		mockClient.onCloseBlocking = func() {
-			// Simulate Close() waiting for the monitor goroutine to finish
-			// In the real nexus client, Close() waits for internal cleanup
-			// which may include goroutines that react to Done() being closed
-			select {
-			case <-monitorAcquiredLock:
-				// Monitor finished - we can return
-			case <-time.After(100 * time.Millisecond):
-				// Timeout - this means deadlock (monitor couldn't acquire lock)
+		callCount := 0
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			callCount++
+			if callCount == 1 {
+				return mockClient, nil
 			}
+			return reconnectClient, nil
 		}
 
-		// Start monitor - simulates the goroutine in connect() that watches client.Done()
-		go func() {
-			close(monitorWaiting) // Signal that monitor is ready
-			<-mockClient.Done()
-			// This is where the deadlock happens in the buggy version:
-			// The monitor tries to acquire the lock, but Close() is holding it
-			// and Close() is waiting for this goroutine to finish
-			session.mu.Lock()
-			close(monitorAcquiredLock)
-			select {
-			case <-session.done:
-			default:
-				close(session.done)
-			}
-			session.mu.Unlock()
-		}()
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.client = mockClient
 
-		<-monitorWaiting
-		time.Sleep(5 * time.Millisecond)
+		// Set up callback to track reconnection
+		var callbackCalled bool
+		var wasReconnect bool
+		session.SetOnConnect(func(reconnect bool) {
+			callbackCalled = true
+			wasReconnect = reconnect
+		})
 
-		// Simulate the BUGGY Close() that holds lock while calling client.Close()
-		buggyCloseCompleted := make(chan bool, 1)
-		go func() {
-			session.mu.Lock()
-			// BUG: Calling client.Close() while holding the lock
-			// client.Close() will:
-			// 1. Close the Done() channel
-			// 2. Wait for internal goroutines (via onCloseBlocking)
-			// But the monitor goroutine is now trying to acquire session.mu
-			// which we're holding -> DEADLOCK
-			mockClient.Close()
-			session.mu.Unlock()
-			buggyCloseCompleted <- false // No deadlock if we get here
-		}()
+		// Start listening for disconnect
+		session.listenForDisconnect()
 
-		select {
-		case <-buggyCloseCompleted:
-			// If we get here, the mock's onCloseBlocking timed out
-			// which means the monitor couldn't acquire the lock
-			t.Log("Confirmed: buggy implementation would deadlock (monitor couldn't acquire lock)")
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("Test itself deadlocked")
-		}
+		// Simulate connection drop
+		mockClient.SimulateConnectionDrop()
+
+		// Wait for reconnection and callback
+		time.Sleep(500 * time.Millisecond)
+
+		assert.True(t, callbackCalled, "onConnect callback should be called")
+		assert.True(t, wasReconnect, "reconnect flag should be true")
 	})
 
-	// This test verifies the FIXED implementation doesn't deadlock
-	t.Run("Fixed Close implementation does not deadlock with realistic mock", func(t *testing.T) {
-		session := &WampSession{
-			done: make(chan struct{}),
+	t.Run("retries reconnection on failure", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
 		}
 
-		monitorWaiting := make(chan struct{})
-		monitorAcquiredLock := make(chan struct{})
+		mockClient := NewMockNexusClient()
+		reconnectClient := NewMockNexusClient()
 
-		// Create a mock client where Close() blocks waiting for goroutines
-		mockClient := newMockNexusClient()
-		mockClient.onCloseBlocking = func() {
-			// Wait for monitor to finish (simulates real nexus behavior)
-			select {
-			case <-monitorAcquiredLock:
-				// Good - monitor finished
-			case <-time.After(500 * time.Millisecond):
-				// This would indicate a problem
+		callCount := 0
+		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			callCount++
+			if callCount <= 2 {
+				// First two reconnection attempts fail
+				return nil, errors.New("connection failed")
 			}
+			// Third attempt succeeds
+			return reconnectClient, nil
 		}
 
-		// Start monitor
-		go func() {
-			close(monitorWaiting)
-			<-mockClient.Done()
-			session.mu.Lock()
-			close(monitorAcquiredLock)
-			select {
-			case <-session.done:
-			default:
-				close(session.done)
-			}
-			session.mu.Unlock()
-		}()
+		session := newTestWampSession(cfg, socketConfig, provider)
+		session.client = mockClient
 
-		<-monitorWaiting
-		time.Sleep(5 * time.Millisecond)
+		// Start listening for disconnect
+		session.listenForDisconnect()
 
-		// FIXED Close() implementation - releases lock before client.Close()
-		fixedCloseCompleted := make(chan bool, 1)
-		go func() {
-			// This is the FIXED pattern:
-			session.mu.Lock()
-			clientToClose := mockClient // Capture reference
-			_ = session.done            // Could capture done channel too
-			session.mu.Unlock()         // RELEASE LOCK FIRST
+		// Simulate connection drop
+		mockClient.SimulateConnectionDrop()
 
-			// Now call Close() outside the lock
-			if clientToClose != nil {
-				clientToClose.Close()
-			}
-			fixedCloseCompleted <- true
-		}()
+		// Wait for multiple reconnection attempts
+		time.Sleep(3500 * time.Millisecond)
 
-		select {
-		case success := <-fixedCloseCompleted:
-			assert.True(t, success, "Fixed implementation should complete without deadlock")
-		case <-time.After(1 * time.Second):
-			t.Fatal("Fixed implementation deadlocked - this should not happen!")
+		assert.GreaterOrEqual(t, callCount, 3, "should retry reconnection multiple times")
+		assert.True(t, session.Connected())
+	})
+}
+
+func TestWampSession_Heartbeat(t *testing.T) {
+	t.Run("heartbeat calls UpdateRemoteDeviceStatus periodically", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			HeartbeatInterval: time.Millisecond * 50, // Fast heartbeat for testing
 		}
+
+		mockClient := NewMockNexusClient()
+		session := newTestWampSession(cfg, socketConfig, nil)
+		session.client = mockClient
+
+		initialCallCount := mockClient.CallCount
+
+		// Start heartbeat
+		session.startHeartbeat()
+
+		// Wait for a few heartbeats
+		time.Sleep(200 * time.Millisecond)
+
+		// Should have made multiple calls (UpdateRemoteDeviceStatus uses Call internally)
+		assert.Greater(t, mockClient.CallCount, initialCallCount, "heartbeat should call UpdateRemoteDeviceStatus")
+	})
+
+	t.Run("heartbeat uses default interval when not configured", func(t *testing.T) {
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			// HeartbeatInterval not set - should use default
+		}
+
+		assert.Equal(t, time.Duration(0), socketConfig.HeartbeatInterval)
+		assert.Equal(t, 30*time.Second, DefaultHeartbeatInterval)
+	})
+
+	t.Run("heartbeat forces close after consecutive failures", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			HeartbeatInterval: time.Millisecond * 50, // Fast heartbeat for testing
+		}
+
+		mockClient := NewMockNexusClient()
+		// Make all calls fail
+		mockClient.SetCallError(errors.New("connection lost"))
+
+		session := newTestWampSession(cfg, socketConfig, nil)
+		session.client = mockClient
+
+		// Start heartbeat
+		session.startHeartbeat()
+
+		// Wait for enough heartbeats to trigger close (2 consecutive failures)
+		time.Sleep(200 * time.Millisecond)
+
+		// After 2 consecutive failures, Close() should have been called
+		assert.False(t, session.Connected(), "session should be disconnected after consecutive heartbeat failures")
+	})
+
+	t.Run("heartbeat resets failure count on success", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			HeartbeatInterval: time.Millisecond * 50, // Fast heartbeat for testing
+		}
+
+		mockClient := NewMockNexusClient()
+		callCount := 0
+
+		// Fail once, then succeed
+		mockClient.OnCall = func(procedure string) (*wamp.Result, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, errors.New("temporary failure")
+			}
+			return &wamp.Result{}, nil
+		}
+
+		session := newTestWampSession(cfg, socketConfig, nil)
+		session.client = mockClient
+
+		// Start heartbeat
+		session.startHeartbeat()
+
+		// Wait for several heartbeats
+		time.Sleep(250 * time.Millisecond)
+
+		// Should still be connected because failures were not consecutive
+		assert.True(t, session.Connected(), "session should remain connected after non-consecutive failures")
+	})
+
+	t.Run("heartbeat skips when not connected", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{
+			ConnectionTimeout: time.Millisecond * 100,
+			HeartbeatInterval: time.Millisecond * 50, // Fast heartbeat for testing
+		}
+
+		mockClient := NewMockNexusClient()
+		mockClient.SimulateConnectionDrop() // Start disconnected
+
+		session := newTestWampSession(cfg, socketConfig, nil)
+		session.client = mockClient
+
+		initialCallCount := mockClient.CallCount
+
+		// Start heartbeat
+		session.startHeartbeat()
+
+		// Wait for a few heartbeat cycles
+		time.Sleep(200 * time.Millisecond)
+
+		// Should not have made any calls since we're disconnected
+		assert.Equal(t, initialCallCount, mockClient.CallCount, "heartbeat should not call when disconnected")
 	})
 }

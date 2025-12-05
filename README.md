@@ -1,17 +1,13 @@
 
+
+# IronFlock Agent
+
+
 <p align="center">
-  <a href="https://www.ironflock.com/reswarm">
-    <img
-      alt="reagent.svg"
-      src="assets/reagent.svg"
-      width="400"
-    />
-  </a>
+  <img src="assets/coverage-badge.svg" alt="Coverage">
 </p>
 
-# REswarm Device Management AGENT
-
-The _Reagent_ is a (lightweight) daemon running on IoT devices that provides
+The _IronFlock Agent_ is a (lightweight) daemon running on IoT devices that provides
 an interface to manage containers on the device and to collect/request app logs.
 In particular, the daemon enables the
 [IronFlock IoT Development Studio](https://www.ironflock.com/reswarm)
@@ -20,7 +16,7 @@ running in containers on the device and retrieve their result and logs.
 
 ## Overview
 
-- [REswarm Device Management AGENT](#reswarm-device-management-agent)
+- [IronFlock Agent](#ironflock-agent)
   - [Overview](#overview)
   - [Introduction](#introduction)
   - [Usage](#usage)
@@ -42,7 +38,7 @@ running in containers on the device and retrieve their result and logs.
 
 ## Usage
 
-The _Reagent_ is provided as a statically linked binary and accepts various
+The _IronFlock Agent_ is provided as a statically linked binary and accepts various
 CLI parameters to configure it when launched. To show a list of the parameters
 it accepts apply the help parameter `./reagent -help`
 
@@ -134,7 +130,7 @@ Using `go`'s built-in (cross-)compilation and some _shell_ scripts we can easily
 
 It is recommended to build the agent within Docker, to do so you can run `make build-all-docker` in the root of this project.
 
-While **not recommended** users can also build the Reagent on the host machine using the `make build-all` command.
+While **not recommended** users can also build the IronFlock Agent on the host machine using the `make build-all` command.
 
 Both commands make use of the [_targets_](#targets) file to determine the target platform(s) and architecture(s).
 
@@ -157,11 +153,11 @@ darwin/amd64
 
 Run `go tool dist list` to see all possible combinations supported by `go` in case you wish to add your own.
 
-**NOTE: The Reagent only supports a limited amount of targets, please read more [here](#target-platform-and-architecture-limitations)**
+**NOTE: The IronFlock Agent only supports a limited amount of targets, please read more [here](#target-platform-and-architecture-limitations)**
 
 ### Target platform and architecture limitations
 
-Due to this project using a [CGo-free port of SQLite/SQLite3](https://gitlab.com/cznic/sqlite), the Reagent can only be built into a [limited amount of target platforms and architectures](https://pkg.go.dev/modernc.org/sqlite?utm_source=godoc#hdr-Supported_platforms_and_architectures):
+Due to this project using a [CGo-free port of SQLite/SQLite3](https://gitlab.com/cznic/sqlite), the IronFlock Agent can only be built into a [limited amount of target platforms and architectures](https://pkg.go.dev/modernc.org/sqlite?utm_source=godoc#hdr-Supported_platforms_and_architectures):
 
 ```
 linux/386
@@ -187,7 +183,7 @@ Once built the version of a binary can be verified with:
 
 ### Publishing
 
-Once the Reagent has been built into the platform(s) and architecture(s) of your needs the binaries can then be published into our remote bucket.
+Once the IronFlock Agent has been built into the platform(s) and architecture(s) of your needs the binaries can then be published into our remote bucket.
 
 The `make publish` command will publish all binaries that are found within the `build/` folder to our [re-agent](https://console.cloud.google.com/storage/browser/re-agent) gcloud bucket.
 
@@ -195,7 +191,7 @@ The `make publish` command will publish all binaries that are found within the `
 
 Once the new binaries have been published they need to be made public for each _IronFlock_ environment (local, production and test cloud).
 
-To update the latest available Reagent binary, the `availableVersions.json` must be updated and published.
+To update the latest available IronFlock Agent binary, the `availableVersions.json` must be updated and published.
 
 Once updated, the file can be published using the `make publish-latestVersions` command.
 

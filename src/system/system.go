@@ -294,6 +294,12 @@ func (system *System) compareVersion(currentVersion string, latestVersion string
 }
 
 func (system *System) DownloadFrpIfNotExists() error {
+	// Check if frpc is embedded in this build (not available on Windows)
+	if !embedded.IsEmbedded() {
+		log.Debug().Msg("frpc not embedded in this build, skipping extraction")
+		return nil
+	}
+
 	frpcPath := filesystem.GetTunnelBinaryPath(system.config, "frpc")
 
 	// Check if frpc already exists

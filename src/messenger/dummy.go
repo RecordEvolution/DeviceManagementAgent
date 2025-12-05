@@ -67,8 +67,7 @@ func (om OfflineMessenger) Connected() bool {
 	return false
 }
 
-func (om OfflineMessenger) Reconnect() {
-
+func (om OfflineMessenger) SetOnConnect(cb func(reconnect bool)) {
 }
 
 func (om OfflineMessenger) Close() {

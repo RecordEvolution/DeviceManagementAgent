@@ -40,7 +40,7 @@ type Messenger interface {
 	GetConfig() *config.Config
 	Done() <-chan struct{}
 	Connected() bool
-	UpdateRemoteDeviceStatus(status DeviceStatus) error // TODO: move this somewhere else, should be generic messenger interface
-	Reconnect()
+	UpdateRemoteDeviceStatus(status DeviceStatus) error
+	SetOnConnect(cb func(reconnect bool))
 	Close()
 }
