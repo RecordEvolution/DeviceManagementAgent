@@ -78,10 +78,10 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Error().Err(err).Msgf("update device metadata")
 	}
 
-	log.Info().Msg("Updating Device Architecture ...")
+	log.Info().Msg("Publishing agent metadata to backend ...")
 	err = agent.updateRemoteDevice()
 	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
+		log.Error().Stack().Err(err).Msg("failed to publish agent metadata to backend")
 	}
 
 	// Step 1: Fetch requested app states from backend
@@ -171,11 +171,15 @@ func (agent *Agent) updateRemoteDevice() error {
 	config := agent.Config
 	ctx := context.Background()
 
-	_, arch, variant := release.GetSystemInfo()
+	os, arch, variant := release.GetSystemInfo()
 	payload := common.Dict{
-		"swarm_key":    config.ReswarmConfig.SwarmKey,
-		"device_key":   config.ReswarmConfig.DeviceKey,
-		"architecture": arch + variant,
+		"swarm_key":     config.ReswarmConfig.SwarmKey,
+		"device_key":    config.ReswarmConfig.DeviceKey,
+		"architecture":  arch + variant,
+		"os":            os,
+		"arch":          arch,
+		"variant":       variant,
+		"agent_version": release.GetVersion(),
 	}
 
 	_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceArchitecture, []interface{}{payload}, nil, nil, nil)
