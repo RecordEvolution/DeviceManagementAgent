@@ -181,5 +181,12 @@ func (m *MockNexusClient) Unregister(procedure string) error {
 	return nil
 }
 
+// GetCallCount returns the current call count in a thread-safe manner
+func (m *MockNexusClient) GetCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.CallCount
+}
+
 // Ensure MockNexusClient implements NexusClient
 var _ NexusClient = (*MockNexusClient)(nil)

@@ -55,6 +55,14 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
+	// Register all endpoints early so terminal/system commands are available
+	// even if Docker is not running - allows remote debugging
+	log.Debug().Msg("Registering all endpoints...")
+	err = agent.External.RegisterAll()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("failed to register all external endpoints")
+	}
+
 	// Due to an issue with frp, the client is falsely flagged as a virus in Windows
 	// To work around this for now, we do not support tunnels in Windows
 	if runtime.GOOS != "windows" && !reconnect {
@@ -78,11 +86,34 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Error().Err(err).Msgf("update device metadata")
 	}
 
-	log.Info().Msg("Updating Device Architecture ...")
+	log.Info().Msg("Publishing agent metadata to backend ...")
 	err = agent.updateRemoteDevice()
 	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to update remote device metadata")
+		log.Error().Stack().Err(err).Msg("failed to publish agent metadata to backend")
 	}
+
+	wg.Add(1)
+	safe.Go(func() {
+		defer wg.Done()
+
+		err = agent.LogManager.ReviveDeadLogs()
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to revive dead logs")
+		}
+
+		err := agent.LogManager.SetupEndpoints()
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to setup endpoints")
+		}
+	})
+
+	// Wait for Docker daemon before container operations
+	log.Info().Msg("Waiting for Docker Daemon to be available...")
+	err = agent.Container.WaitForDaemon()
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("error occurred while waiting for docker daemon")
+	}
+	log.Info().Msg("Docker Daemon is available")
 
 	// Step 1: Fetch requested app states from backend
 	log.Info().Msg("Fetching requested app states from backend...")
@@ -132,29 +163,8 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Error().Stack().Err(err).Msg("failed to EvaluateRequestedStates")
 	}
 
-	wg.Add(1)
-	safe.Go(func() {
-		defer wg.Done()
-
-		err = agent.LogManager.ReviveDeadLogs()
-		if err != nil {
-			log.Error().Stack().Err(err).Msg("failed to revive dead logs")
-		}
-
-		err := agent.LogManager.SetupEndpoints()
-		if err != nil {
-			log.Error().Stack().Err(err).Msg("failed to setup endpoints")
-		}
-	})
-
 	log.Debug().Msg("Waiting for startup setup to finish...")
 	wg.Wait()
-
-	log.Debug().Msg("Registering all endpoints...")
-	err = agent.External.RegisterAll()
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to register all external endpoints")
-	}
 
 	log.Debug().Msg("Startup setup finished!")
 	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONNECTED)
@@ -171,11 +181,15 @@ func (agent *Agent) updateRemoteDevice() error {
 	config := agent.Config
 	ctx := context.Background()
 
-	_, arch, variant := release.GetSystemInfo()
+	os, arch, variant := release.GetSystemInfo()
 	payload := common.Dict{
-		"swarm_key":    config.ReswarmConfig.SwarmKey,
-		"device_key":   config.ReswarmConfig.DeviceKey,
-		"architecture": arch + variant,
+		"swarm_key":     config.ReswarmConfig.SwarmKey,
+		"device_key":    config.ReswarmConfig.DeviceKey,
+		"architecture":  arch + variant,
+		"os":            os,
+		"arch":          arch,
+		"variant":       variant,
+		"agent_version": release.GetVersion(),
 	}
 
 	_, err := agent.Messenger.Call(ctx, topics.UpdateDeviceArchitecture, []interface{}{payload}, nil, nil, nil)
