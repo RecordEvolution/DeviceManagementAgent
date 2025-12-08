@@ -116,15 +116,6 @@ func main() {
 		}
 	}))
 
-	startupLogChannel <- "Waiting for Docker Daemon to be available..."
-
-	err = agent.Container.WaitForDaemon()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("error occured while waiting for daemon")
-	}
-
-	startupLogChannel <- "Got reply from Docker Daemon, continuing"
-
 	startupLogChannel <- "Running onConnect handler"
 
 	err = agent.OnConnect(false)

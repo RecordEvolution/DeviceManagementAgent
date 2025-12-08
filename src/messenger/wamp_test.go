@@ -354,9 +354,9 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 			ConnectionTimeout: time.Millisecond * 100,
 		}
 
-		attemptCount := 0
+		var attemptCount int32
 		provider := mockClientProviderWithCallback(func(attempt int) (NexusClient, error) {
-			attemptCount = attempt
+			atomic.StoreInt32(&attemptCount, int32(attempt))
 			if attempt < 3 {
 				return nil, errors.New("connection failed")
 			}
@@ -373,7 +373,7 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 		time.Sleep(3 * time.Second)
 
 		// Verify retries happened
-		assert.GreaterOrEqual(t, attemptCount, 3, "should have retried at least 3 times")
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&attemptCount), int32(3), "should have retried at least 3 times")
 	})
 
 	t.Run("provider receives correct URL and config", func(t *testing.T) {
@@ -385,14 +385,17 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 			ResponseTimeout:   time.Second * 5,
 		}
 
+		var mu sync.Mutex
 		var receivedURL string
 		var receivedConfig client.Config
-		callCount := 0
+		var callCount int32
 
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
-			callCount++
+			atomic.AddInt32(&callCount, 1)
+			mu.Lock()
 			receivedURL = url
 			receivedConfig = cfg
+			mu.Unlock()
 			return nil, errors.New("stop after first call")
 		}
 
@@ -402,7 +405,9 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 		// Wait for at least one call
 		time.Sleep(200 * time.Millisecond)
 
-		assert.GreaterOrEqual(t, callCount, 1)
+		mu.Lock()
+		defer mu.Unlock()
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&callCount), int32(1))
 		assert.Equal(t, "wss://test.example.com/ws", receivedURL)
 		assert.Equal(t, "realm1", receivedConfig.Realm)
 		assert.Equal(t, socketConfig.ResponseTimeout, receivedConfig.ResponseTimeout)
@@ -414,10 +419,13 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 			ConnectionTimeout: time.Millisecond * 50,
 		}
 
+		var mu sync.Mutex
 		var receivedCtx context.Context
 
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			mu.Lock()
 			receivedCtx = ctx
+			mu.Unlock()
 			return nil, errors.New("stop")
 		}
 
@@ -427,6 +435,8 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 		// Wait for the call
 		time.Sleep(100 * time.Millisecond)
 
+		mu.Lock()
+		defer mu.Unlock()
 		require.NotNil(t, receivedCtx)
 		deadline, hasDeadline := receivedCtx.Deadline()
 		assert.True(t, hasDeadline, "context should have a deadline")
@@ -439,10 +449,13 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 			ConnectionTimeout: 0,
 		}
 
+		var mu sync.Mutex
 		var receivedCtx context.Context
 
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
+			mu.Lock()
 			receivedCtx = ctx
+			mu.Unlock()
 			return nil, errors.New("stop")
 		}
 
@@ -452,6 +465,8 @@ func TestWampSession_EstablishSocketConnection(t *testing.T) {
 		// Wait for the call
 		time.Sleep(100 * time.Millisecond)
 
+		mu.Lock()
+		defer mu.Unlock()
 		require.NotNil(t, receivedCtx)
 		_, hasDeadline := receivedCtx.Deadline()
 		assert.False(t, hasDeadline, "context should not have a deadline when ConnectionTimeout is 0")
@@ -590,10 +605,10 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		// Second client is the reconnected one
 		secondClient := NewMockNexusClient()
 
-		callCount := 0
+		var callCount int32
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
-			callCount++
-			if callCount == 1 {
+			count := atomic.AddInt32(&callCount, 1)
+			if count == 1 {
 				return firstClient, nil
 			}
 			return secondClient, nil
@@ -612,7 +627,7 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Should have reconnected with second client
-		assert.Equal(t, 2, callCount, "should have called provider twice (initial + reconnect)")
+		assert.Equal(t, int32(2), atomic.LoadInt32(&callCount), "should have called provider twice (initial + reconnect)")
 		assert.True(t, session.Connected())
 	})
 
@@ -625,10 +640,10 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		mockClient := NewMockNexusClient()
 		reconnectClient := NewMockNexusClient()
 
-		callCount := 0
+		var callCount int32
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
-			callCount++
-			if callCount == 1 {
+			count := atomic.AddInt32(&callCount, 1)
+			if count == 1 {
 				return mockClient, nil
 			}
 			return reconnectClient, nil
@@ -638,11 +653,14 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		session.client = mockClient
 
 		// Set up callback to track reconnection
+		var mu sync.Mutex
 		var callbackCalled bool
 		var wasReconnect bool
 		session.SetOnConnect(func(reconnect bool) {
+			mu.Lock()
 			callbackCalled = true
 			wasReconnect = reconnect
+			mu.Unlock()
 		})
 
 		// Start listening for disconnect
@@ -654,6 +672,8 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		// Wait for reconnection and callback
 		time.Sleep(500 * time.Millisecond)
 
+		mu.Lock()
+		defer mu.Unlock()
 		assert.True(t, callbackCalled, "onConnect callback should be called")
 		assert.True(t, wasReconnect, "reconnect flag should be true")
 	})
@@ -667,10 +687,10 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		mockClient := NewMockNexusClient()
 		reconnectClient := NewMockNexusClient()
 
-		callCount := 0
+		var callCount int32
 		provider := func(ctx context.Context, url string, cfg client.Config) (NexusClient, error) {
-			callCount++
-			if callCount <= 2 {
+			count := atomic.AddInt32(&callCount, 1)
+			if count <= 2 {
 				// First two reconnection attempts fail
 				return nil, errors.New("connection failed")
 			}
@@ -690,7 +710,7 @@ func TestWampSession_ListenForDisconnect(t *testing.T) {
 		// Wait for multiple reconnection attempts
 		time.Sleep(3500 * time.Millisecond)
 
-		assert.GreaterOrEqual(t, callCount, 3, "should retry reconnection multiple times")
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&callCount), int32(3), "should retry reconnection multiple times")
 		assert.True(t, session.Connected())
 	})
 }
@@ -707,7 +727,7 @@ func TestWampSession_Heartbeat(t *testing.T) {
 		session := newTestWampSession(cfg, socketConfig, nil)
 		session.client = mockClient
 
-		initialCallCount := mockClient.CallCount
+		initialCallCount := mockClient.GetCallCount()
 
 		// Start heartbeat
 		session.startHeartbeat()
@@ -716,7 +736,7 @@ func TestWampSession_Heartbeat(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 
 		// Should have made multiple calls (UpdateRemoteDeviceStatus uses Call internally)
-		assert.Greater(t, mockClient.CallCount, initialCallCount, "heartbeat should call UpdateRemoteDeviceStatus")
+		assert.Greater(t, mockClient.GetCallCount(), initialCallCount, "heartbeat should call UpdateRemoteDeviceStatus")
 	})
 
 	t.Run("heartbeat uses default interval when not configured", func(t *testing.T) {
