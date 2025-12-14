@@ -59,10 +59,6 @@ func (om OfflineMessenger) GetConfig() *config.Config {
 	return om.config
 }
 
-func (om OfflineMessenger) Done() <-chan struct{} {
-	return nil
-}
-
 func (om OfflineMessenger) Connected() bool {
 	return false
 }

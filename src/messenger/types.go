@@ -38,7 +38,6 @@ type Messenger interface {
 	SetupTestament() error
 	GetSessionID() uint64
 	GetConfig() *config.Config
-	Done() <-chan struct{}
 	Connected() bool
 	UpdateRemoteDeviceStatus(status DeviceStatus) error
 	SetOnConnect(cb func(reconnect bool))
