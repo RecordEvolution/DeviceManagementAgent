@@ -69,13 +69,13 @@
 				
 				<option value="file6">reagent/errdefs/is.go (0.0%)</option>
 				
-				<option value="file7">reagent/messenger/dummy.go (53.3%)</option>
+				<option value="file7">reagent/messenger/dummy.go (50.0%)</option>
 				
-				<option value="file8">reagent/messenger/mock_nexus_client.go (65.0%)</option>
+				<option value="file8">reagent/messenger/mock_nexus_client_new.go (63.3%)</option>
 				
 				<option value="file9">reagent/messenger/test_helpers.go (100.0%)</option>
 				
-				<option value="file10">reagent/messenger/wamp.go (57.2%)</option>
+				<option value="file10">reagent/messenger/wamp.go (54.9%)</option>
 				
 				<option value="file11">reagent/safe/utils.go (0.0%)</option>
 				
@@ -1420,7 +1420,7 @@ type OfflineMessenger struct {
         config *config.Config
 }
 
-func NewOffline(config *config.Config) *OfflineMessenger <span class="cov10" title="7">{
+func NewOffline(config *config.Config) *OfflineMessenger <span class="cov10" title="6">{
         return &amp;OfflineMessenger{config}
 }</span>
 
@@ -1468,10 +1468,6 @@ func (om OfflineMessenger) GetConfig() *config.Config <span class="cov1" title="
         return om.config
 }</span>
 
-func (om OfflineMessenger) Done() &lt;-chan struct{} <span class="cov1" title="1">{
-        return nil
-}</span>
-
 func (om OfflineMessenger) Connected() bool <span class="cov1" title="1">{
         return false
 }</span>
@@ -1492,117 +1488,429 @@ func (om OfflineMessenger) UpdateRemoteDeviceStatus(status DeviceStatus) error <
 
 import (
         "context"
+        "errors"
         "sync"
 
         "github.com/gammazero/nexus/v3/client"
         "github.com/gammazero/nexus/v3/wamp"
 )
 
+// =============================================================================
+// Error Constants
+// =============================================================================
+
+// ErrMockConnectionFailed is returned when MockClient is configured to fail connections.
+var ErrMockConnectionFailed = errors.New("mock connection failed")
+
+// ErrMockCallLimitExceeded is returned when MockNexusClient exceeds its call limit.
+var ErrMockCallLimitExceeded = errors.New("mock call limit exceeded")
+
+// =============================================================================
+// MockClient - Configurable mock that mirrors the real client structure
+// =============================================================================
+
+// MockClient is a configurable mock client that produces MockNexusClients.
+// It mirrors the structure of the real nexus client where you configure
+// connection behavior and then call ConnectNet to get a NexusClient.
+//
+// Usage:
+//
+//        mockClient := NewMockClient()
+//        mockClient.SetConnectFailCount(2) // Fail first 2 connection attempts
+//        session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
+//        // After successful connection:
+//        nexusClient := mockClient.LastClient()
+type MockClient struct {
+        mu sync.Mutex
+
+        // Connection behavior configuration
+        connectFailCount int   // Number of times ConnectNet should fail before succeeding
+        connectError     error // Error to return on connection failure
+
+        // Client configuration (applied to created MockNexusClients)
+        clientCallLimit      int   // Max calls before client fails (0 = unlimited)
+        clientCallError      error // Error to return on Call operations
+        clientPublishError   error // Error to return on Publish operations
+        clientDontSignalDone bool  // Whether Close() should NOT signal Done()
+
+        // Custom client configurator for advanced scenarios
+        clientConfigurator func(*MockNexusClient)
+
+        // Tracking
+        connectAttempts int
+        clients         []*MockNexusClient
+}
+
+// NewMockClient creates a new MockClient with default settings.
+// By default, connections succeed immediately and clients work normally.
+func NewMockClient() *MockClient <span class="cov3" title="18">{
+        return &amp;MockClient{
+                connectError: ErrMockConnectionFailed,
+        }
+}</span>
+
+// =============================================================================
+// Connection Configuration
+// =============================================================================
+
+// SetConnectFailCount sets how many connection attempts should fail before succeeding.
+// Pass 0 for immediate success (default).
+func (m *MockClient) SetConnectFailCount(count int) *MockClient <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connectFailCount = count
+        return m
+}</span>
+
+// SetConnectError sets the error returned on failed connection attempts.
+// Defaults to ErrMockConnectionFailed.
+func (m *MockClient) SetConnectError(err error) *MockClient <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connectError = err
+        return m
+}</span>
+
+// =============================================================================
+// Client Configuration (applied to created MockNexusClients)
+// =============================================================================
+
+// SetClientCallLimit sets the maximum number of Call operations before
+// the created clients start returning ErrMockCallLimitExceeded.
+// Pass 0 for unlimited (default).
+func (m *MockClient) SetClientCallLimit(limit int) *MockClient <span class="cov1" title="2">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.clientCallLimit = limit
+        return m
+}</span>
+
+// SetClientCallError sets the error that created clients will return on Call operations.
+// Pass nil for successful calls (default).
+func (m *MockClient) SetClientCallError(err error) *MockClient <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.clientCallError = err
+        return m
+}</span>
+
+// SetClientPublishError sets the error that created clients will return on Publish operations.
+// Pass nil for successful publishes (default).
+func (m *MockClient) SetClientPublishError(err error) *MockClient <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.clientPublishError = err
+        return m
+}</span>
+
+// SetClientDontSignalDone configures whether created clients should NOT signal Done() on Close().
+// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
+func (m *MockClient) SetClientDontSignalDone(value bool) *MockClient <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.clientDontSignalDone = value
+        return m
+}</span>
+
+// SetClientConfigurator sets a custom function to configure each created MockNexusClient.
+// This is called after applying other client settings, allowing advanced customization.
+func (m *MockClient) SetClientConfigurator(fn func(*MockNexusClient)) *MockClient <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.clientConfigurator = fn
+        return m
+}</span>
+
+// =============================================================================
+// ConnectNet - The ClientProvider function
+// =============================================================================
+
+// ConnectNet is the ClientProvider function. Pass this to NewWampSession.
+//
+// Usage:
+//
+//        mockClient := NewMockClient()
+//        session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
+func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Config) (NexusClient, error) <span class="cov9" title="13906">{
+        m.mu.Lock()
+        m.connectAttempts++
+        attempt := m.connectAttempts
+        failCount := m.connectFailCount
+        connectErr := m.connectError
+
+        // Capture client config while holding lock
+        callLimit := m.clientCallLimit
+        callError := m.clientCallError
+        publishError := m.clientPublishError
+        dontSignalDone := m.clientDontSignalDone
+        configurator := m.clientConfigurator
+        m.mu.Unlock()
+
+        // Fail for the configured number of attempts
+        if attempt &lt;= failCount </span><span class="cov1" title="2">{
+                return nil, connectErr
+        }</span>
+
+        // Create successful client
+        <span class="cov9" title="13904">nexusClient := &amp;MockNexusClient{
+                connected:      true,
+                done:           make(chan struct{}),
+                callLimit:      callLimit,
+                callError:      callError,
+                publishError:   publishError,
+                dontSignalDone: dontSignalDone,
+        }
+
+        // Apply custom configurator if set
+        if configurator != nil </span><span class="cov1" title="2">{
+                configurator(nexusClient)
+        }</span>
+
+        <span class="cov9" title="13904">m.mu.Lock()
+        m.clients = append(m.clients, nexusClient)
+        m.mu.Unlock()
+
+        return nexusClient, nil</span>
+}
+
+// =============================================================================
+// Inspection Functions
+// =============================================================================
+
+// ConnectAttempts returns the number of ConnectNet calls made.
+func (m *MockClient) ConnectAttempts() int <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.connectAttempts
+}</span>
+
+// Clients returns all MockNexusClients created by ConnectNet.
+func (m *MockClient) Clients() []*MockNexusClient <span class="cov1" title="1">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        result := make([]*MockNexusClient, len(m.clients))
+        copy(result, m.clients)
+        return result
+}</span>
+
+// LastClient returns the most recently created MockNexusClient, or nil if none.
+func (m *MockClient) LastClient() *MockNexusClient <span class="cov2" title="4">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        if len(m.clients) == 0 </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov2" title="4">return m.clients[len(m.clients)-1]</span>
+}
+
+// ClientCount returns the number of MockNexusClients created.
+func (m *MockClient) ClientCount() int <span class="cov1" title="2">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return len(m.clients)
+}</span>
+
+// Reset clears all tracking state (attempts and clients) but keeps configuration.
+func (m *MockClient) Reset() *MockClient <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.connectAttempts = 0
+        m.clients = nil
+        return m
+}</span>
+
+// =============================================================================
+// MockNexusClient - Mock implementation of NexusClient
+// =============================================================================
+
 // MockNexusClient is a mock implementation of NexusClient for testing.
-// It allows simulating various connection states and failures.
+// It is created by MockClient.ConnectNet() and can be configured to
+// simulate various error conditions.
 type MockNexusClient struct {
         mu sync.Mutex
 
         // Connection state
-        connected  bool
-        done       chan struct{}
-        closeError error
+        connected      bool
+        done           chan struct{}
+        dontSignalDone bool // When true, Close() won't close the done channel
+
+        // Error configuration
+        callError      error
+        publishError   error
+        registerError  error
+        subscribeError error
+
+        // Call limit
+        callLimit int // When &gt; 0, fails after this many calls
 
         // Call tracking
-        CallCount      int
-        CallError      error
-        CallResult     *wamp.Result
-        PublishCount   int
-        PublishError   error
-        RegisterCount  int
-        RegisterError  error
-        SubscribeCount int
-        SubscribeError error
+        callCount      int
+        publishCount   int
+        registerCount  int
+        subscribeCount int
 
-        // Callbacks for custom behavior
-        OnCall    func(procedure string) (*wamp.Result, error)
-        OnPublish func(topic string) error
+        // Custom result for Call
+        callResult *wamp.Result
+
+        // Custom call handler for complex test scenarios
+        onCall func(procedure string) (*wamp.Result, error)
 }
 
-// NewMockNexusClient creates a new mock client in connected state
-func NewMockNexusClient() *MockNexusClient <span class="cov6" title="12">{
-        return &amp;MockNexusClient{
-                connected: true,
-                done:      make(chan struct{}),
-        }
-}</span>
+// =============================================================================
+// MockNexusClient - Simulation Functions
+// =============================================================================
 
-// NewMockNexusClientDisconnected creates a new mock client in disconnected state
-func NewMockNexusClientDisconnected() *MockNexusClient <span class="cov0" title="0">{
-        done := make(chan struct{})
-        close(done) // Already closed = disconnected
-        return &amp;MockNexusClient{
-                connected: false,
-                done:      done,
-        }
-}</span>
-
-// SimulateConnectionDrop simulates the server dropping the connection
-// by closing the done channel and setting connected to false
-func (m *MockNexusClient) SimulateConnectionDrop() <span class="cov4" title="4">{
+// SimulateConnectionDrop simulates the server dropping the connection.
+// This closes the Done() channel and sets Connected() to false.
+func (m *MockNexusClient) SimulateConnectionDrop() <span class="cov1" title="2">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        if m.connected </span><span class="cov4" title="4">{
+        if m.connected </span><span class="cov1" title="2">{
                 m.connected = false
                 close(m.done)
         }</span>
 }
 
-// SimulateReconnect simulates a successful reconnection
-func (m *MockNexusClient) SimulateReconnect() <span class="cov0" title="0">{
+// SimulateBrokenConnection simulates a connection that appears connected
+// but all calls fail. The Done() channel is NOT closed, simulating
+// the nexus bug where ping timeout doesn't properly signal Done().
+func (m *MockNexusClient) SimulateBrokenConnection(callError error) <span class="cov1" title="1">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
         m.connected = true
-        m.done = make(chan struct{})
+        m.callError = callError
+        m.dontSignalDone = true
 }</span>
 
-// SetCallError sets an error to be returned on next Call
-func (m *MockNexusClient) SetCallError(err error) <span class="cov1" title="1">{
+// SetCallError sets an error to be returned on Call operations.
+// Pass nil to clear the error.
+func (m *MockNexusClient) SetCallError(err error) <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
-        m.CallError = err
+        m.callError = err
 }</span>
 
-// SetCallResult sets the result to be returned on next Call
+// SetPublishError sets an error to be returned on Publish operations.
+// Pass nil to clear the error.
+func (m *MockNexusClient) SetPublishError(err error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.publishError = err
+}</span>
+
+// SetRegisterError sets an error to be returned on Register operations.
+// Pass nil to clear the error.
+func (m *MockNexusClient) SetRegisterError(err error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.registerError = err
+}</span>
+
+// SetSubscribeError sets an error to be returned on Subscribe operations.
+// Pass nil to clear the error.
+func (m *MockNexusClient) SetSubscribeError(err error) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.subscribeError = err
+}</span>
+
+// SetCallResult sets a custom result to be returned on Call operations.
+// Pass nil to return an empty result.
 func (m *MockNexusClient) SetCallResult(result *wamp.Result) <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
-        m.CallResult = result
+        m.callResult = result
 }</span>
 
-// NexusClient interface implementation
+// SetOnCall sets a custom handler for Call operations.
+// This allows complex test scenarios where different calls need different results.
+// Pass nil to use the default behavior.
+func (m *MockNexusClient) SetOnCall(handler func(procedure string) (*wamp.Result, error)) <span class="cov1" title="2">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.onCall = handler
+}</span>
 
-func (m *MockNexusClient) Close() error <span class="cov5" title="6">{
+// SetDontSignalDone configures whether Close() should signal the Done() channel.
+// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
+func (m *MockNexusClient) SetDontSignalDone(value bool) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.dontSignalDone = value
+}</span>
+
+// SetCallLimit sets the maximum number of calls before returning ErrMockCallLimitExceeded.
+// Pass 0 to disable the limit.
+func (m *MockNexusClient) SetCallLimit(limit int) <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        m.callLimit = limit
+}</span>
+
+// =============================================================================
+// MockNexusClient - Inspection Functions
+// =============================================================================
+
+// CallCount returns the number of Call operations made.
+func (m *MockNexusClient) CallCount() int <span class="cov2" title="4">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.callCount
+}</span>
+
+// PublishCount returns the number of Publish operations made.
+func (m *MockNexusClient) PublishCount() int <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.publishCount
+}</span>
+
+// RegisterCount returns the number of Register operations made.
+func (m *MockNexusClient) RegisterCount() int <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.registerCount
+}</span>
+
+// SubscribeCount returns the number of Subscribe operations made.
+func (m *MockNexusClient) SubscribeCount() int <span class="cov0" title="0">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        return m.subscribeCount
+}</span>
+
+// =============================================================================
+// MockNexusClient - NexusClient Interface Implementation
+// =============================================================================
+
+func (m *MockNexusClient) Close() error <span class="cov9" title="13887">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        if m.connected </span><span class="cov1" title="1">{
+        if m.connected </span><span class="cov9" title="13885">{
                 m.connected = false
-                close(m.done)
-        }</span>
-        <span class="cov5" title="6">return m.closeError</span>
+                if !m.dontSignalDone </span><span class="cov8" title="7773">{
+                        close(m.done)
+                }</span>
+        }
+        <span class="cov9" title="13887">return nil</span>
 }
 
-func (m *MockNexusClient) Connected() bool <span class="cov10" title="47">{
+func (m *MockNexusClient) Connected() bool <span class="cov10" title="27952">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return m.connected
 }</span>
 
-func (m *MockNexusClient) Done() &lt;-chan struct{} <span class="cov5" title="7">{
+func (m *MockNexusClient) Done() &lt;-chan struct{} <span class="cov9" title="13902">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return m.done
 }</span>
 
-func (m *MockNexusClient) ID() wamp.ID <span class="cov8" title="28">{
+func (m *MockNexusClient) ID() wamp.ID <span class="cov4" title="58">{
         return wamp.ID(12345)
 }</span>
 
@@ -1610,20 +1918,16 @@ func (m *MockNexusClient) Publish(topic string, options wamp.Dict, args wamp.Lis
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        m.PublishCount++
+        m.publishCount++
+        return m.publishError
+}</span>
 
-        if m.OnPublish != nil </span><span class="cov0" title="0">{
-                return m.OnPublish(topic)
-        }</span>
-        <span class="cov0" title="0">return m.PublishError</span>
-}
-
-func (m *MockNexusClient) Subscribe(topic string, fn client.EventHandler, options wamp.Dict) error <span class="cov5" title="7">{
+func (m *MockNexusClient) Subscribe(topic string, fn client.EventHandler, options wamp.Dict) error <span class="cov9" title="13904">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        m.SubscribeCount++
-        return m.SubscribeError
+        m.subscribeCount++
+        return m.subscribeError
 }</span>
 
 func (m *MockNexusClient) SubscriptionID(topic string) (wamp.ID, bool) <span class="cov0" title="0">{
@@ -1634,33 +1938,39 @@ func (m *MockNexusClient) Unsubscribe(topic string) error <span class="cov0" tit
         return nil
 }</span>
 
-func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) <span class="cov8" title="28">{
+func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) <span class="cov4" title="58">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        m.CallCount++
+        m.callCount++
 
-        if m.OnCall != nil </span><span class="cov6" title="9">{
-                return m.OnCall(procedure)
+        // Check call limit
+        if m.callLimit &gt; 0 &amp;&amp; m.callCount &gt; m.callLimit </span><span class="cov2" title="4">{
+                return nil, ErrMockCallLimitExceeded
         }</span>
 
-        <span class="cov7" title="19">if m.CallError != nil </span><span class="cov2" title="2">{
-                return nil, m.CallError
+        // Use custom handler if set
+        <span class="cov4" title="54">if m.onCall != nil </span><span class="cov3" title="15">{
+                return m.onCall(procedure)
         }</span>
 
-        <span class="cov7" title="17">if m.CallResult != nil </span><span class="cov0" title="0">{
-                return m.CallResult, nil
+        <span class="cov4" title="39">if m.callError != nil </span><span class="cov0" title="0">{
+                return nil, m.callError
         }</span>
 
-        <span class="cov7" title="17">return &amp;wamp.Result{}, nil</span>
+        <span class="cov4" title="39">if m.callResult != nil </span><span class="cov0" title="0">{
+                return m.callResult, nil
+        }</span>
+
+        <span class="cov4" title="39">return &amp;wamp.Result{}, nil</span>
 }
 
-func (m *MockNexusClient) Register(procedure string, fn client.InvocationHandler, options wamp.Dict) error <span class="cov5" title="7">{
+func (m *MockNexusClient) Register(procedure string, fn client.InvocationHandler, options wamp.Dict) error <span class="cov9" title="13904">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        m.RegisterCount++
-        return m.RegisterError
+        m.registerCount++
+        return m.registerError
 }</span>
 
 func (m *MockNexusClient) RegistrationID(procedure string) (wamp.ID, bool) <span class="cov0" title="0">{
@@ -1683,7 +1993,7 @@ import (
 )
 
 // testConfig returns a minimal test configuration for messenger tests
-func testConfig() *config.Config <span class="cov10" title="23">{
+func testConfig() *config.Config <span class="cov10" title="24">{
         return &amp;config.Config{
                 CommandLineArguments: &amp;config.CommandLineArguments{
                         AgentDir:      "/opt/reagent",
@@ -1739,6 +2049,7 @@ type WampSession struct {
         clientProvider ClientProvider // nil means use default client.ConnectNet
         mu             sync.Mutex
         onConnect      func(reconnect bool) // Callback invoked after successful connection/reconnection
+        heartbeatDone  chan struct{}        // Closed by heartbeat when connection failure is detected
 }
 
 type wampLogWrapper struct {
@@ -1755,7 +2066,7 @@ const (
 
 var ErrNotConnected = errors.New("not connected")
 
-func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper <span class="cov7" title="93">{
+func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper <span class="cov9" title="13906">{
         return wampLogWrapper{logger: zeroLogger}
 }</span>
 
@@ -1791,7 +2102,7 @@ func (wl wampLogWrapper) Printf(format string, v ...interface{}) <span class="co
         <span class="cov0" title="0">wl.logger.Printf(format, v...)</span>
 }
 
-func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper <span class="cov7" title="93">{
+func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper <span class="cov9" title="13906">{
         wrapper := newWampLogger(&amp;zeroLogger)
         return wrapper
 }</span>
@@ -1813,7 +2124,7 @@ type ClientProvider func(ctx context.Context, url string, cfg client.Config) (Ne
 
 var legacyEndpointRegex = regexp.MustCompile(`devices.*\.(com|io):8080`)
 
-func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) <span class="cov7" title="93">{
+func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) <span class="cov9" title="13906">{
         reswarmConfig := config.ReswarmConfig
 
         cfg := client.Config{
@@ -1841,22 +2152,22 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
                 }</span>
         }
 
-        <span class="cov7" title="93">if socketConfig.PingPongTimeout != 0 </span><span class="cov0" title="0">{
+        <span class="cov9" title="13906">if socketConfig.PingPongTimeout != 0 </span><span class="cov0" title="0">{
                 cfg.WsCfg = transport.WebsocketConfig{
                         KeepAlive: socketConfig.PingPongTimeout,
                 }
         }</span>
 
-        <span class="cov7" title="93">if socketConfig.ResponseTimeout != 0 </span><span class="cov4" title="14">{
+        <span class="cov9" title="13906">if socketConfig.ResponseTimeout != 0 </span><span class="cov1" title="2">{
                 cfg.ResponseTimeout = socketConfig.ResponseTimeout
         }</span>
 
-        <span class="cov7" title="93">return &amp;cfg, nil</span>
+        <span class="cov9" title="13906">return &amp;cfg, nil</span>
 }
 
 // SetOnConnect sets the callback that will be invoked after each successful connection or reconnection.
 // The callback receives a boolean indicating whether this is a reconnection (true) or initial connection (false).
-func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) <span class="cov3" title="5">{
+func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) <span class="cov2" title="5">{
         wampSession.mu.Lock()
         defer wampSession.mu.Unlock()
         wampSession.onConnect = cb
@@ -1864,12 +2175,13 @@ func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) <span clas
 
 // NewWampSession creates a new WampSession from a ReswarmConfig file.
 // If clientProvider is nil, the default client.ConnectNet is used.
-func NewWampSession(config *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) <span class="cov0" title="0">{
+func NewWampSession(config *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) <span class="cov3" title="18">{
         session := &amp;WampSession{
                 agentConfig:    config,
                 socketConfig:   socketConfig,
                 container:      container,
                 clientProvider: clientProvider,
+                heartbeatDone:  make(chan struct{}),
         }
 
         err := session.connect()
@@ -1877,11 +2189,11 @@ func NewWampSession(config *config.Config, socketConfig *SocketConfig, container
                 return nil, err
         }</span>
 
-        <span class="cov0" title="0">return session, nil</span>
+        <span class="cov3" title="18">return session, nil</span>
 }
 
 // connect establishes the WAMP connection
-func (wampSession *WampSession) connect() error <span class="cov1" title="1">{
+func (wampSession *WampSession) connect() error <span class="cov3" title="18">{
         clientChannel := wampSession.establishSocketConnection()
         wampSession.client = &lt;-clientChannel
 
@@ -1893,7 +2205,7 @@ func (wampSession *WampSession) connect() error <span class="cov1" title="1">{
         }
 
         // Start connection monitoring
-        <span class="cov1" title="1">wampSession.listenForDisconnect()
+        <span class="cov3" title="18">wampSession.listenForDisconnect()
         wampSession.startHeartbeat()
 
         return nil</span>
@@ -1901,14 +2213,14 @@ func (wampSession *WampSession) connect() error <span class="cov1" title="1">{
 
 // reconnect attempts to re-establish the WAMP connection.
 // Returns true if reconnection was successful, false otherwise.
-func (wampSession *WampSession) reconnect() bool <span class="cov2" title="3">{
+func (wampSession *WampSession) reconnect() bool <span class="cov9" title="13886">{
         wampSession.mu.Lock()
         // Close existing client
-        if wampSession.client != nil </span><span class="cov2" title="3">{
+        if wampSession.client != nil </span><span class="cov0" title="0">{
                 wampSession.client.Close()
                 wampSession.client = nil
         }</span>
-        <span class="cov2" title="3">wampSession.mu.Unlock()
+        <span class="cov9" title="13886">wampSession.mu.Unlock()
 
         // Establish new connection
         clientChannel := wampSession.establishSocketConnection()
@@ -1922,125 +2234,150 @@ func (wampSession *WampSession) reconnect() bool <span class="cov2" title="3">{
                 return false
         }</span>
 
-        <span class="cov2" title="3">if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
+        <span class="cov9" title="13886">if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
                 err := wampSession.SetupTestament()
                 if err != nil </span><span class="cov0" title="0">{
                         log.Fatal().Stack().Err(err).Msg("failed to setup testament")
                 }</span>
         }
 
-        <span class="cov2" title="3">return true</span>
+        <span class="cov9" title="13886">return true</span>
 }
 
 // listenForDisconnect starts a goroutine that monitors for disconnection
 // and automatically handles reconnection. When reconnection succeeds,
 // it invokes the onConnect callback (if set) with reconnect=true.
-func (wampSession *WampSession) listenForDisconnect() <span class="cov3" title="7">{
+func (wampSession *WampSession) listenForDisconnect() <span class="cov9" title="13904">{
+        log.Debug().Msg("listenForDisconnect: Starting disconnect listener setup...")
+
         // Get the current client's done channel
         wampSession.mu.Lock()
         client := wampSession.client
+        heartbeatDone := wampSession.heartbeatDone
         wampSession.mu.Unlock()
 
-        if client == nil </span><span class="cov0" title="0">{
+        if client == nil </span><span class="cov1" title="1">{
                 log.Warn().Msg("ListenForDisconnect called but client is nil")
                 return
         }</span>
 
-        <span class="cov3" title="7">clientDone := client.Done()
+        <span class="cov9" title="13903">clientDone := client.Done()
 
-        safe.Go(func() </span><span class="cov3" title="7">{
+        safe.Go(func() </span><span class="cov9" title="13902">{
+                // Wait for either the client to signal done OR the heartbeat to detect failure
                 select </span>{
-                case &lt;-clientDone:<span class="cov2" title="3">
-                        log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")
+                case &lt;-clientDone:<span class="cov3" title="18">
+                        log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")</span>
+                case &lt;-heartbeatDone:<span class="cov9" title="13868">
+                        log.Warn().Msg("Connection lost: Heartbeat detected connection failure")</span>
+                }
 
-                        // Cancel any active container streams
-                        if wampSession.container != nil </span><span class="cov0" title="0">{
-                                err := wampSession.container.CancelAllStreams()
-                                if err != nil </span><span class="cov0" title="0">{
-                                        log.Error().Err(err).Msg("error closing stream")
-                                }</span>
-                        }
+                <span class="cov9" title="13886">wampSession.Close()
 
-                        <span class="cov2" title="3">reconnectAttempt := 0
-                        for </span><span class="cov2" title="3">{
-                                reconnectAttempt++
-                                log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
+                // Cancel any active container streams
+                if wampSession.container != nil </span><span class="cov0" title="0">{
+                        err := wampSession.container.CancelAllStreams()
+                        if err != nil </span><span class="cov0" title="0">{
+                                log.Error().Err(err).Msg("error closing stream")
+                        }</span>
+                }
 
-                                if wampSession.reconnect() </span><span class="cov2" title="3">{
-                                        log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
+                <span class="cov9" title="13886">reconnectAttempt := 0
+                for </span><span class="cov9" title="13886">{
+                        reconnectAttempt++
+                        log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
 
-                                        // Invoke onConnect callback if set
-                                        wampSession.mu.Lock()
-                                        cb := wampSession.onConnect
-                                        wampSession.mu.Unlock()
+                        if wampSession.reconnect() </span><span class="cov9" title="13886">{
+                                log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
 
-                                        if cb != nil </span><span class="cov1" title="1">{
-                                                safe.Go(func() </span><span class="cov1" title="1">{
-                                                        log.Info().Msg("Re-initializing after reconnection...")
-                                                        cb(true) // reconnect = true
-                                                        log.Info().Msg("Successfully re-initialized after reconnection")
-                                                }</span>)
-                                        }
+                                // Invoke onConnect callback if set
+                                wampSession.mu.Lock()
+                                cb := wampSession.onConnect
+                                wampSession.mu.Unlock()
 
-                                        // Start listening for the next disconnect
-                                        <span class="cov2" title="3">wampSession.listenForDisconnect()
-                                        return</span>
+                                if cb != nil </span><span class="cov2" title="5">{
+                                        safe.Go(func() </span><span class="cov2" title="5">{
+                                                log.Info().Msg("Re-initializing after reconnection...")
+                                                cb(true) // reconnect = true
+                                                log.Info().Msg("Successfully re-initialized after reconnection")
+                                        }</span>)
                                 }
 
-                                <span class="cov0" title="0">log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
-                                time.Sleep(time.Second * 1)</span>
+                                // Start listening for the next disconnect and restart heartbeat
+                                <span class="cov9" title="13886">wampSession.listenForDisconnect()
+                                return</span>
                         }
+
+                        <span class="cov0" title="0">log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
+                        time.Sleep(time.Second * 1)</span>
                 }
         })
 
-        <span class="cov3" title="7">log.Debug().Msg("Messenger: Setup disconnect listener")</span>
+        <span class="cov9" title="13903">log.Debug().Msg("Messenger: Setup disconnect listener")</span>
 }
 
 // startHeartbeat starts a goroutine that periodically sends a heartbeat to verify
-// the connection is alive. If the heartbeat fails consecutively, it forces a reconnection.
-func (wampSession *WampSession) startHeartbeat() <span class="cov3" title="5">{
+// the connection is alive. If the heartbeat fails consecutively, it signals via heartbeatDone channel.
+func (wampSession *WampSession) startHeartbeat() <span class="cov3" title="18">{
         heartbeatInterval := wampSession.socketConfig.HeartbeatInterval
-        if heartbeatInterval == 0 </span><span class="cov1" title="1">{
+        if heartbeatInterval == 0 </span><span class="cov3" title="13">{
                 heartbeatInterval = DefaultHeartbeatInterval
         }</span>
 
-        <span class="cov3" title="5">safe.Go(func() </span><span class="cov3" title="5">{
+        // Create a new heartbeat channel only if the current one is nil or closed
+        <span class="cov3" title="18">wampSession.mu.Lock()
+        if wampSession.heartbeatDone == nil </span><span class="cov0" title="0">{
+                wampSession.heartbeatDone = make(chan struct{})
+        }</span> else<span class="cov3" title="18"> {
+                // Check if channel is closed by trying a non-blocking receive
+                select </span>{
+                case &lt;-wampSession.heartbeatDone:<span class="cov0" title="0">
+                        // Channel was closed, create a new one
+                        wampSession.heartbeatDone = make(chan struct{})</span>
+                default:<span class="cov3" title="18"></span>
+                        // Channel is still open, keep using it
+                }
+        }
+        <span class="cov3" title="18">heartbeatDone := wampSession.heartbeatDone
+        wampSession.mu.Unlock()
+
+        safe.Go(func() </span><span class="cov3" title="18">{
                 consecutiveFailures := 0
                 const maxConsecutiveFailures = 2 // Trigger reconnect after 2 failures
 
-                for </span><span class="cov6" title="48">{
+                for </span><span class="cov5" title="74">{
                         time.Sleep(heartbeatInterval)
 
                         // Check if connection is still alive
-                        if !wampSession.Connected() </span><span class="cov4" title="15">{
+                        if !wampSession.Connected() </span><span class="cov0" title="0">{
                                 log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
                                 consecutiveFailures = 0
                                 continue</span>
                         }
 
-                        <span class="cov5" title="28">err := wampSession.UpdateRemoteDeviceStatus(CONNECTED)
-                        if err != nil </span><span class="cov2" title="3">{
+                        <span class="cov4" title="58">err := wampSession.UpdateRemoteDeviceStatus(CONNECTED)
+                        if err != nil </span><span class="cov2" title="5">{
                                 consecutiveFailures++
                                 log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
 
                                 // If we've failed multiple times, the connection is likely broken
-                                // Force a reconnection by closing the client
-                                if consecutiveFailures &gt;= maxConsecutiveFailures </span><span class="cov1" title="1">{
-                                        log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), forcing reconnection...")
-                                        wampSession.Close()
-                                        consecutiveFailures = 0
+                                // Signal via heartbeatDone channel to trigger reconnection
+                                if consecutiveFailures &gt;= maxConsecutiveFailures </span><span class="cov1" title="2">{
+                                        log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), signaling reconnection...")
+                                        close(heartbeatDone)
+                                        return // Exit this heartbeat goroutine
                                 }</span>
-                        } else<span class="cov5" title="25"> {
+                        } else<span class="cov4" title="53"> {
                                 // Reset counter on success
                                 if consecutiveFailures &gt; 0 </span><span class="cov1" title="1">{
                                         log.Info().Msg("Heartbeat successful, connection restored")
                                 }</span>
-                                <span class="cov5" title="25">consecutiveFailures = 0</span>
+                                <span class="cov4" title="53">consecutiveFailures = 0</span>
                         }
                 }
         })
 
-        <span class="cov3" title="5">log.Debug().Msg("Messenger: Started heartbeat")</span>
+        <span class="cov3" title="18">log.Debug().Msg("Messenger: Started heartbeat")</span>
 }
 
 func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov0" title="0">{
@@ -2061,7 +2398,7 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 
 // establishSocketConnection establishes a WAMP connection using the session's ClientProvider.
 // If clientProvider is nil, client.ConnectNet is used directly.
-func (wampSession *WampSession) establishSocketConnection() chan NexusClient <span class="cov4" title="12">{
+func (wampSession *WampSession) establishSocketConnection() chan NexusClient <span class="cov9" title="13904">{
         agentConfig := wampSession.agentConfig
         socketConfig := wampSession.socketConfig
         container := wampSession.container
@@ -2070,44 +2407,44 @@ func (wampSession *WampSession) establishSocketConnection() chan NexusClient <sp
         resChan := make(chan NexusClient)
 
         // never returns a established connection
-        if agentConfig.CommandLineArguments.Offline </span><span class="cov1" title="1">{
+        if agentConfig.CommandLineArguments.Offline </span><span class="cov0" title="0">{
                 log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
                 return resChan
         }</span>
 
-        <span class="cov4" title="11">log.Debug().Msg("Attempting to establish a socket connection...")
+        <span class="cov9" title="13904">log.Debug().Msg("Attempting to establish a socket connection...")
 
-        safe.Go(func() </span><span class="cov4" title="11">{
-                for </span><span class="cov7" title="93">{
+        safe.Go(func() </span><span class="cov9" title="13904">{
+                for </span><span class="cov9" title="13906">{
                         connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
                         if err != nil </span><span class="cov0" title="0">{
                                 log.Error().Err(err).Msg("failed to create connect config...")
                                 continue</span>
                         }
 
-                        <span class="cov7" title="93">var ctx context.Context
+                        <span class="cov9" title="13906">var ctx context.Context
                         var cancelFunc context.CancelFunc
 
-                        if socketConfig.ConnectionTimeout == 0 </span><span class="cov4" title="13">{
+                        if socketConfig.ConnectionTimeout == 0 </span><span class="cov0" title="0">{
                                 ctx = context.Background()
-                        }</span> else<span class="cov7" title="80"> {
+                        }</span> else<span class="cov9" title="13906"> {
                                 ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
                         }</span>
 
-                        <span class="cov7" title="93">var duration time.Duration
+                        <span class="cov9" title="13906">var duration time.Duration
                         requestStart := time.Now() // time request
                         var wClient NexusClient
-                        if provider != nil </span><span class="cov7" title="93">{
+                        if provider != nil </span><span class="cov9" title="13906">{
                                 wClient, err = provider(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
                         }</span> else<span class="cov0" title="0"> {
                                 wClient, err = client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
                         }</span>
-                        <span class="cov7" title="93">if err != nil </span><span class="cov7" title="86">{
-                                if cancelFunc != nil </span><span class="cov6" title="73">{
+                        <span class="cov9" title="13906">if err != nil </span><span class="cov1" title="2">{
+                                if cancelFunc != nil </span><span class="cov1" title="2">{
                                         cancelFunc()
                                 }</span>
 
-                                <span class="cov7" title="86">duration = time.Since(requestStart)
+                                <span class="cov1" title="2">duration = time.Since(requestStart)
 
                                 if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") </span><span class="cov0" title="0">{
                                         exitMessage := fmt.Sprintln("The IronFlock device connect authentication failed")
@@ -2115,36 +2452,36 @@ func (wampSession *WampSession) establishSocketConnection() chan NexusClient <sp
                                         os.Exit(1)
                                 }</span>
 
-                                <span class="cov7" title="86">log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
+                                <span class="cov1" title="2">log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
                                 time.Sleep(time.Second * 1)
                                 continue</span>
                         }
 
-                        <span class="cov3" title="7">if cancelFunc != nil </span><span class="cov3" title="7">{
+                        <span class="cov9" title="13904">if cancelFunc != nil </span><span class="cov9" title="13904">{
                                 cancelFunc()
                         }</span>
 
                         // add a dummy topic that will be used as a means to check if a client has an existing session or not
-                        <span class="cov3" title="7">topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+                        <span class="cov9" title="13904">topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
                         invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult </span><span class="cov0" title="0">{
                                 return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
                         }</span>
 
-                        <span class="cov3" title="7">err = wClient.Register(topic, invokeHandler, nil)
+                        <span class="cov9" title="13904">err = wClient.Register(topic, invokeHandler, nil)
                         if err != nil &amp;&amp; strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) </span><span class="cov0" title="0">{
                                 exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
                                 fmt.Println(exitMessage)
                                 os.Exit(1)
                         }</span>
 
-                        <span class="cov3" title="7">onDestroyListener := func(event *wamp.Event) </span><span class="cov0" title="0">{
+                        <span class="cov9" title="13904">onDestroyListener := func(event *wamp.Event) </span><span class="cov0" title="0">{
                                 container.PruneSystem()
                                 os.Exit(1)
                         }</span>
 
-                        <span class="cov3" title="7">wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
+                        <span class="cov9" title="13904">wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
 
-                        if wClient.Connected() </span><span class="cov3" title="5">{
+                        if wClient.Connected() </span><span class="cov9" title="13904">{
                                 duration = time.Since(requestStart)
                                 log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
                                 resChan &lt;- wClient
@@ -2152,40 +2489,35 @@ func (wampSession *WampSession) establishSocketConnection() chan NexusClient <sp
                                 return
                         }</span>
 
-                        <span class="cov1" title="2">duration = time.Since(requestStart)
-                        if wClient != nil </span><span class="cov1" title="2">{
+                        <span class="cov0" title="0">duration = time.Since(requestStart)
+                        if wClient != nil </span><span class="cov0" title="0">{
                                 wClient.Close()
                         }</span>
 
-                        <span class="cov1" title="2">log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())</span>
+                        <span class="cov0" title="0">log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())</span>
                 }
         })
 
-        <span class="cov4" title="11">return resChan</span>
+        <span class="cov9" title="13904">return resChan</span>
 }
 
-func (wampSession *WampSession) Connected() bool <span class="cov10" title="653">{
+func (wampSession *WampSession) Connected() bool <span class="cov10" title="14051">{
         wampSession.mu.Lock()
         client := wampSession.client
         wampSession.mu.Unlock()
-        if client == nil </span><span class="cov9" title="614">{
+        if client == nil </span><span class="cov1" title="2">{
                 return false
         }</span>
-        <span class="cov6" title="39">return client.Connected()</span>
+        <span class="cov9" title="14049">return client.Connected()</span>
 }
 
-func (wampSession *WampSession) Done() &lt;-chan struct{} <span class="cov9" title="601">{
+// Client returns the underlying NexusClient.
+// This is primarily useful for testing to access the MockNexusClient.
+func (wampSession *WampSession) Client() NexusClient <span class="cov0" title="0">{
         wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-        if client == nil </span><span class="cov9" title="601">{
-                // Return a closed channel if no client
-                ch := make(chan struct{})
-                close(ch)
-                return ch
-        }</span>
-        <span class="cov0" title="0">return client.Done()</span>
-}
+        defer wampSession.mu.Unlock()
+        return wampSession.client
+}</span>
 
 func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error <span class="cov0" title="0">{
         wampSession.mu.Lock()
@@ -2213,7 +2545,7 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
         <span class="cov0" title="0">return client.Subscribe(string(topic), handler, wamp.Dict(options))</span>
 }
 
-func (wampSession *WampSession) GetConfig() *config.Config <span class="cov5" title="28">{
+func (wampSession *WampSession) GetConfig() *config.Config <span class="cov4" title="58">{
         return wampSession.agentConfig
 }</span>
 
@@ -2247,7 +2579,7 @@ func (wampSession *WampSession) Call(
         args []interface{},
         kwargs common.Dict,
         options common.Dict,
-        progCb func(Result)) (Result, error) <span class="cov5" title="28">{
+        progCb func(Result)) (Result, error) <span class="cov4" title="58">{
 
         wampSession.mu.Lock()
         client := wampSession.client
@@ -2257,7 +2589,7 @@ func (wampSession *WampSession) Call(
                 return Result{}, ErrNotConnected
         }</span>
 
-        <span class="cov5" title="28">var handler func(result *wamp.Result)
+        <span class="cov4" title="58">var handler func(result *wamp.Result)
         if progCb != nil </span><span class="cov0" title="0">{
                 handler = func(result *wamp.Result) </span><span class="cov0" title="0">{
                         cbResultMap := Result{
@@ -2270,12 +2602,12 @@ func (wampSession *WampSession) Call(
                 }</span>
         }
 
-        <span class="cov5" title="28">result, err := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
-        if err != nil </span><span class="cov2" title="3">{
+        <span class="cov4" title="58">result, err := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+        if err != nil </span><span class="cov2" title="5">{
                 return Result{}, err
         }</span>
 
-        <span class="cov5" title="25">callResultMap := Result{
+        <span class="cov4" title="53">callResultMap := Result{
                 Request:     uint64(result.Request),
                 Details:     common.Dict(result.Details),
                 Arguments:   []interface{}(result.Arguments),
@@ -2285,7 +2617,7 @@ func (wampSession *WampSession) Call(
         return callResultMap, nil</span>
 }
 
-func (wampSession *WampSession) GetSessionID() uint64 <span class="cov5" title="28">{
+func (wampSession *WampSession) GetSessionID() uint64 <span class="cov4" title="58">{
         wampSession.mu.Lock()
         client := wampSession.client
         wampSession.mu.Unlock()
@@ -2294,7 +2626,7 @@ func (wampSession *WampSession) GetSessionID() uint64 <span class="cov5" title="
                 return 0
         }</span>
 
-        <span class="cov5" title="28">return uint64(client.ID())</span>
+        <span class="cov4" title="58">return uint64(client.ID())</span>
 }
 
 func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error <span class="cov0" title="0">{
@@ -2394,25 +2726,24 @@ func (wampSession *WampSession) SetupTestament() error <span class="cov0" title=
         <span class="cov0" title="0">return nil</span>
 }
 
-func (wampSession *WampSession) Close() <span class="cov7" title="106">{
+func (wampSession *WampSession) Close() <span class="cov9" title="14005">{
         wampSession.mu.Lock()
         clientToClose := wampSession.client
         wampSession.client = nil
         wampSession.mu.Unlock()
 
-        // Close the client - this will close its Done() channel
-        if clientToClose != nil </span><span class="cov1" title="1">{
+        if clientToClose != nil </span><span class="cov9" title="13887">{
                 clientToClose.Close()
         }</span>
 }
 
-func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) <span class="cov7" title="93">{
+func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) <span class="cov9" title="13906">{
         return func(c *wamp.Challenge) (string, wamp.Dict) </span><span class="cov0" title="0">{
                 return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
         }</span>
 }
 
-func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov5" title="28">{
+func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov4" title="58">{
         config := wampSession.GetConfig()
         ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
         defer cancelFunc()
@@ -2425,11 +2756,11 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
         }
 
         res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
-        if err != nil </span><span class="cov2" title="3">{
+        if err != nil </span><span class="cov2" title="5">{
                 return err
         }</span>
 
-        <span class="cov5" title="25">if res.Arguments == nil || res.Arguments[0] == nil </span><span class="cov5" title="25">{
+        <span class="cov4" title="53">if res.Arguments == nil || res.Arguments[0] == nil </span><span class="cov4" title="53">{
                 return nil
         }</span>
 

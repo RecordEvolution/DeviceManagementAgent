@@ -33,6 +33,7 @@ type WampSession struct {
 	clientProvider ClientProvider // nil means use default client.ConnectNet
 	mu             sync.Mutex
 	onConnect      func(reconnect bool) // Callback invoked after successful connection/reconnection
+	heartbeatDone  chan struct{}        // Closed by heartbeat when connection failure is detected
 }
 
 type wampLogWrapper struct {
@@ -164,6 +165,7 @@ func NewWampSession(config *config.Config, socketConfig *SocketConfig, container
 		socketConfig:   socketConfig,
 		container:      container,
 		clientProvider: clientProvider,
+		heartbeatDone:  make(chan struct{}),
 	}
 
 	err := session.connect()
@@ -230,9 +232,12 @@ func (wampSession *WampSession) reconnect() bool {
 // and automatically handles reconnection. When reconnection succeeds,
 // it invokes the onConnect callback (if set) with reconnect=true.
 func (wampSession *WampSession) listenForDisconnect() {
+	log.Debug().Msg("listenForDisconnect: Starting disconnect listener setup...")
+
 	// Get the current client's done channel
 	wampSession.mu.Lock()
 	client := wampSession.client
+	heartbeatDone := wampSession.heartbeatDone
 	wampSession.mu.Unlock()
 
 	if client == nil {
@@ -243,47 +248,52 @@ func (wampSession *WampSession) listenForDisconnect() {
 	clientDone := client.Done()
 
 	safe.Go(func() {
+		// Wait for either the client to signal done OR the heartbeat to detect failure
 		select {
 		case <-clientDone:
 			log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")
+		case <-heartbeatDone:
+			log.Warn().Msg("Connection lost: Heartbeat detected connection failure")
+		}
 
-			// Cancel any active container streams
-			if wampSession.container != nil {
-				err := wampSession.container.CancelAllStreams()
-				if err != nil {
-					log.Error().Err(err).Msg("error closing stream")
+		wampSession.Close()
+
+		// Cancel any active container streams
+		if wampSession.container != nil {
+			err := wampSession.container.CancelAllStreams()
+			if err != nil {
+				log.Error().Err(err).Msg("error closing stream")
+			}
+		}
+
+		reconnectAttempt := 0
+		for {
+			reconnectAttempt++
+			log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
+
+			if wampSession.reconnect() {
+				log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
+
+				// Invoke onConnect callback if set
+				wampSession.mu.Lock()
+				cb := wampSession.onConnect
+				wampSession.mu.Unlock()
+
+				if cb != nil {
+					safe.Go(func() {
+						log.Info().Msg("Re-initializing after reconnection...")
+						cb(true) // reconnect = true
+						log.Info().Msg("Successfully re-initialized after reconnection")
+					})
 				}
+
+				// Start listening for the next disconnect and restart heartbeat
+				wampSession.listenForDisconnect()
+				return
 			}
 
-			reconnectAttempt := 0
-			for {
-				reconnectAttempt++
-				log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
-
-				if wampSession.reconnect() {
-					log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
-
-					// Invoke onConnect callback if set
-					wampSession.mu.Lock()
-					cb := wampSession.onConnect
-					wampSession.mu.Unlock()
-
-					if cb != nil {
-						safe.Go(func() {
-							log.Info().Msg("Re-initializing after reconnection...")
-							cb(true) // reconnect = true
-							log.Info().Msg("Successfully re-initialized after reconnection")
-						})
-					}
-
-					// Start listening for the next disconnect
-					wampSession.listenForDisconnect()
-					return
-				}
-
-				log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
-				time.Sleep(time.Second * 1)
-			}
+			log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
+			time.Sleep(time.Second * 1)
 		}
 	})
 
@@ -291,12 +301,29 @@ func (wampSession *WampSession) listenForDisconnect() {
 }
 
 // startHeartbeat starts a goroutine that periodically sends a heartbeat to verify
-// the connection is alive. If the heartbeat fails consecutively, it forces a reconnection.
+// the connection is alive. If the heartbeat fails consecutively, it signals via heartbeatDone channel.
 func (wampSession *WampSession) startHeartbeat() {
 	heartbeatInterval := wampSession.socketConfig.HeartbeatInterval
 	if heartbeatInterval == 0 {
 		heartbeatInterval = DefaultHeartbeatInterval
 	}
+
+	// Create a new heartbeat channel only if the current one is nil or closed
+	wampSession.mu.Lock()
+	if wampSession.heartbeatDone == nil {
+		wampSession.heartbeatDone = make(chan struct{})
+	} else {
+		// Check if channel is closed by trying a non-blocking receive
+		select {
+		case <-wampSession.heartbeatDone:
+			// Channel was closed, create a new one
+			wampSession.heartbeatDone = make(chan struct{})
+		default:
+			// Channel is still open, keep using it
+		}
+	}
+	heartbeatDone := wampSession.heartbeatDone
+	wampSession.mu.Unlock()
 
 	safe.Go(func() {
 		consecutiveFailures := 0
@@ -318,11 +345,11 @@ func (wampSession *WampSession) startHeartbeat() {
 				log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
 
 				// If we've failed multiple times, the connection is likely broken
-				// Force a reconnection by closing the client
+				// Signal via heartbeatDone channel to trigger reconnection
 				if consecutiveFailures >= maxConsecutiveFailures {
-					log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), forcing reconnection...")
-					wampSession.Close()
-					consecutiveFailures = 0
+					log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), signaling reconnection...")
+					close(heartbeatDone)
+					return // Exit this heartbeat goroutine
 				}
 			} else {
 				// Reset counter on success
@@ -468,17 +495,12 @@ func (wampSession *WampSession) Connected() bool {
 	return client.Connected()
 }
 
-func (wampSession *WampSession) Done() <-chan struct{} {
+// Client returns the underlying NexusClient.
+// This is primarily useful for testing to access the MockNexusClient.
+func (wampSession *WampSession) Client() NexusClient {
 	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-	if client == nil {
-		// Return a closed channel if no client
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return client.Done()
+	defer wampSession.mu.Unlock()
+	return wampSession.client
 }
 
 func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
@@ -694,7 +716,6 @@ func (wampSession *WampSession) Close() {
 	wampSession.client = nil
 	wampSession.mu.Unlock()
 
-	// Close the client - this will close its Done() channel
 	if clientToClose != nil {
 		clientToClose.Close()
 	}
