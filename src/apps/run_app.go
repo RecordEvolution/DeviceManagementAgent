@@ -570,7 +570,7 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 	}
 
 	if config.ReswarmConfig.ReswarmBaseURL != "" {
-		deviceURL := fmt.Sprintf("%s/%s/swarms/%s/device/%s", config.ReswarmConfig.ReswarmBaseURL, config.ReswarmConfig.SwarmOwnerName, config.ReswarmConfig.SwarmName, config.ReswarmConfig.Name)
+		deviceURL := fmt.Sprintf("%s/%s/swarms/%s/settings/devices/%s", config.ReswarmConfig.ReswarmBaseURL, config.ReswarmConfig.SwarmOwnerName, config.ReswarmConfig.SwarmName, config.ReswarmConfig.Name)
 		environmentVariables = append(environmentVariables, fmt.Sprintf("RESWARM_URL=%s", config.ReswarmConfig.ReswarmBaseURL))
 		environmentVariables = append(environmentVariables, fmt.Sprintf("DEVICE_URL=%s", deviceURL))
 	}

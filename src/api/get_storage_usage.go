@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"reagent/common"
 	"reagent/errdefs"
-	"reagent/filesystem"
 	"reagent/messenger"
 )
 
@@ -18,12 +18,24 @@ func (ex *External) getStorageDataHandler(ctx context.Context, response messenge
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get storage data"))
 	}
 
-	diskUsageEntry, err := filesystem.AvailableDiskSpace()
-	if err != nil {
-		return nil, err
+	stats := common.GetStats()
+
+	result := common.Dict{
+		"cpu_count":           stats.CPUCount,
+		"cpu_usage":           stats.CPUUsagePercent,
+		"memory_total":        stats.MemoryTotal,
+		"memory_used":         stats.MemoryUsed,
+		"memory_available":    stats.MemoryAvailable,
+		"storage_total":       stats.StorageTotal,
+		"storage_used":        stats.StorageUsed,
+		"storage_free":        stats.StorageFree,
+		"docker_apps_total":   stats.DockerAppsTotal,
+		"docker_apps_used":    stats.DockerAppsUsed,
+		"docker_apps_free":    stats.DockerAppsFree,
+		"docker_apps_mounted": stats.DockerAppsMounted,
 	}
 
 	return &messenger.InvokeResult{
-		Arguments: []interface{}{diskUsageEntry},
+		Arguments: []interface{}{result},
 	}, nil
 }

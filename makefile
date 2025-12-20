@@ -30,21 +30,21 @@ help: ## This help.
 .DEFAULT_GOAL := help
 
 test: ## Run unit tests (packages without embedded binary dependency)
-	cd src && go test -short reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe
+	cd src && go test -short reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe reagent/apps reagent/api reagent/tunnel
 
-test-all: download-frpc ## Run all unit tests excluding tunnel (requires frpc binary)
-	cd src && go test -short $$(go list ./... | grep -v reagent/tunnel)
+test-all: download-frpc ## Run all unit tests (requires frpc binary)
+	cd src && go test -short ./...
 
 test-verbose: ## Run unit tests with verbose output
 	cd src && go test -v -short reagent/messenger reagent/testutil
 
 test-coverage: ## Run tests with coverage report
-	cd src && go test -short -coverprofile=coverage.out -covermode=atomic reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe
+	cd src && go test -short -coverprofile=coverage.out -covermode=atomic reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe reagent/apps reagent/api reagent/tunnel
 	cd src && go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated at src/coverage.html"
 
-test-coverage-all: download-frpc ## Run all tests with coverage excluding tunnel (requires frpc binary)
-	cd src && go test -short -coverprofile=coverage.out -covermode=atomic $$(go list ./... | grep -v reagent/tunnel)
+test-coverage-all: download-frpc ## Run all unit tests with coverage (requires frpc binary)
+	cd src && go test -short -coverprofile=coverage.out -covermode=atomic ./...
 	cd src && go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated at src/coverage.html"
 

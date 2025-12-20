@@ -7,24 +7,11 @@ import (
 	"reagent/messenger/topics"
 )
 
-// Result the value that is received from a Messenger request
-// E.g. Call, Register callback, Subscription callback
-type Result struct {
-	Arguments    []interface{}
-	ArgumentsKw  common.Dict
-	Details      common.Dict
-	Registration uint64 // Values will be filled based on Result type, e.g. Call, Subcribe, Register...
-	Request      uint64
-	Subscription uint64
-	Publication  uint64
-}
+// Result is an alias to common.Result for backward compatibility
+type Result = common.Result
 
-// InvokeResult the value that is sent whenever a procedure is invoked
-type InvokeResult struct {
-	Arguments   []interface{}
-	ArgumentsKw common.Dict
-	Err         string
-}
+// InvokeResult is an alias to common.InvokeResult for backward compatibility
+type InvokeResult = common.InvokeResult
 
 type Messenger interface {
 	Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error

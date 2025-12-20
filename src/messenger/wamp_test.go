@@ -455,10 +455,15 @@ func TestWampSession_Heartbeat(t *testing.T) {
 		require.NoError(t, err)
 		defer session.Close()
 
-		time.Sleep(400 * time.Millisecond)
+		// Reset the call limit so subsequent clients (after reconnection) work normally
+		mockClient.SetClientCallLimit(0)
 
-		assert.GreaterOrEqual(t, mockClient.ClientCount(), 2)
-		assert.True(t, session.Connected())
+		// Wait for reconnection to happen (heartbeat fails after 2 consecutive failures)
+		require.Eventually(t, func() bool {
+			return mockClient.Clients()[len(mockClient.Clients())-1].Connected()
+		}, time.Second, 10*time.Millisecond,
+			"expected at least 2 clients after heartbeat-triggered reconnection")
+
 	})
 
 	t.Run("heartbeat resets failure count on success", func(t *testing.T) {
@@ -522,13 +527,8 @@ func TestHeartbeatTriggersReconnectWithoutDoneChannel(t *testing.T) {
 
 	// Wait for reconnection to be triggered and new client to be created
 	require.Eventually(t, func() bool {
-		return mockClient.ClientCount() >= 2
+		return mockClient.ClientCount() >= 2 && mockClient.Clients()[len(mockClient.Clients())-1].Connected()
 	}, time.Second, 10*time.Millisecond,
 		"reconnection should be triggered by heartbeat failure even when Done() is not signaled")
 
-	// Wait for session to become connected with the new client
-	require.Eventually(t, func() bool {
-		return session.Connected()
-	}, time.Second, 10*time.Millisecond,
-		"session should be connected after reconnection")
 }

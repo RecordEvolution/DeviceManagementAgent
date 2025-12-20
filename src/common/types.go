@@ -12,6 +12,24 @@ import (
 type Dict map[string]interface{}
 type Timestamp string
 
+// Result is the value received from a Messenger request (Call, Register callback, Subscription callback)
+type Result struct {
+	Arguments    []interface{}
+	ArgumentsKw  Dict
+	Details      Dict
+	Registration uint64 // Values will be filled based on Result type
+	Request      uint64
+	Subscription uint64
+	Publication  uint64
+}
+
+// InvokeResult is the value sent whenever a procedure is invoked
+type InvokeResult struct {
+	Arguments   []interface{}
+	ArgumentsKw Dict
+	Err         string
+}
+
 type App struct {
 	AppKey              uint64
 	DeviceToAppKey      uint64

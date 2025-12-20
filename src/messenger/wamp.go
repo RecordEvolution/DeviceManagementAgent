@@ -732,14 +732,30 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancelFunc()
 
+	stats := common.GetStats()
+
 	payload := common.Dict{
 		"swarm_key":       config.ReswarmConfig.SwarmKey,
 		"device_key":      config.ReswarmConfig.DeviceKey,
 		"status":          string(status),
 		"wamp_session_id": wampSession.GetSessionID(),
+		"stats": common.Dict{
+			"cpu_count":           stats.CPUCount,
+			"cpu_usage":           stats.CPUUsagePercent,
+			"memory_total":        stats.MemoryTotal,
+			"memory_used":         stats.MemoryUsed,
+			"memory_available":    stats.MemoryAvailable,
+			"storage_total":       stats.StorageTotal,
+			"storage_used":        stats.StorageUsed,
+			"storage_free":        stats.StorageFree,
+			"docker_apps_total":   stats.DockerAppsTotal,
+			"docker_apps_used":    stats.DockerAppsUsed,
+			"docker_apps_free":    stats.DockerAppsFree,
+			"docker_apps_mounted": stats.DockerAppsMounted,
+		},
 	}
 
-	res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []interface{}{payload}, nil, nil, nil)
+	res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -748,7 +764,7 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 		return nil
 	}
 
-	args, ok := res.Arguments[0].(map[string]interface{})
+	args, ok := res.Arguments[0].(map[string]any)
 	if !ok {
 		return nil
 	}

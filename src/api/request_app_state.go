@@ -20,23 +20,6 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 		return nil, err
 	}
 
-	var privileged bool
-	if payload.CurrentState == common.REMOVED || payload.CurrentState == common.UNINSTALLED {
-		privileged, err = ex.Privilege.Check("INSTALL", response.Details)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		privileged, err = ex.Privilege.Check("OPERATE", response.Details)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if !privileged {
-		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to request app state"))
-	}
-
 	// TODO: remove check and implement proper stream canceling for Docker Compose
 	if payload.CancelTransition && payload.DockerCompose != nil {
 		return nil, errors.New("canceling docker compose apps not yet implemented")

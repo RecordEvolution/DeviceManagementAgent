@@ -15,6 +15,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 func BuildContainerName(stage Stage, appKey uint64, appName string) string {
@@ -364,4 +367,62 @@ func PrettyFormat(data interface{}) (string, error) {
 	}
 
 	return string(p), nil
+}
+
+// Stats contains system resource usage information
+type Stats struct {
+	CPUCount          int     `json:"cpu_count"`           // Number of logical CPUs
+	CPUUsagePercent   float64 `json:"cpu_usage_percent"`   // CPU usage percentage (0-100)
+	MemoryTotal       uint64  `json:"memory_total"`        // Total memory in bytes
+	MemoryUsed        uint64  `json:"memory_used"`         // Used memory in bytes
+	MemoryAvailable   uint64  `json:"memory_available"`    // Available memory in bytes
+	StorageTotal      uint64  `json:"storage_total"`       // Total storage in bytes (root filesystem)
+	StorageUsed       uint64  `json:"storage_used"`        // Used storage in bytes (root filesystem)
+	StorageFree       uint64  `json:"storage_free"`        // Free storage in bytes (root filesystem)
+	DockerAppsTotal   uint64  `json:"docker_apps_total"`   // Total storage in bytes (/opt/reagent/docker-apps)
+	DockerAppsUsed    uint64  `json:"docker_apps_used"`    // Used storage in bytes (/opt/reagent/docker-apps)
+	DockerAppsFree    uint64  `json:"docker_apps_free"`    // Free storage in bytes (/opt/reagent/docker-apps)
+	DockerAppsMounted bool    `json:"docker_apps_mounted"` // Whether /opt/reagent/docker-apps is a separate mount
+}
+
+// GetStats returns current system resource statistics.
+// This function is cross-platform (Linux, macOS, Windows).
+func GetStats() Stats {
+	stats := Stats{}
+
+	// Get CPU count
+	if cpuCount, err := cpu.Counts(true); err == nil {
+		stats.CPUCount = cpuCount
+	}
+
+	// Get CPU usage (percentage is the only meaningful metric for CPU)
+	if cpuPercent, err := cpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
+		stats.CPUUsagePercent = cpuPercent[0]
+	}
+
+	// Get Memory - absolute values
+	if vmStat, err := mem.VirtualMemory(); err == nil {
+		stats.MemoryTotal = vmStat.Total
+		stats.MemoryUsed = vmStat.Used
+		stats.MemoryAvailable = vmStat.Available
+	}
+
+	// Get Disk - absolute values for root filesystem
+	if diskStat, err := disk.Usage("/"); err == nil {
+		stats.StorageTotal = diskStat.Total
+		stats.StorageUsed = diskStat.Used
+		stats.StorageFree = diskStat.Free
+	}
+
+	// Get Docker apps storage - /opt/reagent/docker-apps mount
+	dockerAppsPath := "/opt/reagent/docker-apps"
+	if diskStat, err := disk.Usage(dockerAppsPath); err == nil {
+		stats.DockerAppsTotal = diskStat.Total
+		stats.DockerAppsUsed = diskStat.Used
+		stats.DockerAppsFree = diskStat.Free
+		// Check if it's a separate mount (different total than root)
+		stats.DockerAppsMounted = stats.DockerAppsTotal != stats.StorageTotal
+	}
+
+	return stats
 }

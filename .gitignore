@@ -24,4 +24,5 @@ reagent.db-wal
 *.tar
 build
 .cache/
+frpc
 

@@ -1,0 +1,12 @@
+serverAddr: app.ironflock.com
+serverPort: 7000
+transport:
+    tls:
+        enable: true
+webServer:
+    addr: 127.0.0.1
+    port: 30000
+log:
+    to: /var/log/frpc.log
+    level: debug
+    maxDays: 3

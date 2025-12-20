@@ -3,7 +3,7 @@ package system
 import (
 	"errors"
 	"os"
-	"reagent/messenger"
+	"reagent/common"
 
 	"github.com/rs/zerolog/log"
 )
@@ -84,7 +84,7 @@ func getDeviceConfig() (DeviceConfig, error) {
 	}, nil
 }
 
-func buildDeviceConfigFromPayload(result *messenger.Result) (DeviceConfig, error) {
+func buildDeviceConfigFromPayload(result *common.Result) (DeviceConfig, error) {
 	devInfoPayloadArgs := result.Arguments[0]
 	secondArray, ok := (devInfoPayloadArgs).([]interface{})
 	if !ok {

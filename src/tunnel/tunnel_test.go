@@ -1,10 +1,13 @@
 package tunnel
 
 import (
+	"os"
+	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/logging"
 	"reagent/messenger"
+	"runtime"
 	"testing"
 
 	"github.com/rs/zerolog/log"
@@ -15,9 +18,44 @@ func init() {
 	logging.SetupLogger(&config.CommandLineArguments{PrettyLogging: true, Debug: true})
 }
 
+// getTestAgentDir returns the appropriate agent directory for testing.
+// On Mac/Windows (development), it uses the embedded binary from download-frpc.
+// On Linux (CI/production), it uses /opt/reagent.
+func getTestAgentDir() string {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		// For local development, use the embedded binary downloaded by `make download-frpc`
+		// Find the src/embedded directory relative to this test file
+		_, filename, _, ok := runtime.Caller(0)
+		if !ok {
+			log.Fatal().Msg("Failed to get current file path")
+		}
+		// filename is .../src/tunnel/tunnel_test.go, we need .../src/embedded
+		srcDir := filepath.Dir(filepath.Dir(filename))
+		embeddedDir := filepath.Join(srcDir, "embedded")
+
+		// Ensure the frpc binary exists with the correct name
+		srcBinary := filepath.Join(embeddedDir, "frpc_binary")
+		dstBinary := filepath.Join(embeddedDir, "frpc")
+		if _, err := os.Stat(srcBinary); err == nil {
+			// Copy the binary to "frpc" if it doesn't exist
+			if _, err := os.Stat(dstBinary); os.IsNotExist(err) {
+				data, err := os.ReadFile(srcBinary)
+				if err != nil {
+					log.Fatal().Err(err).Msg("Failed to read frpc_binary")
+				}
+				if err := os.WriteFile(dstBinary, data, 0755); err != nil {
+					log.Fatal().Err(err).Msg("Failed to write frpc")
+				}
+			}
+		}
+		return embeddedDir
+	}
+	return "/opt/reagent"
+}
+
 func setupTunnel() *FrpTunnelManager {
 	generalConfig := &config.Config{
-		CommandLineArguments: &config.CommandLineArguments{AgentDir: "/opt/reagent"},
+		CommandLineArguments: &config.CommandLineArguments{AgentDir: getTestAgentDir()},
 		ReswarmConfig:        &config.ReswarmConfig{Environment: string(common.PRODUCTION)},
 	}
 
@@ -36,6 +74,10 @@ func setupTunnel() *FrpTunnelManager {
 }
 
 func TestAddTunnel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping tunnel integration test - requires connection to frps server")
+	}
+
 	assert := assert.New(t)
 
 	tunnelManager := setupTunnel()
