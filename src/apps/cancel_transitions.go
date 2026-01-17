@@ -47,3 +47,23 @@ func (sm *StateMachine) cancelUpdate(payload common.TransitionPayload, app *comm
 
 	return sm.setState(app, common.PRESENT)
 }
+
+func (sm *StateMachine) cancelUpdateAndRemove(payload common.TransitionPayload, app *common.App) error {
+	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
+
+	sm.Container.CancelStream(pullID)
+
+	app.UpdateStatus = common.CANCELED
+
+	return sm.removeApp(payload, app)
+}
+
+func (sm *StateMachine) cancelTransfer(payload common.TransitionPayload, app *common.App) error {
+	if payload.Stage != common.DEV {
+		return errors.New("file transfer is only for dev apps")
+	}
+
+	sm.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
+
+	return sm.setState(app, common.REMOVED)
+}

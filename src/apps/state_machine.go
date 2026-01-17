@@ -97,9 +97,9 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PRESENT:     sm.pullApp,
 		},
 		common.TRANSFERING: {
-			common.REMOVED:     sm.removeApp,
-			common.UNINSTALLED: sm.uninstallApp,
-			common.PRESENT:     sm.pullApp,
+			common.REMOVED:     sm.cancelTransfer,
+			common.UNINSTALLED: sm.cancelTransfer,
+			common.PRESENT:     sm.cancelTransfer,
 		},
 		common.PUBLISHED: {
 			common.REMOVED:     sm.removeApp,
@@ -136,13 +136,13 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		},
 		common.UPDATING: {
 			common.PRESENT:     sm.cancelUpdate,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.cancelUpdateAndRemove,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},
 		common.DELETING: {
 			common.PRESENT:     nil,
-			common.REMOVED:     nil,
+			common.REMOVED:     sm.removeApp,
 			common.UNINSTALLED: sm.uninstallApp,
 			common.RUNNING:     nil,
 		},

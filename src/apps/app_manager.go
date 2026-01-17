@@ -301,6 +301,34 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	return nil
 }
 
+// HandleTransferFailure handles a failed file transfer by resetting the app state to REMOVED.
+// This is called when the file transfer encounters an error (e.g., canceled, network failure).
+func (am *AppManager) HandleTransferFailure(containerName string, transferErr error) {
+	log.Warn().Err(transferErr).Str("container", containerName).Msg("File transfer failed, resetting app state")
+
+	app := am.AppStore.GetAppByContainerName(containerName)
+	if app == nil {
+		log.Warn().Str("container", containerName).Msg("Could not find app for failed transfer, cannot reset state")
+		return
+	}
+
+	app.StateLock.Lock()
+	currentState := app.CurrentState
+	app.StateLock.Unlock()
+
+	// Only reset if the app is actually in TRANSFERING state
+	if currentState != common.TRANSFERING {
+		log.Debug().Str("container", containerName).Str("currentState", string(currentState)).Msg("App not in TRANSFERING state, skipping reset")
+		return
+	}
+
+	// Notify the backend that the state should be REMOVED
+	err := am.StateObserver.Notify(app, common.REMOVED)
+	if err != nil {
+		log.Error().Stack().Err(err).Str("container", containerName).Msg("Failed to notify backend of transfer failure")
+	}
+}
+
 func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayload) bool {
 	app.StateLock.Lock()
 	defer app.StateLock.Unlock()

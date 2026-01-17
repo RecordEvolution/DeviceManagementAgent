@@ -182,6 +182,11 @@ func TestStateTransitionMatrix(t *testing.T) {
 		{"DOWNLOADING->REMOVED", common.DOWNLOADING, common.REMOVED, false, "Cancel pull"},
 		{"DOWNLOADING->UNINSTALLED", common.DOWNLOADING, common.UNINSTALLED, false, "Cancel pull"},
 
+		// TRANSFERING state transitions
+		{"TRANSFERING->REMOVED", common.TRANSFERING, common.REMOVED, false, "Cancel file transfer"},
+		{"TRANSFERING->UNINSTALLED", common.TRANSFERING, common.UNINSTALLED, false, "Cancel file transfer"},
+		{"TRANSFERING->PRESENT", common.TRANSFERING, common.PRESENT, false, "Cancel file transfer"},
+
 		// STOPPED state transitions
 		{"STOPPED->REMOVED", common.STOPPED, common.REMOVED, false, "Remove app"},
 		{"STOPPED->RUNNING", common.STOPPED, common.RUNNING, false, "Run app"},
@@ -274,6 +279,8 @@ func TestCancelableStates(t *testing.T) {
 			common.BUILDING,
 			common.PUBLISHING,
 			common.DOWNLOADING,
+			common.TRANSFERING,
+			common.UPDATING,
 		}
 
 		for _, state := range cancelableStates {
@@ -433,4 +440,48 @@ func TestInitTransition(t *testing.T) {
 	//
 	// assert.NoError(t, err)
 	// assert.True(t, mockContainer.HasCall("Pull"))
+}
+
+// =============================================================================
+// TestCancelTransfer - Tests for cancel file transfer functionality
+// =============================================================================
+
+func TestCancelTransfer(t *testing.T) {
+	t.Run("TRANSFERING state has transition to REMOVED", func(t *testing.T) {
+		sm, _, _ := setupTestStateMachine()
+		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.REMOVED)
+		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->REMOVED")
+	})
+
+	t.Run("TRANSFERING state has transition to UNINSTALLED", func(t *testing.T) {
+		sm, _, _ := setupTestStateMachine()
+		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.UNINSTALLED)
+		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->UNINSTALLED")
+	})
+
+	t.Run("TRANSFERING state has transition to PRESENT", func(t *testing.T) {
+		sm, _, _ := setupTestStateMachine()
+		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.PRESENT)
+		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->PRESENT")
+	})
+
+	t.Run("TRANSFERING is a cancelable state", func(t *testing.T) {
+		assert.True(t, common.IsCancelableState(common.TRANSFERING), "Expected TRANSFERING to be cancelable")
+	})
+
+	t.Run("app in TRANSFERING state is cancelable", func(t *testing.T) {
+		app := createTestApp("test-app", common.TRANSFERING, common.DEV)
+		assert.True(t, app.IsCancelable(), "Expected app in TRANSFERING state to be cancelable")
+	})
+
+	t.Run("cancelTransfer returns error for non-DEV stage", func(t *testing.T) {
+		sm, _, _ := setupTestStateMachine()
+		app := createTestApp("test-app", common.TRANSFERING, common.PROD)
+		payload := createTestPayload("test-app", common.REMOVED, common.PROD)
+
+		err := sm.cancelTransfer(payload, app)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "file transfer is only for dev apps")
+	})
 }

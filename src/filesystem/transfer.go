@@ -47,6 +47,14 @@ func (fs *Filesystem) CancelFileTransfer(containerName string) {
 	fileTransfer.Canceled = true
 }
 
+// CleanupFailedTransfer removes a failed transfer from the active transfers map.
+// This should be called when a transfer error occurs to prevent stale state.
+func (fs *Filesystem) CleanupFailedTransfer(containerName string) {
+	fs.activeTransfersLock.Lock()
+	delete(fs.activeTransfers, containerName)
+	fs.activeTransfersLock.Unlock()
+}
+
 func (fs *Filesystem) GetActiveTransfer(containerName string) *ActiveFileTransfer {
 	fs.activeTransfersLock.Lock()
 	activeTransfer := fs.activeTransfers[containerName]

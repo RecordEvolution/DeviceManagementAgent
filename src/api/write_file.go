@@ -67,6 +67,11 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 
 	err = ex.Filesystem.Write(fileChunk)
 	if err != nil {
+		// Clean up the failed transfer and notify the app manager to reset state
+		ex.Filesystem.CleanupFailedTransfer(containerName)
+		safe.Go(func() {
+			ex.AppManager.HandleTransferFailure(containerName, err)
+		})
 		return nil, err
 	}
 

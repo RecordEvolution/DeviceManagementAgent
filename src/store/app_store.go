@@ -8,6 +8,7 @@ import (
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/semaphore"
@@ -255,4 +256,18 @@ func (am *AppStore) DeleteAppState(appKey uint64, stage common.Stage) error {
 
 func (am *AppStore) DeleteRequestedState(appKey uint64, stage common.Stage) error {
 	return am.database.DeleteRequestedState(appKey, stage)
+}
+
+// GetAppByContainerName finds an app by its container name.
+// Container names follow the format: {stage}_{appKey}_{appName}
+// This is primarily used for DEV apps during file transfers.
+func (am *AppStore) GetAppByContainerName(containerName string) *common.App {
+	for _, app := range am.apps {
+		// Build expected container name for this app
+		expectedContainerName := fmt.Sprintf("%s_%d_%s", string(app.Stage), app.AppKey, app.AppName)
+		if strings.EqualFold(expectedContainerName, containerName) {
+			return app
+		}
+	}
+	return nil
 }

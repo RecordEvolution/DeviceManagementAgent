@@ -12,7 +12,7 @@ type Environment string
 
 func IsCancelableState(appState AppState) bool {
 	switch appState {
-	case BUILDING, PUBLISHING, DOWNLOADING:
+	case BUILDING, PUBLISHING, DOWNLOADING, TRANSFERING, UPDATING:
 		return true
 	}
 	return false
