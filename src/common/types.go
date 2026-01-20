@@ -92,11 +92,12 @@ type PortForwardRule struct {
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
-	RequestedState       AppState
-	CurrentState         AppState
-	Stage                Stage
-	RequestorAccountKey  uint64
-	DeviceToAppKey       uint64
+	RequestedState         AppState
+	CurrentState           AppState
+	Stage                  Stage
+	RequestorAccountKey    uint64
+	DeviceOwnerAccountKey  uint64
+	DeviceToAppKey         uint64
 	AppKey               uint64
 	CallerAuthID         int
 	AppName              string
@@ -147,6 +148,7 @@ type DeviceSyncResponse struct {
 	DeviceKey              int                    `json:"device_key"`
 	SwarmKey               int                    `json:"swarm_key"`
 	AccountKey             int                    `json:"account_key"`
+	DeviceOwnerAccountKey  int                    `json:"device_owner_account_key"`
 	SerialNumber           string                 `json:"serial_number"`
 	AppName                string                 `json:"app_name"`
 	Name                   string                 `json:"name"` // device name

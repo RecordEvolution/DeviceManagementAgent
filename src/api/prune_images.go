@@ -40,7 +40,7 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 		}
 
 		if all {
-			output, err := ex.Container.PruneAllImages()
+			output, err := ex.Container.PruneSystem()
 			if err != nil {
 				return nil, err
 			}

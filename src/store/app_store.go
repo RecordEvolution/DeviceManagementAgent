@@ -234,6 +234,7 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 			config,
 		)
 
+		payload.DeviceOwnerAccountKey = uint64(deviceSyncState.DeviceOwnerAccountKey)
 		payload.RequestUpdate = deviceSyncState.RequestUpdate
 		payload.PresentVersion = deviceSyncState.PresentVersion
 		payload.DockerCompose = deviceSyncState.DockerCompose

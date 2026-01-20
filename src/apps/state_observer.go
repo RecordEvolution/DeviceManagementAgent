@@ -435,16 +435,32 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			app.StateLock.Lock()
 			currentAppState := app.CurrentState
 			var correctedAppState common.AppState
-			// no images were found (and no container) for this guy, so this guy is REMOVED
-			if !foundImage {
-				if currentAppState == common.UNINSTALLED {
-					correctedAppState = common.UNINSTALLED
+
+			// Check for stuck transient states first
+			switch currentAppState {
+			case common.DOWNLOADING,
+				common.TRANSFERING,
+				common.PUBLISHING,
+				common.BUILDING,
+				common.UPDATING:
+				// Transient states: if image exists → PRESENT, else REMOVED
+				if foundImage {
+					correctedAppState = common.PRESENT
 				} else {
 					correctedAppState = common.REMOVED
 				}
-			} else {
-				// images were found for this guy, but no container, this means --> PRESENT
-				correctedAppState = common.PRESENT
+			default:
+				// no images were found (and no container) for this guy, so this guy is REMOVED
+				if !foundImage {
+					if currentAppState == common.UNINSTALLED {
+						correctedAppState = common.UNINSTALLED
+					} else {
+						correctedAppState = common.REMOVED
+					}
+				} else {
+					// images were found for this guy, but no container, this means --> PRESENT
+					correctedAppState = common.PRESENT
+				}
 			}
 
 			app.StateLock.Unlock()

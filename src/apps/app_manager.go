@@ -219,7 +219,13 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	}
 
 	// before we transition, should request the token
-	token, err := am.AppStore.GetRegistryToken(payload.RequestorAccountKey)
+	// For PROD apps, use the device owner's account key to ensure proper permissions
+	// This avoids issues when the original requestor's permissions have changed
+	tokenAccountKey := payload.RequestorAccountKey
+	if payload.Stage == common.PROD && payload.DeviceOwnerAccountKey != 0 {
+		tokenAccountKey = payload.DeviceOwnerAccountKey
+	}
+	token, err := am.AppStore.GetRegistryToken(tokenAccountKey)
 	if err != nil {
 		app.UnlockTransition()
 		log.Error().Stack().Err(err).Msg("Failed to get registry token")
