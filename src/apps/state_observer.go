@@ -298,13 +298,11 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 			correctedAppState = common.PRESENT
 		}
 
-		if currentAppState != correctedAppState {
-			if updateRemote {
-				// notify the remote database of any changed states due to correction
-				err = so.Notify(app, correctedAppState)
-			} else {
-				err = so.NotifyLocal(app, correctedAppState)
-			}
+		if updateRemote {
+			// Always sync with remote when online to ensure backend is up-to-date
+			err = so.Notify(app, correctedAppState)
+		} else if currentAppState != correctedAppState {
+			err = so.NotifyLocal(app, correctedAppState)
 		}
 
 		if err != nil {
@@ -464,17 +462,22 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 			}
 
 			app.StateLock.Unlock()
-			if currentAppState != correctedAppState {
-				if updateRemote {
-					// notify the remote database of any changed states due to correction
-					err = so.Notify(app, correctedAppState)
-				} else {
-					err = so.NotifyLocal(app, correctedAppState)
-				}
+			if updateRemote {
+				// Always sync with remote when online to ensure backend is up-to-date.
+				// This handles the case where the offline phase already corrected a transient
+				// state (e.g. TRANSFERING → REMOVED) but the backend was never notified.
+				err = so.Notify(app, correctedAppState)
+			} else if currentAppState != correctedAppState {
+				err = so.NotifyLocal(app, correctedAppState)
 			}
 
 			if err != nil {
 				log.Error().Err(err).Msg("failed to notify app state")
+			}
+
+			// Throttle remote updates to avoid overwhelming the backend
+			if updateRemote && idx < len(rStates)-1 {
+				time.Sleep(100 * time.Millisecond)
 			}
 
 			// should be all good iterate over next app
