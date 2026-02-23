@@ -36,6 +36,7 @@ new_docker_compose = excluded.new_docker_compose,
 new_release_key = excluded.new_release_key,
 manually_requested_state=excluded.manually_requested_state,
 current_state=excluded.current_state,
+requestor_account_key=excluded.requestor_account_key,
 request_update=excluded.request_update`
 
 const QueryDeleteAppStateByAppKeyAndStage = `DELETE FROM AppStates WHERE app_key = ? AND stage = ?`
