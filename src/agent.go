@@ -181,14 +181,14 @@ func (agent *Agent) updateRemoteDevice() error {
 	config := agent.Config
 	ctx := context.Background()
 
-	os, arch, variant := release.GetSystemInfo()
+	sysInfo := release.GetSystemInfo()
 	payload := common.Dict{
 		"swarm_key":     config.ReswarmConfig.SwarmKey,
 		"device_key":    config.ReswarmConfig.DeviceKey,
-		"architecture":  arch + variant,
-		"os":            os,
-		"arch":          arch,
-		"variant":       variant,
+		"architecture":  sysInfo.Arch + sysInfo.Variant,
+		"os":            sysInfo.DetailedOS,
+		"arch":          sysInfo.Arch,
+		"variant":       sysInfo.Variant,
 		"agent_version": release.GetVersion(),
 	}
 

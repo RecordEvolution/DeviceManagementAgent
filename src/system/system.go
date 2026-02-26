@@ -155,32 +155,6 @@ func GetOSReleaseLatest() (map[string]interface{}, error) {
 	return dict, nil
 }
 
-func GetOSVersion() (string, error) {
-	switch runtime.GOOS {
-	case "linux":
-		osRelease, err := GetOSReleaseCurrent()
-		if err == nil {
-			prettyName := osRelease["PRETTY_NAME"]
-			if prettyName != "" {
-				return prettyName, nil
-			}
-
-			name := osRelease["NAME"]
-			if name != "" {
-				return name, nil
-			}
-		}
-
-		return "Linux/Unix-based", nil
-	case "windows":
-		return "Windows", nil
-	case "darwin":
-		return "MacOS", nil
-	}
-
-	return "", nil
-}
-
 // getOSUpdateTags read and extracts info tags about latest available update
 func getOSUpdateTags() (string, string, error) {
 

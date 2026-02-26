@@ -282,8 +282,8 @@ func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, co
 	devContainerName := BuildContainerName(DEV, appKey, appName)
 	prodContainerName := BuildContainerName(PROD, appKey, appName)
 
-	_, arch, variant := release.GetSystemInfo()
-	imageArchName := arch + variant
+	sysInfo := release.GetSystemInfo()
+	imageArchName := sysInfo.Arch + sysInfo.Variant
 
 	devImageName := BuildImageName(DEV, imageArchName, appKey, appName)
 	devRegImageName := BuildRegistryImageName(config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, devImageName)

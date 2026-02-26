@@ -29,7 +29,7 @@ help: ## This help.
 
 .DEFAULT_GOAL := help
 
-test: ## Run unit tests (packages without embedded binary dependency)
+test: download-frpc ## Run unit tests (packages without embedded binary dependency)
 	cd src && go test -short reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe reagent/apps reagent/api reagent/tunnel
 
 test-all: download-frpc ## Run all unit tests (requires frpc binary)

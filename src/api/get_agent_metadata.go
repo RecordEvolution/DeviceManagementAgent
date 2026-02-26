@@ -8,7 +8,6 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/release"
-	"reagent/system"
 )
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -22,22 +21,18 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 	}
 
 	currentAgentVersion := release.GetVersion()
-	OSVersion, err := system.GetOSVersion()
-	if err != nil {
-		return nil, err
-	}
-
 	serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
 	reswarmModeEnabled := true //filesystem.PathExists("/opt/reagent/reswarm-mode")
-	os, arch, variant := release.GetSystemInfo()
+	sysInfo := release.GetSystemInfo()
 	dict := common.Dict{
-		"os":           os,
-		"arch":         arch,
-		"variant":      variant,
+		"os":           sysInfo.DetailedOS,
+		"arch":         sysInfo.Arch,
+		"variant":      sysInfo.Variant,
 		"version":      currentAgentVersion,
 		"serialNumber": serialNumber,
 		"canUpdate":    reswarmModeEnabled,
+		"OSVersion":    sysInfo.DetailedOS,
 	}
 
 	// frpc is now embedded in the binary
@@ -51,10 +46,6 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		dict["latestTunnelVersion"] = frpVersion
 		dict["latestAgentVersion"] = lastAgentVersion
 		dict["hasLatest"] = agentIsLatest && frpIsLatest
-	}
-
-	if OSVersion != "" {
-		dict["OSVersion"] = OSVersion
 	}
 
 	return &messenger.InvokeResult{

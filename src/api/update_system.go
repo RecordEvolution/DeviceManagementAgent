@@ -27,6 +27,11 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
 	// current release information
 	osReleaseCurrent, err := system.GetOSReleaseCurrent()
 	if err != nil {
+		if os.IsNotExist(err) {
+			return &messenger.InvokeResult{
+				Arguments: []interface{}{},
+			}, nil
+		}
 		return nil, err
 	}
 	osReleaseVersionSplit := strings.Split(osReleaseCurrent["VERSION"], "-")
