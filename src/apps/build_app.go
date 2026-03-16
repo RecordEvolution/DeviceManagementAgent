@@ -217,7 +217,13 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	buildOutput, buildCmd, err := compose.Build(dockerComposePath)
+	buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	compose.RegisterBuildCancel(buildID, cancel)
+	defer compose.UnregisterBuildCancel(buildID)
+
+	buildOutput, buildCmd, err := compose.Build(ctx, dockerComposePath)
 	if err != nil {
 		return err
 	}

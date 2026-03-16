@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reagent/common"
 	"reagent/config"
@@ -18,11 +17,6 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
 	payload, err := responseToTransitionPayload(ex.Config, response)
 	if err != nil {
 		return nil, err
-	}
-
-	// TODO: remove check and implement proper stream canceling for Docker Compose
-	if payload.CancelTransition && payload.DockerCompose != nil {
-		return nil, errors.New("canceling docker compose apps not yet implemented")
 	}
 
 	err = ex.AppManager.CreateOrUpdateApp(payload)

@@ -24,7 +24,7 @@ type Compose struct {
 	Supported             bool
 	config                *config.Config
 	logStreamMap          map[string]*ComposeLog
-	composeProcessesMap   map[string]*exec.Cmd
+	composeProcessesMap   map[string]context.CancelFunc
 	composeProcessesMutex sync.Mutex
 	logStreamMapMutex     sync.Mutex
 }
@@ -84,7 +84,7 @@ func NewCompose(config *config.Config) Compose {
 		Supported:             supported,
 		config:                config,
 		logStreamMap:          make(map[string]*ComposeLog),
-		composeProcessesMap:   make(map[string]*exec.Cmd),
+		composeProcessesMap:   make(map[string]context.CancelFunc),
 		composeProcessesMutex: sync.Mutex{},
 		logStreamMapMutex:     sync.Mutex{},
 	}
@@ -113,11 +113,15 @@ func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, er
 }
 
 func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, *exec.Cmd, error) {
+	return c.composeCommandContext(context.Background(), dockerComposePath, providedArgs...)
+}
+
+func (c *Compose) composeCommandContext(ctx context.Context, dockerComposePath string, providedArgs ...string) (chan string, *exec.Cmd, error) {
 	finalArgs := []string{}
 	finalArgs = append(finalArgs, "compose", "-f", dockerComposePath)
 	finalArgs = append(finalArgs, providedArgs...)
 
-	cmd := exec.Command("docker", finalArgs...)
+	cmd := exec.CommandContext(ctx, "docker", finalArgs...)
 
 	outputChan := make(chan string)
 
@@ -127,6 +131,7 @@ func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...strin
 	}
 
 	cmd.Stderr = cmd.Stdout
+	setPdeathsig(cmd)
 
 	err = cmd.Start()
 	if err != nil {
@@ -146,8 +151,31 @@ func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...strin
 	return outputChan, cmd, nil
 }
 
-func (c *Compose) Build(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "build")
+func (c *Compose) Build(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommandContext(ctx, dockerComposePath, "build")
+}
+
+func (c *Compose) RegisterBuildCancel(buildID string, cancel context.CancelFunc) {
+	c.composeProcessesMutex.Lock()
+	c.composeProcessesMap[buildID] = cancel
+	c.composeProcessesMutex.Unlock()
+}
+
+func (c *Compose) UnregisterBuildCancel(buildID string) {
+	c.composeProcessesMutex.Lock()
+	delete(c.composeProcessesMap, buildID)
+	c.composeProcessesMutex.Unlock()
+}
+
+func (c *Compose) CancelBuild(buildID string) error {
+	c.composeProcessesMutex.Lock()
+	cancel := c.composeProcessesMap[buildID]
+	c.composeProcessesMutex.Unlock()
+	if cancel == nil {
+		return errors.New("no active compose build process found")
+	}
+	cancel()
+	return nil
 }
 
 func (c *Compose) Push(dockerComposePath string) (chan string, *exec.Cmd, error) {

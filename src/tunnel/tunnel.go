@@ -261,6 +261,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 	ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
 	frpCommand := exec.CommandContext(ctx, frpcPath, "-c", frpTm.configBuilder.ConfigPath)
 	frpCommand.Dir = filepath.Dir(frpcPath)
+	setPdeathsig(frpCommand)
 
 	frpTm.clientProcess = frpCommand
 

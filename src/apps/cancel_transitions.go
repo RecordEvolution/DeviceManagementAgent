@@ -12,6 +12,12 @@ func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *commo
 
 	buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
 
+	if payload.DockerCompose != nil {
+		compose := sm.Container.Compose()
+		compose.CancelBuild(buildID) // ignore error — build may have already finished
+		return sm.setState(app, common.REMOVED)
+	}
+
 	sm.Container.CancelStream(buildID)
 
 	return sm.setState(app, common.REMOVED)
