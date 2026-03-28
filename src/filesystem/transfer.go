@@ -23,6 +23,7 @@ type ActiveFileTransfer struct {
 	Current  uint64
 	Total    uint64
 	Canceled bool
+	File     *os.File
 }
 
 type FileChunk struct {
@@ -39,18 +40,28 @@ func New() Filesystem {
 }
 
 func (fs *Filesystem) CancelFileTransfer(containerName string) {
-	fileTransfer := fs.GetActiveTransfer(containerName)
+	fs.activeTransfersLock.Lock()
+	fileTransfer := fs.activeTransfers[containerName]
+	fs.activeTransfersLock.Unlock()
+
 	if fileTransfer == nil {
 		return
 	}
 
 	fileTransfer.Canceled = true
+	if fileTransfer.File != nil {
+		fileTransfer.File.Close()
+	}
 }
 
 // CleanupFailedTransfer removes a failed transfer from the active transfers map.
 // This should be called when a transfer error occurs to prevent stale state.
 func (fs *Filesystem) CleanupFailedTransfer(containerName string) {
 	fs.activeTransfersLock.Lock()
+	transfer := fs.activeTransfers[containerName]
+	if transfer != nil && transfer.File != nil {
+		transfer.File.Close()
+	}
 	delete(fs.activeTransfers, containerName)
 	fs.activeTransfersLock.Unlock()
 }
@@ -67,47 +78,68 @@ func (fs *Filesystem) GetActiveTransfer(containerName string) *ActiveFileTransfe
 //
 // Matches implementation in file_transfer.ts (IronFlock Backend)
 func (fs *Filesystem) Write(chunk FileChunk) error {
+	filePath := chunk.FilePath + "/" + chunk.FileName
+
+	if chunk.Data == "BEGIN" {
+		fs.activeTransfersLock.Lock()
+
+		// Close any previous transfer file for the same container
+		if prev := fs.activeTransfers[chunk.ContainerName]; prev != nil && prev.File != nil {
+			prev.File.Close()
+		}
+
+		// O_TRUNC ensures old archive data is wiped atomically on open
+		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			delete(fs.activeTransfers, chunk.ContainerName)
+			fs.activeTransfersLock.Unlock()
+			return err
+		}
+
+		fs.activeTransfers[chunk.ContainerName] = &ActiveFileTransfer{
+			ID:    chunk.ID,
+			Total: chunk.Total,
+			File:  f,
+		}
+		fs.activeTransfersLock.Unlock()
+		return nil
+	}
 
 	fs.activeTransfersLock.Lock()
 	activeTransfer := fs.activeTransfers[chunk.ContainerName]
 	fs.activeTransfersLock.Unlock()
 
-	f, err := os.OpenFile(chunk.FilePath+"/"+chunk.FileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
+	if activeTransfer == nil {
+		return errors.New("We received a chunk without an active transfer")
 	}
 
 	if chunk.Data == "END" {
+		var err error
+		if activeTransfer.File != nil {
+			err = activeTransfer.File.Sync()
+			if closeErr := activeTransfer.File.Close(); err == nil {
+				err = closeErr
+			}
+		}
+
 		fs.activeTransfersLock.Lock()
 		delete(fs.activeTransfers, chunk.ContainerName)
 		fs.activeTransfersLock.Unlock()
 
-		return f.Close()
-	}
-
-	if chunk.Data == "BEGIN" {
-		fs.activeTransfersLock.Lock()
-		fs.activeTransfers[chunk.ContainerName] = &ActiveFileTransfer{
-			ID:    chunk.ID,
-			Total: chunk.Total,
-		}
-		fs.activeTransfersLock.Unlock()
-
-		os.Remove(chunk.FilePath + "/" + chunk.FileName)
-		return nil
+		return err
 	}
 
 	if activeTransfer.Canceled {
 		return errors.New("canceled")
 	}
 
-	if activeTransfer == nil {
-		return errors.New("We received a chunk without an active transfer")
-	}
-
-	if activeTransfer != nil && activeTransfer.ID != chunk.ID {
+	if activeTransfer.ID != chunk.ID {
 		log.Debug().Msg("Received a chunk from transfer that was reset")
 		return nil
+	}
+
+	if activeTransfer.File == nil {
+		return errors.New("active transfer has no open file handle")
 	}
 
 	data, err := hex.DecodeString(chunk.Data)
@@ -115,7 +147,7 @@ func (fs *Filesystem) Write(chunk FileChunk) error {
 		return err
 	}
 
-	n, err := f.Write(data)
+	n, err := activeTransfer.File.Write(data)
 	if err != nil {
 		return err
 	}
