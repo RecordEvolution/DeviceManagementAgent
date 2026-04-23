@@ -50,6 +50,18 @@ const (
 
 var ErrNotConnected = errors.New("not connected")
 
+// recoverClientClosed converts a "send on closed channel" panic from the
+// underlying nexus client into ErrNotConnected. The nexus client's internal
+// action channel is closed by Client.Close(), so any in-flight call that
+// races with Close()/reconnect() would otherwise panic. Callers already
+// treat ErrNotConnected as a recoverable disconnect.
+func recoverClientClosed(err *error) {
+	if r := recover(); r != nil {
+		log.Warn().Msgf("Recovered from panic in WAMP client call (likely closed during reconnect): %v", r)
+		*err = ErrNotConnected
+	}
+}
+
 func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
 	return wampLogWrapper{logger: zeroLogger}
 }
@@ -364,7 +376,7 @@ func (wampSession *WampSession) startHeartbeat() {
 	log.Debug().Msg("Messenger: Started heartbeat")
 }
 
-func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error {
+func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) (err error) {
 	wampSession.mu.Lock()
 	client := wampSession.client
 	wampSession.mu.Unlock()
@@ -373,7 +385,9 @@ func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, 
 		return ErrNotConnected
 	}
 
-	err := client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
+	defer recoverClientClosed(&err)
+
+	err = client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
 	if err != nil {
 		log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
 	}
@@ -503,7 +517,7 @@ func (wampSession *WampSession) Client() NexusClient {
 	return wampSession.client
 }
 
-func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
+func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) (err error) {
 	wampSession.mu.Lock()
 	client := wampSession.client
 	wampSession.mu.Unlock()
@@ -511,6 +525,8 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 	if client == nil {
 		return ErrNotConnected
 	}
+
+	defer recoverClientClosed(&err)
 
 	handler := func(event *wamp.Event) {
 		cbEventMap := Result{
@@ -563,7 +579,7 @@ func (wampSession *WampSession) Call(
 	args []interface{},
 	kwargs common.Dict,
 	options common.Dict,
-	progCb func(Result)) (Result, error) {
+	progCb func(Result)) (result Result, err error) {
 
 	wampSession.mu.Lock()
 	client := wampSession.client
@@ -572,6 +588,8 @@ func (wampSession *WampSession) Call(
 	if client == nil {
 		return Result{}, ErrNotConnected
 	}
+
+	defer recoverClientClosed(&err)
 
 	var handler func(result *wamp.Result)
 	if progCb != nil {
@@ -586,19 +604,19 @@ func (wampSession *WampSession) Call(
 		}
 	}
 
-	result, err := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
-	if err != nil {
-		return Result{}, err
+	callResult, callErr := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+	if callErr != nil {
+		return Result{}, callErr
 	}
 
-	callResultMap := Result{
-		Request:     uint64(result.Request),
-		Details:     common.Dict(result.Details),
-		Arguments:   []interface{}(result.Arguments),
-		ArgumentsKw: common.Dict(result.ArgumentsKw),
+	result = Result{
+		Request:     uint64(callResult.Request),
+		Details:     common.Dict(callResult.Details),
+		Arguments:   []interface{}(callResult.Arguments),
+		ArgumentsKw: common.Dict(callResult.ArgumentsKw),
 	}
 
-	return callResultMap, nil
+	return result, nil
 }
 
 func (wampSession *WampSession) GetSessionID() uint64 {
@@ -613,7 +631,8 @@ func (wampSession *WampSession) GetSessionID() uint64 {
 	return uint64(client.ID())
 }
 
-func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error {
+func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) (err error) {
+	defer recoverClientClosed(&err)
 
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Result{
@@ -650,7 +669,7 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 		return ErrNotConnected
 	}
 
-	err := client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
+	err = client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
 	if err != nil {
 		return err
 	}
@@ -658,7 +677,7 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 	return nil
 }
 
-func (wampSession *WampSession) Unregister(topic topics.Topic) error {
+func (wampSession *WampSession) Unregister(topic topics.Topic) (err error) {
 	wampSession.mu.Lock()
 	client := wampSession.client
 	wampSession.mu.Unlock()
@@ -666,11 +685,13 @@ func (wampSession *WampSession) Unregister(topic topics.Topic) error {
 	if client == nil {
 		return ErrNotConnected
 	}
+
+	defer recoverClientClosed(&err)
 
 	return client.Unregister(string(topic))
 }
 
-func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
+func (wampSession *WampSession) Unsubscribe(topic topics.Topic) (err error) {
 	wampSession.mu.Lock()
 	client := wampSession.client
 	wampSession.mu.Unlock()
@@ -678,6 +699,8 @@ func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error {
 	if client == nil {
 		return ErrNotConnected
 	}
+
+	defer recoverClientClosed(&err)
 
 	return client.Unsubscribe(string(topic))
 }

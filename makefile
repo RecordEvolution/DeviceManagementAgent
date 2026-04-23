@@ -119,3 +119,44 @@ publish-version:
 publish-latestVersions:
 	gsutil cp "availableVersions.json" gs://re-agent
 	gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/availableVersions.json
+
+# -----------------------------------------------------------------------------
+# Official agent docker image (runtime image with prebuilt binary and default
+# device config). See docker/Dockerfile.
+#
+# The image does NOT build the agent itself - it consumes the prebuilt
+# binaries produced by `make build-all-docker` (or `make build-all`) from
+# the build/ directory.
+# -----------------------------------------------------------------------------
+AGENT_IMAGE_NAME:=europe-docker.pkg.dev/record-1283/eu.gcr.io/ironflock-agent
+AGENT_IMAGE_VERSION:=v$(shell cat src/release/version.txt)
+
+build-docker-image-amd64: ## Build agent runtime image for linux/amd64 (reuses build/reagent-linux-amd64)
+	@test -f build/reagent-linux-amd64 || { echo "ERROR: build/reagent-linux-amd64 missing. Run 'make build-all-docker' first."; exit 1; }
+	docker build --platform linux/amd64 \
+	    --build-arg TARGETARCH=amd64 \
+	    -f docker/Dockerfile \
+	    -t $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-amd64 \
+	    -t $(AGENT_IMAGE_NAME):latest-amd64 .
+
+build-docker-image-arm64: ## Build agent runtime image for linux/arm64 (reuses build/reagent-linux-arm64)
+	@test -f build/reagent-linux-arm64 || { echo "ERROR: build/reagent-linux-arm64 missing. Run 'make build-all-docker' first."; exit 1; }
+	docker build --platform linux/arm64 \
+	    --build-arg TARGETARCH=arm64 \
+	    -f docker/Dockerfile \
+	    -t $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-arm64 \
+	    -t $(AGENT_IMAGE_NAME):latest-arm64 .
+
+build-docker-image: build-docker-image-amd64 ## Build the official agent runtime image (linux/amd64)
+
+push-docker-image: build-docker-image-amd64 build-docker-image-arm64 ## Push multi-arch agent runtime image manifest
+	docker push $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-amd64
+	docker push $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-arm64
+	docker push $(AGENT_IMAGE_NAME):latest-amd64
+	docker push $(AGENT_IMAGE_NAME):latest-arm64
+	docker buildx imagetools create -t $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION) \
+	    $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-amd64 \
+	    $(AGENT_IMAGE_NAME):$(AGENT_IMAGE_VERSION)-arm64
+	docker buildx imagetools create -t $(AGENT_IMAGE_NAME):latest \
+	    $(AGENT_IMAGE_NAME):latest-amd64 \
+	    $(AGENT_IMAGE_NAME):latest-arm64
