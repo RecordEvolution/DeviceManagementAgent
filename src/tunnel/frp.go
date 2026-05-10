@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -118,10 +119,20 @@ func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localP
 func initialize(cfg *config.Config) TunnelConfigBuilder {
 	frpcConfigPath := filepath.Join(cfg.CommandLineArguments.AgentDir, "frpc.yaml")
 
-	// Extract server address from device_endpoint_url
+	// Extract server address. Order of precedence:
+	//   1. ReswarmConfig.ApplianceDomain (set on appliance installs from
+	//      APPLIANCE_DOMAIN — the operator's tunnel domain, already correct).
+	//   2. device_endpoint_url with the leading subdomain replaced by "app"
+	//      (cloud case: api.ironflock.com -> app.ironflock.com). This rewrite
+	//      is skipped when the hostname is an IP literal, since splitting on
+	//      "." would mangle e.g. 192.168.0.21 into "app.168.0.21".
+	//   3. Environment-based default.
 	serverAddr := PROD_SERVER_ADDR // Default fallback
 
-	if cfg.ReswarmConfig.DeviceEndpointURL != "" {
+	if cfg.ReswarmConfig.ApplianceDomain != "" {
+		serverAddr = cfg.ReswarmConfig.ApplianceDomain
+		log.Debug().Msgf("Using tunnel server address from appliance_domain: %s", serverAddr)
+	} else if cfg.ReswarmConfig.DeviceEndpointURL != "" {
 		parsedURL, err := url.Parse(cfg.ReswarmConfig.DeviceEndpointURL)
 		if err != nil {
 			log.Warn().Err(err).Msgf("Failed to parse device_endpoint_url, using default: %s", serverAddr)
@@ -129,10 +140,13 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 			// Extract hostname (without port)
 			hostname := parsedURL.Hostname()
 			if hostname != "" {
-				// For localhost, use as-is; otherwise replace subdomain with "app"
-				if hostname == "localhost" || hostname == "127.0.0.1" {
+				switch {
+				case hostname == "localhost" || hostname == "127.0.0.1":
 					serverAddr = hostname
-				} else {
+				case net.ParseIP(hostname) != nil:
+					// IP literal — no subdomain to replace; use as-is.
+					serverAddr = hostname
+				default:
 					// Replace subdomain with "app"
 					// e.g., "api.ironflock.com" -> "app.ironflock.com"
 					parts := strings.Split(hostname, ".")

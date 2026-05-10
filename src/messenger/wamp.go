@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"reagent/config"
 	"reagent/container"
 	"reagent/messenger/topics"
-	"reagent/safe"
 
 	"github.com/gammazero/nexus/v3/client"
 	"github.com/gammazero/nexus/v3/transport"
@@ -25,19 +25,30 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// reconnectBackoff is the delay between reconnect attempts after a transport
+// failure. Kept short so the agent comes back online quickly; the loop never
+// gives up while the session context is alive.
+const reconnectBackoff = time.Second
+
+// setupTestamentTimeout bounds the testament-installation Call so a stuck
+// router can never wedge the reconnect path.
+const setupTestamentTimeout = 10 * time.Second
+
+// cancelStreamsTimeout bounds the synchronous container-cleanup step that
+// runs before a reconnect attempt. If Docker is stuck, we still reconnect.
+const cancelStreamsTimeout = 5 * time.Second
+
 type WampSession struct {
 	client         NexusClient
 	container      container.Container
 	agentConfig    *config.Config
 	socketConfig   *SocketConfig
 	clientProvider ClientProvider // nil means use default client.ConnectNet
-	mu             sync.Mutex
-	onConnect      func(reconnect bool) // Callback invoked after successful connection/reconnection
-	heartbeatDone  chan struct{}        // Closed by heartbeat when connection failure is detected
-}
+	onConnect      func(reconnect bool)
 
-type wampLogWrapper struct {
-	logger *zerolog.Logger
+	mu     sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 type DeviceStatus string
@@ -50,80 +61,33 @@ const (
 
 var ErrNotConnected = errors.New("not connected")
 
-// recoverClientClosed converts a "send on closed channel" panic from the
-// underlying nexus client into ErrNotConnected. The nexus client's internal
-// action channel is closed by Client.Close(), so any in-flight call that
-// races with Close()/reconnect() would otherwise panic. Callers already
-// treat ErrNotConnected as a recoverable disconnect.
-func recoverClientClosed(err *error) {
-	if r := recover(); r != nil {
-		log.Warn().Msgf("Recovered from panic in WAMP client call (likely closed during reconnect): %v", r)
-		*err = ErrNotConnected
-	}
+// wampLogger adapts a zerolog.Logger to the nexus stdlog.StdLog interface
+// so the nexus client/router can write through our structured logger.
+type wampLogger struct {
+	logger *zerolog.Logger
 }
 
-func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper {
-	return wampLogWrapper{logger: zeroLogger}
-}
-
-func (wl wampLogWrapper) Print(v ...interface{}) {
-	// Check for connection errors that indicate the connection is broken
-	for _, val := range v {
-		if str, ok := val.(string); ok {
-			if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") {
-				log.Warn().Msgf("WAMP connection error detected: %v", str)
-			}
-		}
-	}
-	wl.logger.Print(v...)
-}
-
-func (wl wampLogWrapper) Println(v ...interface{}) {
-	// Check for connection errors
-	for _, val := range v {
-		if str, ok := val.(string); ok {
-			if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") {
-				log.Warn().Msgf("WAMP connection error detected: %v", str)
-			}
-		}
-	}
-	wl.logger.Print(v, "\n")
-}
-
-func (wl wampLogWrapper) Printf(format string, v ...interface{}) {
-	// Check for connection errors in formatted strings
-	if strings.Contains(format, "broken pipe") || strings.Contains(format, "connection reset") || strings.Contains(format, "write tcp") {
-		log.Warn().Msgf("WAMP connection error detected: "+format, v...)
-	}
-	wl.logger.Printf(format, v...)
-}
-
-func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper {
-	wrapper := newWampLogger(&zeroLogger)
-	return wrapper
-}
+func (l wampLogger) Print(v ...interface{})                 { l.logger.Print(v...) }
+func (l wampLogger) Println(v ...interface{})               { l.logger.Print(v...) }
+func (l wampLogger) Printf(format string, v ...interface{}) { l.logger.Printf(format, v...) }
 
 type SocketConfig struct {
 	PingPongTimeout   time.Duration
 	ResponseTimeout   time.Duration
 	ConnectionTimeout time.Duration
-	HeartbeatInterval time.Duration // Default: 30 seconds if zero
 	SetupTestament    bool
 }
 
-// DefaultHeartbeatInterval is the default interval between heartbeat checks
-const DefaultHeartbeatInterval = 30 * time.Second
-
 // ClientProvider is a function that attempts to connect and returns a NexusClient.
-// It's used to allow mocking the connection in tests.
+// Used to inject a fake client in tests.
 type ClientProvider func(ctx context.Context, url string, cfg client.Config) (NexusClient, error)
 
 var legacyEndpointRegex = regexp.MustCompile(`devices.*\.(com|io):8080`)
 
-func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
-	reswarmConfig := config.ReswarmConfig
+func createConnectConfig(cfg *config.Config, socketConfig *SocketConfig) (*client.Config, error) {
+	reswarmConfig := cfg.ReswarmConfig
 
-	cfg := client.Config{
+	clientCfg := client.Config{
 		Realm: "realm1",
 		HelloDetails: wamp.Dict{
 			"authid": fmt.Sprintf("%d-%d", reswarmConfig.SwarmKey, reswarmConfig.DeviceKey),
@@ -131,402 +95,343 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
 		AuthHandlers: map[string]client.AuthFunc{
 			"wampcra": clientAuthFunc(reswarmConfig.Secret),
 		},
-		Debug:  config.CommandLineArguments.DebugMessaging,
-		Logger: wrapZeroLogger(log.Logger),
+		Debug:  cfg.CommandLineArguments.DebugMessaging,
+		Logger: wampLogger{logger: &log.Logger},
 	}
 
-	isLegacyEndpoint := legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL))
-	if isLegacyEndpoint {
+	if legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL)) {
 		tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
 		if err != nil {
 			return nil, err
 		}
-
-		cfg.TlsCfg = &tls.Config{
+		clientCfg.TlsCfg = &tls.Config{
 			Certificates:       []tls.Certificate{tlscert},
 			InsecureSkipVerify: true,
 		}
 	}
 
 	if socketConfig.PingPongTimeout != 0 {
-		cfg.WsCfg = transport.WebsocketConfig{
+		clientCfg.WsCfg = transport.WebsocketConfig{
 			KeepAlive: socketConfig.PingPongTimeout,
 		}
 	}
 
 	if socketConfig.ResponseTimeout != 0 {
-		cfg.ResponseTimeout = socketConfig.ResponseTimeout
+		clientCfg.ResponseTimeout = socketConfig.ResponseTimeout
 	}
 
-	return &cfg, nil
+	return &clientCfg, nil
 }
 
-// SetOnConnect sets the callback that will be invoked after each successful connection or reconnection.
-// The callback receives a boolean indicating whether this is a reconnection (true) or initial connection (false).
-func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) {
-	wampSession.mu.Lock()
-	defer wampSession.mu.Unlock()
-	wampSession.onConnect = cb
+// SetOnConnect sets the callback invoked after each successful connection or
+// reconnection. The callback receives a flag indicating whether this is a
+// reconnect (true) or the initial connection (false).
+func (s *WampSession) SetOnConnect(cb func(reconnect bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onConnect = cb
 }
 
-// NewWampSession creates a new WampSession from a ReswarmConfig file.
-// If clientProvider is nil, the default client.ConnectNet is used.
-func NewWampSession(config *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) {
+// NewWampSession creates a new WampSession and establishes the initial WAMP
+// connection. If clientProvider is nil, the default client.ConnectNet is used.
+func NewWampSession(cfg *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	session := &WampSession{
-		agentConfig:    config,
+		agentConfig:    cfg,
 		socketConfig:   socketConfig,
 		container:      container,
 		clientProvider: clientProvider,
-		heartbeatDone:  make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
-	err := session.connect()
-	if err != nil {
+	if err := session.connect(false); err != nil {
+		cancel()
 		return nil, err
 	}
 
 	return session, nil
 }
 
-// connect establishes the WAMP connection
-func (wampSession *WampSession) connect() error {
-	clientChannel := wampSession.establishSocketConnection()
-	wampSession.client = <-clientChannel
+// connect dials the router (with retry until success or session close) and
+// installs the new client plus its disconnect watcher. When isReconnect is
+// true, the onConnect callback is invoked.
+//
+// Liveness contract: the only error returned is the one from dial() when the
+// session context is cancelled (i.e. Close() was called). Any other failure
+// during post-dial setup is logged and recovered: the watcher is always
+// spawned so a subsequent disconnect drives another reconnect cycle.
+func (s *WampSession) connect(isReconnect bool) error {
+	c, err := s.dial()
+	if err != nil {
+		return err
+	}
 
-	if wampSession.socketConfig.SetupTestament {
-		err := wampSession.SetupTestament()
-		if err != nil {
-			return err
+	s.mu.Lock()
+	s.client = c
+	cb := s.onConnect
+	s.mu.Unlock()
+
+	if s.socketConfig.SetupTestament {
+		if testErr := s.setupTestamentBounded(); testErr != nil {
+			if isReconnect {
+				log.Error().Err(testErr).Msg("failed to setup testament after reconnect — continuing; watcher will reconnect on next disconnect")
+			} else {
+				// Initial connect: caller decides what to do. Do not leak
+				// the dialled client.
+				_ = c.Close()
+				s.mu.Lock()
+				s.client = nil
+				s.mu.Unlock()
+				return testErr
+			}
 		}
 	}
 
-	// Start connection monitoring
-	wampSession.listenForDisconnect()
-	wampSession.startHeartbeat()
+	s.spawnWatcher(c)
+
+	if isReconnect && cb != nil {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Msgf("Panic in onConnect callback (recovered, agent stays online): %+v\n%s", r, debug.Stack())
+				}
+			}()
+			log.Info().Msg("Re-initializing after reconnection...")
+			cb(true)
+			log.Info().Msg("Successfully re-initialized after reconnection")
+		}()
+	}
 
 	return nil
 }
 
-// reconnect attempts to re-establish the WAMP connection.
-// Returns true if reconnection was successful, false otherwise.
-func (wampSession *WampSession) reconnect() bool {
-	wampSession.mu.Lock()
-	// Close existing client
-	if wampSession.client != nil {
-		wampSession.client.Close()
-		wampSession.client = nil
-	}
-	wampSession.mu.Unlock()
-
-	// Establish new connection
-	clientChannel := wampSession.establishSocketConnection()
-
-	wampSession.mu.Lock()
-	wampSession.client = <-clientChannel
-	wampSession.mu.Unlock()
-
-	// Check if we actually connected
-	if !wampSession.Connected() {
-		return false
-	}
-
-	if wampSession.socketConfig.SetupTestament {
-		err := wampSession.SetupTestament()
-		if err != nil {
-			log.Fatal().Stack().Err(err).Msg("failed to setup testament")
-		}
-	}
-
-	return true
+// spawnWatcher starts watchDisconnect in its own goroutine with a panic
+// recovery wrapper that re-spawns the watcher on panic so the reconnect
+// machinery survives unexpected failures.
+func (s *WampSession) spawnWatcher(c NexusClient) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Msgf("Panic in disconnect watcher (recovered): %+v\n%s", r, debug.Stack())
+				// A panic here would otherwise leave the session with no
+				// liveness monitor. Re-arm by triggering a reconnect cycle
+				// directly so the agent stays self-healing.
+				if s.ctx.Err() == nil {
+					if connErr := s.connect(true); connErr != nil {
+						log.Warn().Err(connErr).Msg("reconnect aborted after watcher panic")
+					}
+				}
+			}
+		}()
+		s.watchDisconnect(c)
+	}()
 }
 
-// listenForDisconnect starts a goroutine that monitors for disconnection
-// and automatically handles reconnection. When reconnection succeeds,
-// it invokes the onConnect callback (if set) with reconnect=true.
-func (wampSession *WampSession) listenForDisconnect() {
-	log.Debug().Msg("listenForDisconnect: Starting disconnect listener setup...")
-
-	// Get the current client's done channel
-	wampSession.mu.Lock()
-	client := wampSession.client
-	heartbeatDone := wampSession.heartbeatDone
-	wampSession.mu.Unlock()
-
-	if client == nil {
-		log.Warn().Msg("ListenForDisconnect called but client is nil")
+// watchDisconnect waits on the underlying client's Done channel and triggers
+// a reconnect when it fires. Exits silently if the session is closed.
+func (s *WampSession) watchDisconnect(c NexusClient) {
+	select {
+	case <-c.Done():
+	case <-s.ctx.Done():
 		return
 	}
 
-	clientDone := client.Done()
+	log.Warn().Msg("WAMP connection lost, reconnecting...")
 
-	safe.Go(func() {
-		// Wait for either the client to signal done OR the heartbeat to detect failure
-		select {
-		case <-clientDone:
-			log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")
-		case <-heartbeatDone:
-			log.Warn().Msg("Connection lost: Heartbeat detected connection failure")
-		}
+	s.cancelContainerStreams()
 
-		wampSession.Close()
-
-		// Cancel any active container streams
-		if wampSession.container != nil {
-			err := wampSession.container.CancelAllStreams()
-			if err != nil {
-				log.Error().Err(err).Msg("error closing stream")
-			}
-		}
-
-		reconnectAttempt := 0
-		for {
-			reconnectAttempt++
-			log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
-
-			if wampSession.reconnect() {
-				log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
-
-				// Invoke onConnect callback if set
-				wampSession.mu.Lock()
-				cb := wampSession.onConnect
-				wampSession.mu.Unlock()
-
-				if cb != nil {
-					safe.Go(func() {
-						log.Info().Msg("Re-initializing after reconnection...")
-						cb(true) // reconnect = true
-						log.Info().Msg("Successfully re-initialized after reconnection")
-					})
-				}
-
-				// Start listening for the next disconnect and restart heartbeat
-				wampSession.listenForDisconnect()
-				return
-			}
-
-			log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
-			time.Sleep(time.Second * 1)
-		}
-	})
-
-	log.Debug().Msg("Messenger: Setup disconnect listener")
+	if err := s.connect(true); err != nil {
+		log.Warn().Err(err).Msg("reconnect aborted")
+	}
 }
 
-// startHeartbeat starts a goroutine that periodically sends a heartbeat to verify
-// the connection is alive. If the heartbeat fails consecutively, it signals via heartbeatDone channel.
-func (wampSession *WampSession) startHeartbeat() {
-	heartbeatInterval := wampSession.socketConfig.HeartbeatInterval
-	if heartbeatInterval == 0 {
-		heartbeatInterval = DefaultHeartbeatInterval
+// cancelContainerStreams runs container.CancelAllStreams in a bounded window
+// so a stuck Docker daemon cannot block reconnect.
+func (s *WampSession) cancelContainerStreams() {
+	if s.container == nil {
+		return
 	}
-
-	// Create a new heartbeat channel only if the current one is nil or closed
-	wampSession.mu.Lock()
-	if wampSession.heartbeatDone == nil {
-		wampSession.heartbeatDone = make(chan struct{})
-	} else {
-		// Check if channel is closed by trying a non-blocking receive
-		select {
-		case <-wampSession.heartbeatDone:
-			// Channel was closed, create a new one
-			wampSession.heartbeatDone = make(chan struct{})
-		default:
-			// Channel is still open, keep using it
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic in CancelAllStreams: %+v", r)
+			}
+		}()
+		done <- s.container.CancelAllStreams()
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Error().Err(err).Msg("error cancelling container streams during reconnect")
 		}
+	case <-time.After(cancelStreamsTimeout):
+		log.Warn().Dur("timeout", cancelStreamsTimeout).Msg("container.CancelAllStreams timed out — proceeding with reconnect anyway")
 	}
-	heartbeatDone := wampSession.heartbeatDone
-	wampSession.mu.Unlock()
-
-	safe.Go(func() {
-		consecutiveFailures := 0
-		const maxConsecutiveFailures = 2 // Trigger reconnect after 2 failures
-
-		for {
-			time.Sleep(heartbeatInterval)
-
-			// Check if connection is still alive
-			if !wampSession.Connected() {
-				log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
-				consecutiveFailures = 0
-				continue
-			}
-
-			err := wampSession.UpdateRemoteDeviceStatus(CONNECTED)
-			if err != nil {
-				consecutiveFailures++
-				log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
-
-				// If we've failed multiple times, the connection is likely broken
-				// Signal via heartbeatDone channel to trigger reconnection
-				if consecutiveFailures >= maxConsecutiveFailures {
-					log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), signaling reconnection...")
-					close(heartbeatDone)
-					return // Exit this heartbeat goroutine
-				}
-			} else {
-				// Reset counter on success
-				if consecutiveFailures > 0 {
-					log.Info().Msg("Heartbeat successful, connection restored")
-				}
-				consecutiveFailures = 0
-			}
-		}
-	})
-
-	log.Debug().Msg("Messenger: Started heartbeat")
 }
 
-func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) (err error) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
-		return ErrNotConnected
+// setupTestamentBounded wraps SetupTestament with a hard timeout so the
+// testament Call cannot hang the reconnect path even if nexus's response
+// timeout is misconfigured or the router is unresponsive.
+func (s *WampSession) setupTestamentBounded() error {
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic in SetupTestament: %+v", r)
+			}
+		}()
+		done <- s.SetupTestament()
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(setupTestamentTimeout):
+		return fmt.Errorf("SetupTestament timed out after %s", setupTestamentTimeout)
 	}
-
-	defer recoverClientClosed(&err)
-
-	err = client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
-	if err != nil {
-		log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
-	}
-	return err
 }
 
-// establishSocketConnection establishes a WAMP connection using the session's ClientProvider.
-// If clientProvider is nil, client.ConnectNet is used directly.
-func (wampSession *WampSession) establishSocketConnection() chan NexusClient {
-	agentConfig := wampSession.agentConfig
-	socketConfig := wampSession.socketConfig
-	container := wampSession.container
-	provider := wampSession.clientProvider
-
-	resChan := make(chan NexusClient)
-
-	// never returns a established connection
-	if agentConfig.CommandLineArguments.Offline {
+// dial repeatedly attempts to establish a WAMP connection until one succeeds
+// or the session context is cancelled. Returns the connected client, or
+// context.Canceled if the session is closed during dialling.
+func (s *WampSession) dial() (NexusClient, error) {
+	if s.agentConfig.CommandLineArguments.Offline {
 		log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
-		return resChan
+		<-s.ctx.Done()
+		return nil, s.ctx.Err()
 	}
 
 	log.Debug().Msg("Attempting to establish a socket connection...")
 
-	safe.Go(func() {
-		for {
-			connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to create connect config...")
-				continue
-			}
-
-			var ctx context.Context
-			var cancelFunc context.CancelFunc
-
-			if socketConfig.ConnectionTimeout == 0 {
-				ctx = context.Background()
-			} else {
-				ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
-			}
-
-			var duration time.Duration
-			requestStart := time.Now() // time request
-			var wClient NexusClient
-			if provider != nil {
-				wClient, err = provider(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
-			} else {
-				wClient, err = client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
-			}
-			if err != nil {
-				if cancelFunc != nil {
-					cancelFunc()
-				}
-
-				duration = time.Since(requestStart)
-
-				if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") {
-					exitMessage := fmt.Sprintln("The IronFlock device connect authentication failed")
-					fmt.Println(exitMessage)
-					os.Exit(1)
-				}
-
-				log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
-				time.Sleep(time.Second * 1)
-				continue
-			}
-
-			if cancelFunc != nil {
-				cancelFunc()
-			}
-
-			// add a dummy topic that will be used as a means to check if a client has an existing session or not
-			topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
-			invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult {
-				return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
-			}
-
-			err = wClient.Register(topic, invokeHandler, nil)
-			if err != nil && strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) {
-				exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
-				fmt.Println(exitMessage)
-				os.Exit(1)
-			}
-
-			onDestroyListener := func(event *wamp.Event) {
-				container.PruneSystem()
-				os.Exit(1)
-			}
-
-			wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
-
-			if wClient.Connected() {
-				duration = time.Since(requestStart)
-				log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
-				resChan <- wClient
-				close(resChan)
-				return
-			}
-
-			duration = time.Since(requestStart)
-			if wClient != nil {
-				wClient.Close()
-			}
-
-			log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())
+	for attempt := 1; ; attempt++ {
+		if s.ctx.Err() != nil {
+			return nil, s.ctx.Err()
 		}
-	})
 
-	return resChan
+		connectionConfig, err := createConnectConfig(s.agentConfig, s.socketConfig)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to create connect config")
+			if !s.sleepOrDone(reconnectBackoff) {
+				return nil, s.ctx.Err()
+			}
+			continue
+		}
+
+		dialCtx := s.ctx
+		var dialCancel context.CancelFunc
+		if s.socketConfig.ConnectionTimeout != 0 {
+			dialCtx, dialCancel = context.WithTimeout(s.ctx, s.socketConfig.ConnectionTimeout)
+		}
+
+		requestStart := time.Now()
+		var c NexusClient
+		if s.clientProvider != nil {
+			c, err = s.clientProvider(dialCtx, s.agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+		} else {
+			c, err = client.ConnectNet(dialCtx, s.agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+		}
+		if dialCancel != nil {
+			dialCancel()
+		}
+
+		if err != nil {
+			if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") {
+				fmt.Println("The IronFlock device connect authentication failed")
+				os.Exit(1)
+			}
+			log.Debug().Err(err).Msgf("Failed to establish a websocket connection (duration: %s, attempt #%d), reattempting in %s", time.Since(requestStart), attempt, reconnectBackoff)
+			if !s.sleepOrDone(reconnectBackoff) {
+				return nil, s.ctx.Err()
+			}
+			continue
+		}
+
+		// Register the device's "I am here" procedure. A second device with
+		// the same serial trying to register the same procedure is rejected
+		// by the router with ProcedureAlreadyExists, which we treat as a
+		// fatal duplicate-serial condition.
+		topic := common.BuildExternalApiTopic(s.agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+		invokeHandler := func(ctx context.Context, _ *wamp.Invocation) client.InvokeResult {
+			return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
+		}
+		if regErr := c.Register(topic, invokeHandler, nil); regErr != nil {
+			if strings.Contains(regErr.Error(), string(wamp.ErrProcedureAlreadyExists)) {
+				fmt.Printf("a WAMP connection for %s already exists\n", s.agentConfig.ReswarmConfig.SerialNumber)
+				os.Exit(1)
+			}
+			// Non-duplicate Register failure: log it so we can debug, but
+			// keep the client. If the connection is genuinely dead the
+			// watcher's Done() will fire and trigger another reconnect.
+			log.Debug().Err(regErr).Msg("connection-established Register failed (non-fatal)")
+		}
+
+		onDestroyListener := func(_ *wamp.Event) {
+			if s.container != nil {
+				s.container.PruneSystem()
+			}
+			os.Exit(1)
+		}
+		if subErr := c.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{}); subErr != nil {
+			log.Debug().Err(subErr).Msg("ondestroy Subscribe failed (non-fatal)")
+		}
+
+		log.Debug().Msgf("Successfully established a connection (duration: %s)", time.Since(requestStart))
+		return c, nil
+	}
 }
 
-func (wampSession *WampSession) Connected() bool {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-	if client == nil {
+// sleepOrDone sleeps for d, returning false if the session context is
+// cancelled before the sleep completes.
+func (s *WampSession) sleepOrDone(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-s.ctx.Done():
 		return false
 	}
-	return client.Connected()
 }
 
-// Client returns the underlying NexusClient.
-// This is primarily useful for testing to access the MockNexusClient.
-func (wampSession *WampSession) Client() NexusClient {
-	wampSession.mu.Lock()
-	defer wampSession.mu.Unlock()
-	return wampSession.client
-}
-
-func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) (err error) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error {
+	c := s.currentClient()
+	if c == nil {
 		return ErrNotConnected
 	}
 
-	defer recoverClientClosed(&err)
+	if err := c.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs)); err != nil {
+		log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
+		return err
+	}
+	return nil
+}
+
+func (s *WampSession) Connected() bool {
+	c := s.currentClient()
+	if c == nil {
+		return false
+	}
+	return c.Connected()
+}
+
+// Client returns the underlying NexusClient. Primarily useful for tests.
+func (s *WampSession) Client() NexusClient {
+	return s.currentClient()
+}
+
+func (s *WampSession) currentClient() NexusClient {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client
+}
+
+func (s *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
+	c := s.currentClient()
+	if c == nil {
+		return ErrNotConnected
+	}
 
 	handler := func(event *wamp.Event) {
 		cbEventMap := Result{
@@ -536,104 +441,83 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
 			Arguments:    []interface{}(event.Arguments),
 			ArgumentsKw:  common.Dict(event.ArgumentsKw),
 		}
-		err := cb(cbEventMap)
-		if err != nil {
+		if err := cb(cbEventMap); err != nil {
 			log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
 		}
 	}
 
-	return client.Subscribe(string(topic), handler, wamp.Dict(options))
+	return c.Subscribe(string(topic), handler, wamp.Dict(options))
 }
 
-func (wampSession *WampSession) GetConfig() *config.Config {
-	return wampSession.agentConfig
+func (s *WampSession) GetConfig() *config.Config {
+	return s.agentConfig
 }
 
-func (wampSession *WampSession) SubscriptionID(topic topics.Topic) (id uint64, ok bool) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) SubscriptionID(topic topics.Topic) (uint64, bool) {
+	c := s.currentClient()
+	if c == nil {
 		return 0, false
 	}
-	subID, ok := client.SubscriptionID(string(topic))
+	subID, ok := c.SubscriptionID(string(topic))
 	return uint64(subID), ok
 }
 
-func (wampSession *WampSession) RegistrationID(topic topics.Topic) (id uint64, ok bool) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) RegistrationID(topic topics.Topic) (uint64, bool) {
+	c := s.currentClient()
+	if c == nil {
 		return 0, false
 	}
-	subID, ok := client.RegistrationID(string(topic))
-	return uint64(subID), ok
+	regID, ok := c.RegistrationID(string(topic))
+	return uint64(regID), ok
 }
 
-func (wampSession *WampSession) Call(
+func (s *WampSession) Call(
 	ctx context.Context,
 	topic topics.Topic,
 	args []interface{},
 	kwargs common.Dict,
 	options common.Dict,
-	progCb func(Result)) (result Result, err error) {
-
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+	progCb func(Result),
+) (Result, error) {
+	c := s.currentClient()
+	if c == nil {
 		return Result{}, ErrNotConnected
 	}
-
-	defer recoverClientClosed(&err)
 
 	var handler func(result *wamp.Result)
 	if progCb != nil {
 		handler = func(result *wamp.Result) {
-			cbResultMap := Result{
+			progCb(Result{
 				Request:     uint64(result.Request),
 				Details:     common.Dict(result.Details),
 				Arguments:   []interface{}(result.Arguments),
 				ArgumentsKw: common.Dict(result.ArgumentsKw),
-			}
-			progCb(cbResultMap)
+			})
 		}
 	}
 
-	callResult, callErr := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
-	if callErr != nil {
-		return Result{}, callErr
+	callResult, err := c.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+	if err != nil {
+		return Result{}, err
 	}
 
-	result = Result{
+	return Result{
 		Request:     uint64(callResult.Request),
 		Details:     common.Dict(callResult.Details),
 		Arguments:   []interface{}(callResult.Arguments),
 		ArgumentsKw: common.Dict(callResult.ArgumentsKw),
-	}
-
-	return result, nil
+	}, nil
 }
 
-func (wampSession *WampSession) GetSessionID() uint64 {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) GetSessionID() uint64 {
+	c := s.currentClient()
+	if c == nil {
 		return 0
 	}
-
-	return uint64(client.ID())
+	return uint64(c.ID())
 }
 
-func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) (err error) {
-	defer recoverClientClosed(&err)
-
+func (s *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error {
 	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
 		cbInvocationMap := Result{
 			Request:      uint64(invocation.Request),
@@ -645,102 +529,76 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 
 		resultMap, invokeErr := cb(ctx, cbInvocationMap)
 		if invokeErr != nil {
-			// Global error logging for any Registered WAMP topics
 			log.Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
-
 			return client.InvokeResult{
-				Err: wamp.URI("wamp.error.canceled"), // TODO: parse Error URI from error
+				Err: wamp.URI("wamp.error.canceled"),
 				Args: wamp.List{
 					wamp.Dict{"error": invokeErr.Error()},
 				},
 			}
 		}
 
-		kwargs := resultMap.ArgumentsKw
-
-		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs)}
+		return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(resultMap.ArgumentsKw)}
 	}
 
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+	c := s.currentClient()
+	if c == nil {
 		return ErrNotConnected
 	}
 
-	err = client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return c.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
 }
 
-func (wampSession *WampSession) Unregister(topic topics.Topic) (err error) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) Unregister(topic topics.Topic) error {
+	c := s.currentClient()
+	if c == nil {
 		return ErrNotConnected
 	}
-
-	defer recoverClientClosed(&err)
-
-	return client.Unregister(string(topic))
+	return c.Unregister(string(topic))
 }
 
-func (wampSession *WampSession) Unsubscribe(topic topics.Topic) (err error) {
-	wampSession.mu.Lock()
-	client := wampSession.client
-	wampSession.mu.Unlock()
-
-	if client == nil {
+func (s *WampSession) Unsubscribe(topic topics.Topic) error {
+	c := s.currentClient()
+	if c == nil {
 		return ErrNotConnected
 	}
-
-	defer recoverClientClosed(&err)
-
-	return client.Unsubscribe(string(topic))
+	return c.Unsubscribe(string(topic))
 }
 
-// SetupTestament will setup the device's crossbar testament
-func (wampSession *WampSession) SetupTestament() error {
-	ctx := context.Background()
+// SetupTestament installs the device's WAMP testament on the router so the
+// router publishes a DISCONNECTED status if the session drops uncleanly.
+func (s *WampSession) SetupTestament() error {
+	cfg := s.GetConfig()
 
-	config := wampSession.GetConfig()
-
-	// https://github.com/gammazero/nexus/blob/v3/router/realm.go#L1042 on how to form payload
 	args := []interface{}{
 		topics.SetDeviceTestament,
 		[]interface{}{
 			common.Dict{
-				"swarm_key":       config.ReswarmConfig.SwarmKey,
-				"device_key":      config.ReswarmConfig.DeviceKey,
-				"serial_number":   config.ReswarmConfig.SerialNumber,
-				"wamp_session_id": wampSession.GetSessionID(),
+				"swarm_key":       cfg.ReswarmConfig.SwarmKey,
+				"device_key":      cfg.ReswarmConfig.DeviceKey,
+				"serial_number":   cfg.ReswarmConfig.SerialNumber,
+				"wamp_session_id": s.GetSessionID(),
 			},
 		},
 		common.Dict{},
 	}
 
-	_, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := s.Call(context.Background(), topics.MetaProcAddSessionTestament, args, nil, nil, nil)
+	return err
 }
 
-func (wampSession *WampSession) Close() {
-	wampSession.mu.Lock()
-	clientToClose := wampSession.client
-	wampSession.client = nil
-	wampSession.mu.Unlock()
+// Close cancels the session's reconnect loop and closes the underlying
+// client. Safe to call multiple times.
+func (s *WampSession) Close() {
+	s.cancel()
 
-	if clientToClose != nil {
-		clientToClose.Close()
+	s.mu.Lock()
+	c := s.client
+	s.client = nil
+	s.mu.Unlock()
+
+	if c != nil {
+		_ = c.Close()
 	}
 }
 
@@ -750,18 +608,18 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 	}
 }
 
-func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
-	config := wampSession.GetConfig()
-	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancelFunc()
+func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
+	cfg := s.GetConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	stats := common.GetStats()
 
 	payload := common.Dict{
-		"swarm_key":       config.ReswarmConfig.SwarmKey,
-		"device_key":      config.ReswarmConfig.DeviceKey,
+		"swarm_key":       cfg.ReswarmConfig.SwarmKey,
+		"device_key":      cfg.ReswarmConfig.DeviceKey,
 		"status":          string(status),
-		"wamp_session_id": wampSession.GetSessionID(),
+		"wamp_session_id": s.GetSessionID(),
 		"stats": common.Dict{
 			"cpu_count":           stats.CPUCount,
 			"cpu_usage":           stats.CPUUsagePercent,
@@ -778,7 +636,7 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 		},
 	}
 
-	res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)
+	res, err := s.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -792,9 +650,8 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
 		return nil
 	}
 
-	reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"])
-	if reswarmBaseURL != "" {
-		wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+	if reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"]); reswarmBaseURL != "" {
+		s.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
 	}
 
 	return nil

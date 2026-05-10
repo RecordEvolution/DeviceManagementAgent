@@ -2,14 +2,12 @@ package messenger
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gammazero/nexus/v3/client"
-	"github.com/gammazero/nexus/v3/wamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -407,128 +405,102 @@ func TestWampSession_Reconnection(t *testing.T) {
 		assert.True(t, wasReconnect)
 	})
 
-}
-
-// =============================================================================
-// TestWampSession_Heartbeat - Tests for heartbeat mechanism
-// =============================================================================
-
-func TestWampSession_Heartbeat(t *testing.T) {
-	t.Run("heartbeat calls UpdateRemoteDeviceStatus periodically", func(t *testing.T) {
+	t.Run("survives multiple sequential disconnects", func(t *testing.T) {
 		cfg := testConfig()
-		socketConfig := &SocketConfig{
-			ConnectionTimeout: time.Millisecond * 100,
-			HeartbeatInterval: time.Millisecond * 50,
-		}
+		socketConfig := &SocketConfig{ConnectionTimeout: time.Millisecond * 100}
 		mockClient := NewMockClient()
 
 		session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
 		require.NoError(t, err)
 		defer session.Close()
 
-		nexusClient := mockClient.LastClient()
-		initialCallCount := nexusClient.CallCount()
+		for i := 0; i < 5; i++ {
+			require.Eventually(t, func() bool {
+				c := mockClient.LastClient()
+				return c != nil && c.Connected()
+			}, time.Second, 5*time.Millisecond, "cycle %d: expected fresh connected client", i)
+			mockClient.LastClient().SimulateConnectionDrop()
+		}
 
-		time.Sleep(200 * time.Millisecond)
-
-		assert.Greater(t, nexusClient.CallCount(), initialCallCount)
+		require.Eventually(t, session.Connected, time.Second, 5*time.Millisecond,
+			"session should reconnect after final drop")
+		assert.GreaterOrEqual(t, mockClient.ClientCount(), 6, "expected initial + 5 reconnects")
 	})
 
-	t.Run("heartbeat uses default interval when not configured", func(t *testing.T) {
+	t.Run("recovers when dial fails repeatedly then succeeds", func(t *testing.T) {
+		cfg := testConfig()
 		socketConfig := &SocketConfig{ConnectionTimeout: time.Millisecond * 100}
 
-		assert.Equal(t, time.Duration(0), socketConfig.HeartbeatInterval)
-		assert.Equal(t, 30*time.Second, DefaultHeartbeatInterval)
+		mockClient := NewMockClient()
+		session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
+		require.NoError(t, err)
+		defer session.Close()
+
+		// Make every subsequent ConnectNet fail several times before succeeding.
+		mockClient.SetConnectFailCount(3)
+		mockClient.LastClient().SimulateConnectionDrop()
+
+		require.Eventually(t, session.Connected, 30*time.Second, 50*time.Millisecond,
+			"session must reconnect even after repeated dial failures")
 	})
 
-	t.Run("heartbeat triggers reconnect after consecutive failures", func(t *testing.T) {
+	t.Run("panicking onConnect callback does not stop the session", func(t *testing.T) {
 		cfg := testConfig()
-		socketConfig := &SocketConfig{
-			ConnectionTimeout: time.Millisecond * 100,
-			HeartbeatInterval: time.Millisecond * 50,
-		}
-
-		// First client fails all calls; subsequent clients succeed
-		mockClient := NewMockClient().SetClientCallLimit(1)
+		socketConfig := &SocketConfig{ConnectionTimeout: time.Millisecond * 100}
+		mockClient := NewMockClient()
 
 		session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
 		require.NoError(t, err)
 		defer session.Close()
 
-		// Reset the call limit so subsequent clients (after reconnection) work normally
-		mockClient.SetClientCallLimit(0)
-
-		// Wait for reconnection to happen (heartbeat fails after 2 consecutive failures)
-		require.Eventually(t, func() bool {
-			return mockClient.Clients()[len(mockClient.Clients())-1].Connected()
-		}, time.Second, 10*time.Millisecond,
-			"expected at least 2 clients after heartbeat-triggered reconnection")
-
-	})
-
-	t.Run("heartbeat resets failure count on success", func(t *testing.T) {
-		cfg := testConfig()
-		socketConfig := &SocketConfig{
-			ConnectionTimeout: time.Millisecond * 100,
-			HeartbeatInterval: time.Millisecond * 50,
-		}
-
-		var callCount int32
-
-		// Use SetClientConfigurator to set up alternating success/failure
-		mockClient := NewMockClient().SetClientConfigurator(func(c *MockNexusClient) {
-			c.SetOnCall(func(procedure string) (*wamp.Result, error) {
-				count := atomic.AddInt32(&callCount, 1)
-				if count == 1 {
-					return nil, errors.New("temporary failure")
-				}
-				return &wamp.Result{}, nil
-			})
+		var panicCount int32
+		session.SetOnConnect(func(reconnect bool) {
+			atomic.AddInt32(&panicCount, 1)
+			panic("intentional test panic in onConnect")
 		})
 
+		// Two consecutive disconnects: each triggers a panicking callback,
+		// the watcher must survive both and keep the session online.
+		for i := 0; i < 2; i++ {
+			require.Eventually(t, func() bool {
+				c := mockClient.LastClient()
+				return c != nil && c.Connected()
+			}, time.Second, 5*time.Millisecond)
+			mockClient.LastClient().SimulateConnectionDrop()
+		}
+
+		require.Eventually(t, session.Connected, time.Second, 5*time.Millisecond,
+			"session must stay reconnectable even when callback panics")
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&panicCount), int32(2),
+			"callback should have been invoked for each reconnect")
+	})
+
+	t.Run("Close stops the reconnect loop even mid-dial", func(t *testing.T) {
+		cfg := testConfig()
+		socketConfig := &SocketConfig{ConnectionTimeout: time.Millisecond * 100}
+
+		mockClient := NewMockClient()
 		session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
 		require.NoError(t, err)
-		defer session.Close()
 
-		time.Sleep(250 * time.Millisecond)
+		// Force the next dial to keep failing so the reconnect loop is busy.
+		mockClient.SetConnectFailCount(1000)
+		mockClient.LastClient().SimulateConnectionDrop()
 
-		assert.True(t, session.Connected())
+		// Give the loop a moment to enter the failing-dial state, then close.
+		time.Sleep(50 * time.Millisecond)
+		closed := make(chan struct{})
+		go func() {
+			session.Close()
+			close(closed)
+		}()
+
+		select {
+		case <-closed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Close blocked while dial loop was active")
+		}
+		assert.False(t, session.Connected())
 	})
 }
 
-// =============================================================================
-// TestHeartbeatTriggersReconnectWithoutDoneChannel - Tests for nexus bug workaround
-// =============================================================================
-
-func TestHeartbeatTriggersReconnectWithoutDoneChannel(t *testing.T) {
-	cfg := testConfig()
-	socketConfig := &SocketConfig{
-		ConnectionTimeout: time.Millisecond * 100,
-		HeartbeatInterval: time.Millisecond * 30,
-	}
-
-	// First client: don't signal done (simulates nexus bug)
-	mockClient := NewMockClient().SetClientDontSignalDone(true).SetClientCallLimit(1)
-
-	session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
-	require.NoError(t, err)
-	defer session.Close()
-
-	time.Sleep(50 * time.Millisecond)
-
-	firstClient := mockClient.Clients()[0]
-
-	// Reset factory settings BEFORE triggering reconnection
-	// so the next client will be healthy
-	mockClient.SetClientDontSignalDone(false).SetClientCallLimit(0)
-
-	// Now trigger the broken connection - reconnection will use the new settings
-	firstClient.SimulateBrokenConnection(errors.New("write: broken pipe"))
-
-	// Wait for reconnection to be triggered and new client to be created
-	require.Eventually(t, func() bool {
-		return mockClient.ClientCount() >= 2 && mockClient.Clients()[len(mockClient.Clients())-1].Connected()
-	}, time.Second, 10*time.Millisecond,
-		"reconnection should be triggered by heartbeat failure even when Done() is not signaled")
-
-}

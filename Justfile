@@ -90,6 +90,13 @@ download-frpc:
         echo "Downloaded and cached frpc to {{FRP_CACHED_BINARY}}"
     fi
 
+# Refresh all Go module dependencies. Re-pins the nexus fork
+# (RecordEvolution/nexus v4-contrib) to its current branch tip and bumps
+# everything else to the latest compatible versions. Go modules pin to a
+# pseudo-version, so the nexus fork only moves when this recipe runs.
+update-dependencies:
+    cd src && go mod edit -replace github.com/gammazero/nexus/v3=github.com/RecordEvolution/nexus/v3@v4-contrib && go get -u ./... && go mod tidy
+
 run:
     cd src && sudo go run -ldflags="-linkmode=external" . -config test-config.flock -prettyLogging -env=local
 
@@ -153,6 +160,25 @@ build-docker-image-arm64:
 
 # Build the official agent runtime image (linux/amd64)
 build-docker-image: build-docker-image-amd64
+
+# Iterate locally against the REDeployments stack: cross-compile the
+# host-arch linux reagent binary with the host's Go toolchain (much faster
+# than `build-all-docker`, which cleans then rebuilds all 8 targets inside
+# Docker), package it into the agent runtime image, and tag as the bare
+# `:latest` so REDeployments/docker-compose.yml's `agent` service (which
+# normally pulls the multi-arch :latest from the registry) picks up the
+# local build instead. Recreate the running container with:
+#   (cd ../REDeployments && docker compose up -d --force-recreate agent)
+# We invoke `docker build` directly (rather than `docker compose build`)
+# because the Dockerfile pins the docker-ce apt repo via TARGETARCH and
+# compose's hardcoded TARGETARCH=amd64 in the build args mismatches the
+# host platform on M1.
+build-local:
+    scripts/build.sh src build linux/{{FRP_ARCH}}
+    @just build-docker-image-{{FRP_ARCH}}
+    docker tag {{AGENT_IMAGE_NAME}}:latest-{{FRP_ARCH}} {{AGENT_IMAGE_NAME}}:latest
+    @echo "==> Tagged {{AGENT_IMAGE_NAME}}:latest from local linux/{{FRP_ARCH}} build."
+    @echo "    Restart with: (cd ../REDeployments && docker compose up -d --force-recreate agent)"
 
 # Push multi-arch agent runtime image manifest
 push-docker-image: build-docker-image-amd64 build-docker-image-arm64

@@ -47,6 +47,7 @@ type ReswarmConfig struct {
 	DockerRegistryURL    string `json:"docker_registry_url"`
 	InsecureRegistries   string `json:"insecure-registries,omitempty"`
 	DockerMainRepository string `json:"docker_main_repository"`
+	ApplianceDomain      string `json:"appliance_domain,omitempty"`
 	ReswarmBaseURL       string `json:"-"`
 }
 

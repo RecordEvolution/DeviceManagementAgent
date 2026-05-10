@@ -42,10 +42,9 @@ type MockClient struct {
 	connectError     error // Error to return on connection failure
 
 	// Client configuration (applied to created MockNexusClients)
-	clientCallLimit      int   // Max calls before client fails (0 = unlimited)
-	clientCallError      error // Error to return on Call operations
-	clientPublishError   error // Error to return on Publish operations
-	clientDontSignalDone bool  // Whether Close() should NOT signal Done()
+	clientCallLimit    int   // Max calls before client fails (0 = unlimited)
+	clientCallError    error // Error to return on Call operations
+	clientPublishError error // Error to return on Publish operations
 
 	// Custom client configurator for advanced scenarios
 	clientConfigurator func(*MockNexusClient)
@@ -117,15 +116,6 @@ func (m *MockClient) SetClientPublishError(err error) *MockClient {
 	return m
 }
 
-// SetClientDontSignalDone configures whether created clients should NOT signal Done() on Close().
-// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockClient) SetClientDontSignalDone(value bool) *MockClient {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.clientDontSignalDone = value
-	return m
-}
-
 // SetClientConfigurator sets a custom function to configure each created MockNexusClient.
 // This is called after applying other client settings, allowing advanced customization.
 func (m *MockClient) SetClientConfigurator(fn func(*MockNexusClient)) *MockClient {
@@ -156,7 +146,6 @@ func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Conf
 	callLimit := m.clientCallLimit
 	callError := m.clientCallError
 	publishError := m.clientPublishError
-	dontSignalDone := m.clientDontSignalDone
 	configurator := m.clientConfigurator
 	m.mu.Unlock()
 
@@ -167,12 +156,11 @@ func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Conf
 
 	// Create successful client
 	nexusClient := &MockNexusClient{
-		connected:      true,
-		done:           make(chan struct{}),
-		callLimit:      callLimit,
-		callError:      callError,
-		publishError:   publishError,
-		dontSignalDone: dontSignalDone,
+		connected:    true,
+		done:         make(chan struct{}),
+		callLimit:    callLimit,
+		callError:    callError,
+		publishError: publishError,
 	}
 
 	// Apply custom configurator if set
@@ -244,9 +232,8 @@ type MockNexusClient struct {
 	mu sync.Mutex
 
 	// Connection state
-	connected      bool
-	done           chan struct{}
-	dontSignalDone bool // When true, Close() won't close the done channel
+	connected bool
+	done      chan struct{}
 
 	// Error configuration
 	callError      error
@@ -284,18 +271,6 @@ func (m *MockNexusClient) SimulateConnectionDrop() {
 		m.connected = false
 		close(m.done)
 	}
-}
-
-// SimulateBrokenConnection simulates a connection that appears connected
-// but all calls fail. The Done() channel is NOT closed, simulating
-// the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockNexusClient) SimulateBrokenConnection(callError error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.connected = true
-	m.callError = callError
-	m.dontSignalDone = true
 }
 
 // SetCallError sets an error to be returned on Call operations.
@@ -345,14 +320,6 @@ func (m *MockNexusClient) SetOnCall(handler func(procedure string) (*wamp.Result
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onCall = handler
-}
-
-// SetDontSignalDone configures whether Close() should signal the Done() channel.
-// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockNexusClient) SetDontSignalDone(value bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.dontSignalDone = value
 }
 
 // SetCallLimit sets the maximum number of calls before returning ErrMockCallLimitExceeded.
@@ -405,9 +372,7 @@ func (m *MockNexusClient) Close() error {
 
 	if m.connected {
 		m.connected = false
-		if !m.dontSignalDone {
-			close(m.done)
-		}
+		close(m.done)
 	}
 	return nil
 }

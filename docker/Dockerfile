@@ -17,7 +17,12 @@
 
 FROM ubuntu:22.04
 
-ARG TARGETARCH=amd64
+# No default — BuildKit auto-populates TARGETARCH from the target platform
+# (host arch if --platform is not set). A default would shadow that and
+# pin the apt repo arch (line 37) to amd64 even on arm64 hosts, breaking
+# `docker compose build` on M1. Explicit `--build-arg TARGETARCH=...` from
+# build-docker-image-{amd64,arm64} still wins.
+ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

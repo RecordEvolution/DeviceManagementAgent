@@ -15,7 +15,7 @@
  "password": "",
  "wlanssid": "",
  "swarm_key": 2,
- "device_key": 2,
+ "device_key": 3,
  "swarm_name": "demo_swarm",
  "description": "This is a demo device",
  "architecture": "arm64",
@@ -24,7 +24,7 @@
   "key": "",
   "certificate": ""
  },
- "swarm_owner_name": "demo",
+ "swarm_owner_name": "marko",
  "config_passphrase": "",
  "device_endpoint_url": "ws://localhost:8080/ws-re-dev",
  "environment": "production",
