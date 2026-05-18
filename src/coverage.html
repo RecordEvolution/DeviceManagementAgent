@@ -81,7 +81,7 @@
 				
 				<option value="file12">reagent/api/prune_images.go (0.0%)</option>
 				
-				<option value="file13">reagent/api/request_app_state.go (81.6%)</option>
+				<option value="file13">reagent/api/request_app_state.go (82.4%)</option>
 				
 				<option value="file14">reagent/api/system_operations.go (0.0%)</option>
 				
@@ -99,7 +99,7 @@
 				
 				<option value="file21">reagent/apps/build_app.go (0.0%)</option>
 				
-				<option value="file22">reagent/apps/cancel_transitions.go (8.0%)</option>
+				<option value="file22">reagent/apps/cancel_transitions.go (6.9%)</option>
 				
 				<option value="file23">reagent/apps/crashloop.go (0.0%)</option>
 				
@@ -149,11 +149,11 @@
 				
 				<option value="file46">reagent/messenger/dummy.go (50.0%)</option>
 				
-				<option value="file47">reagent/messenger/mock_nexus_client_new.go (63.3%)</option>
+				<option value="file47">reagent/messenger/mock_nexus_client_new.go (40.3%)</option>
 				
 				<option value="file48">reagent/messenger/test_helpers.go (100.0%)</option>
 				
-				<option value="file49">reagent/messenger/wamp.go (54.4%)</option>
+				<option value="file49">reagent/messenger/wamp.go (39.8%)</option>
 				
 				<option value="file50">reagent/safe/utils.go (0.0%)</option>
 				
@@ -163,7 +163,9 @@
 				
 				<option value="file53">reagent/tunnel/frp.go (0.0%)</option>
 				
-				<option value="file54">reagent/tunnel/tunnel.go (0.3%)</option>
+				<option value="file54">reagent/tunnel/pdeathsig_other.go (0.0%)</option>
+				
+				<option value="file55">reagent/tunnel/tunnel.go (0.3%)</option>
 				
 				</select>
 			</div>
@@ -620,7 +622,6 @@ import (
         "reagent/errdefs"
         "reagent/messenger"
         "reagent/release"
-        "reagent/system"
 )
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) <span class="cov0" title="0">{
@@ -634,22 +635,18 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
         }</span>
 
         <span class="cov0" title="0">currentAgentVersion := release.GetVersion()
-        OSVersion, err := system.GetOSVersion()
-        if err != nil </span><span class="cov0" title="0">{
-                return nil, err
-        }</span>
-
-        <span class="cov0" title="0">serialNumber := ex.Config.ReswarmConfig.SerialNumber
+        serialNumber := ex.Config.ReswarmConfig.SerialNumber
 
         reswarmModeEnabled := true //filesystem.PathExists("/opt/reagent/reswarm-mode")
-        os, arch, variant := release.GetSystemInfo()
+        sysInfo := release.GetSystemInfo()
         dict := common.Dict{
-                "os":           os,
-                "arch":         arch,
-                "variant":      variant,
+                "os":           sysInfo.DetailedOS,
+                "arch":         sysInfo.Arch,
+                "variant":      sysInfo.Variant,
                 "version":      currentAgentVersion,
                 "serialNumber": serialNumber,
                 "canUpdate":    reswarmModeEnabled,
+                "OSVersion":    sysInfo.DetailedOS,
         }
 
         // frpc is now embedded in the binary
@@ -663,10 +660,6 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
                 dict["latestTunnelVersion"] = frpVersion
                 dict["latestAgentVersion"] = lastAgentVersion
                 dict["hasLatest"] = agentIsLatest &amp;&amp; frpIsLatest
-        }</span>
-
-        <span class="cov0" title="0">if OSVersion != "" </span><span class="cov0" title="0">{
-                dict["OSVersion"] = OSVersion
         }</span>
 
         <span class="cov0" title="0">return &amp;messenger.InvokeResult{
@@ -921,7 +914,7 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
                 }</span>
 
                 <span class="cov0" title="0">if all </span><span class="cov0" title="0">{
-                        output, err := ex.Container.PruneAllImages()
+                        output, err := ex.Container.PruneSystem()
                         if err != nil </span><span class="cov0" title="0">{
                                 return nil, err
                         }</span>
@@ -943,7 +936,6 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 
 import (
         "context"
-        "errors"
         "fmt"
         "reagent/common"
         "reagent/config"
@@ -959,11 +951,6 @@ func (ex *External) requestAppStateHandler(ctx context.Context, response messeng
         payload, err := responseToTransitionPayload(ex.Config, response)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
-        }</span>
-
-        // TODO: remove check and implement proper stream canceling for Docker Compose
-        <span class="cov0" title="0">if payload.CancelTransition &amp;&amp; payload.DockerCompose != nil </span><span class="cov0" title="0">{
-                return nil, errors.New("canceling docker compose apps not yet implemented")
         }</span>
 
         <span class="cov0" title="0">err = ex.AppManager.CreateOrUpdateApp(payload)
@@ -1601,8 +1588,13 @@ func (ex *External) getOSReleaseHandler(ctx context.Context, response messenger.
         // current release information
         <span class="cov0" title="0">osReleaseCurrent, err := system.GetOSReleaseCurrent()
         if err != nil </span><span class="cov0" title="0">{
-                return nil, err
-        }</span>
+                if os.IsNotExist(err) </span><span class="cov0" title="0">{
+                        return &amp;messenger.InvokeResult{
+                                Arguments: []interface{}{},
+                        }, nil
+                }</span>
+                <span class="cov0" title="0">return nil, err</span>
+        }
         <span class="cov0" title="0">osReleaseVersionSplit := strings.Split(osReleaseCurrent["VERSION"], "-")
         osReleaseVersion := ""
         osReleaseBuildTime := ""
@@ -2277,7 +2269,13 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error <s
         }</span>
 
         // before we transition, should request the token
-        <span class="cov0" title="0">token, err := am.AppStore.GetRegistryToken(payload.RequestorAccountKey)
+        // For PROD apps, use the device owner's account key to ensure proper permissions
+        // This avoids issues when the original requestor's permissions have changed
+        <span class="cov0" title="0">tokenAccountKey := payload.RequestorAccountKey
+        if payload.Stage == common.PROD &amp;&amp; payload.DeviceOwnerAccountKey != 0 </span><span class="cov0" title="0">{
+                tokenAccountKey = payload.DeviceOwnerAccountKey
+        }</span>
+        <span class="cov0" title="0">token, err := am.AppStore.GetRegistryToken(tokenAccountKey)
         if err != nil </span><span class="cov0" title="0">{
                 app.UnlockTransition()
                 log.Error().Stack().Err(err).Msg("Failed to get registry token")
@@ -3006,7 +3004,13 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
                 return err
         }</span>
 
-        <span class="cov0" title="0">buildOutput, buildCmd, err := compose.Build(dockerComposePath)
+        <span class="cov0" title="0">buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
+        ctx, cancel := context.WithCancel(context.Background())
+        defer cancel()
+        compose.RegisterBuildCancel(buildID, cancel)
+        defer compose.UnregisterBuildCancel(buildID)
+
+        buildOutput, buildCmd, err := compose.Build(ctx, dockerComposePath)
         if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
@@ -3162,7 +3166,13 @@ func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *commo
 
         <span class="cov0" title="0">buildID := common.BuildDockerBuildID(app.AppKey, app.AppName)
 
-        sm.Container.CancelStream(buildID)
+        if payload.DockerCompose != nil </span><span class="cov0" title="0">{
+                compose := sm.Container.Compose()
+                compose.CancelBuild(buildID) // ignore error — build may have already finished
+                return sm.setState(app, common.REMOVED)
+        }</span>
+
+        <span class="cov0" title="0">sm.Container.CancelStream(buildID)
 
         return sm.setState(app, common.REMOVED)</span>
 }
@@ -3222,8 +3232,10 @@ func (sm *StateMachine) cancelTransfer(payload common.TransitionPayload, app *co
 		<pre class="file" id="file23" style="display: none">package apps
 
 import (
+        "math/rand"
         "reagent/common"
         "reagent/safe"
+        "sync"
         "time"
 
         "github.com/rs/zerolog/log"
@@ -3238,18 +3250,36 @@ type CrashLoop struct {
         Retries uint
 }
 
+var (
+        jitterRand     = rand.New(rand.NewSource(time.Now().UnixNano()))
+        jitterRandLock sync.Mutex
+)
+
+// calculateLoopSleepTime returns the backoff duration before the next restart
+// attempt. The curve is quadratic (5s * retries^2) capped at 1 hour, with ±20%
+// jitter to avoid synchronized retries across a fleet. The polynomial shape is
+// deliberately gentler than exponential so that apps waiting on slow
+// dependencies (peer machines coming online, network ready, mounts appearing)
+// get many patient retries before the interval stretches to the cap.
 func calculateLoopSleepTime(retries uint) time.Duration <span class="cov0" title="0">{
-        var sleepTime time.Duration
         if retries == 0 </span><span class="cov0" title="0">{
-                sleepTime = time.Second * 5
-        }</span> else<span class="cov0" title="0"> {
-                sleepTime = time.Second * 5 * time.Duration(retries)
+                retries = 1
+        }</span>
+        // Guard against overflow; the cap kicks in well before this anyway.
+        <span class="cov0" title="0">if retries &gt; 100 </span><span class="cov0" title="0">{
+                retries = 100
         }</span>
 
-        // cap to 2,5 minutes
-        <span class="cov0" title="0">sleepTime = time.Duration(common.Min(int64(sleepTime), int64(time.Second*150)))
+        <span class="cov0" title="0">sleepTime := time.Second * 5 * time.Duration(retries) * time.Duration(retries)
+        if sleepTime &gt; time.Hour </span><span class="cov0" title="0">{
+                sleepTime = time.Hour
+        }</span>
 
-        return sleepTime</span>
+        <span class="cov0" title="0">jitterRandLock.Lock()
+        jitter := 0.8 + jitterRand.Float64()*0.4 // factor in [0.8, 1.2)
+        jitterRandLock.Unlock()
+
+        return time.Duration(float64(sleepTime) * jitter)</span>
 }
 
 func (clm *AppManager) retry(crashTask *CrashLoop) <span class="cov0" title="0">{
@@ -3257,21 +3287,14 @@ func (clm *AppManager) retry(crashTask *CrashLoop) <span class="cov0" title="0">
 
         safe.Go(func() </span><span class="cov0" title="0">{
 
-                // cap to 2,5 minutes
                 sleepTime := calculateLoopSleepTime(crashTask.Retries)
 
                 log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
                 time.Sleep(sleepTime)
 
-                if crashTask.Retries == 30 </span><span class="cov0" title="0">{
-                        clm.crashLoopLock.Lock()
-                        crashTask.Retries = 0
-                        clm.crashLoopLock.Unlock()
-                }</span>
-
                 // exit the goroutine if the crashloop was canceled in the meantime
-                <span class="cov0" title="0">clm.crashLoopLock.Lock()
+                clm.crashLoopLock.Lock()
                 var foundTask *CrashLoop
                 for task := range clm.crashLoops </span><span class="cov0" title="0">{
                         if task.Payload.Stage == crashTask.Payload.Stage &amp;&amp; task.Payload.AppKey == crashTask.Payload.AppKey </span><span class="cov0" title="0">{
@@ -5417,14 +5440,12 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
                         correctedAppState = common.PRESENT
                 }</span>
 
-                <span class="cov0" title="0">if currentAppState != correctedAppState </span><span class="cov0" title="0">{
-                        if updateRemote </span><span class="cov0" title="0">{
-                                // notify the remote database of any changed states due to correction
-                                err = so.Notify(app, correctedAppState)
-                        }</span> else<span class="cov0" title="0"> {
-                                err = so.NotifyLocal(app, correctedAppState)
-                        }</span>
-                }
+                <span class="cov0" title="0">if updateRemote </span><span class="cov0" title="0">{
+                        // Always sync with remote when online to ensure backend is up-to-date
+                        err = so.Notify(app, correctedAppState)
+                }</span> else<span class="cov0" title="0"> if currentAppState != correctedAppState </span><span class="cov0" title="0">{
+                        err = so.NotifyLocal(app, correctedAppState)
+                }</span>
 
                 <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
                         return err
@@ -5554,30 +5575,51 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error <span class="
                         <span class="cov0" title="0">app.StateLock.Lock()
                         currentAppState := app.CurrentState
                         var correctedAppState common.AppState
-                        // no images were found (and no container) for this guy, so this guy is REMOVED
-                        if !foundImage </span><span class="cov0" title="0">{
-                                if currentAppState == common.UNINSTALLED </span><span class="cov0" title="0">{
-                                        correctedAppState = common.UNINSTALLED
+
+                        // Check for stuck transient states first
+                        switch currentAppState </span>{
+                        case common.DOWNLOADING,
+                                common.TRANSFERING,
+                                common.PUBLISHING,
+                                common.BUILDING,
+                                common.UPDATING:<span class="cov0" title="0">
+                                // Transient states: if image exists → PRESENT, else REMOVED
+                                if foundImage </span><span class="cov0" title="0">{
+                                        correctedAppState = common.PRESENT
                                 }</span> else<span class="cov0" title="0"> {
                                         correctedAppState = common.REMOVED
                                 }</span>
-                        } else<span class="cov0" title="0"> {
-                                // images were found for this guy, but no container, this means --&gt; PRESENT
-                                correctedAppState = common.PRESENT
-                        }</span>
-
-                        <span class="cov0" title="0">app.StateLock.Unlock()
-                        if currentAppState != correctedAppState </span><span class="cov0" title="0">{
-                                if updateRemote </span><span class="cov0" title="0">{
-                                        // notify the remote database of any changed states due to correction
-                                        err = so.Notify(app, correctedAppState)
-                                }</span> else<span class="cov0" title="0"> {
-                                        err = so.NotifyLocal(app, correctedAppState)
+                        default:<span class="cov0" title="0">
+                                // no images were found (and no container) for this guy, so this guy is REMOVED
+                                if !foundImage </span><span class="cov0" title="0">{
+                                        if currentAppState == common.UNINSTALLED </span><span class="cov0" title="0">{
+                                                correctedAppState = common.UNINSTALLED
+                                        }</span> else<span class="cov0" title="0"> {
+                                                correctedAppState = common.REMOVED
+                                        }</span>
+                                } else<span class="cov0" title="0"> {
+                                        // images were found for this guy, but no container, this means --&gt; PRESENT
+                                        correctedAppState = common.PRESENT
                                 }</span>
                         }
 
+                        <span class="cov0" title="0">app.StateLock.Unlock()
+                        if updateRemote </span><span class="cov0" title="0">{
+                                // Always sync with remote when online to ensure backend is up-to-date.
+                                // This handles the case where the offline phase already corrected a transient
+                                // state (e.g. TRANSFERING → REMOVED) but the backend was never notified.
+                                err = so.Notify(app, correctedAppState)
+                        }</span> else<span class="cov0" title="0"> if currentAppState != correctedAppState </span><span class="cov0" title="0">{
+                                err = so.NotifyLocal(app, correctedAppState)
+                        }</span>
+
                         <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
                                 log.Error().Err(err).Msg("failed to notify app state")
+                        }</span>
+
+                        // Throttle remote updates to avoid overwhelming the backend
+                        <span class="cov0" title="0">if updateRemote &amp;&amp; idx &lt; len(rStates)-1 </span><span class="cov0" title="0">{
+                                time.Sleep(100 * time.Millisecond)
                         }</span>
 
                         // should be all good iterate over next app
@@ -6920,11 +6962,12 @@ type PortForwardRule struct {
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
-        RequestedState       AppState
-        CurrentState         AppState
-        Stage                Stage
-        RequestorAccountKey  uint64
-        DeviceToAppKey       uint64
+        RequestedState         AppState
+        CurrentState           AppState
+        Stage                  Stage
+        RequestorAccountKey    uint64
+        DeviceOwnerAccountKey  uint64
+        DeviceToAppKey         uint64
         AppKey               uint64
         CallerAuthID         int
         AppName              string
@@ -6975,6 +7018,7 @@ type DeviceSyncResponse struct {
         DeviceKey              int                    `json:"device_key"`
         SwarmKey               int                    `json:"swarm_key"`
         AccountKey             int                    `json:"account_key"`
+        DeviceOwnerAccountKey  int                    `json:"device_owner_account_key"`
         SerialNumber           string                 `json:"serial_number"`
         AppName                string                 `json:"app_name"`
         Name                   string                 `json:"name"` // device name
@@ -7290,8 +7334,8 @@ func (tp *TransitionPayload) initContainerData(appKey uint64, appName string, co
         devContainerName := BuildContainerName(DEV, appKey, appName)
         prodContainerName := BuildContainerName(PROD, appKey, appName)
 
-        _, arch, variant := release.GetSystemInfo()
-        imageArchName := arch + variant
+        sysInfo := release.GetSystemInfo()
+        imageArchName := sysInfo.Arch + sysInfo.Variant
 
         devImageName := BuildImageName(DEV, imageArchName, appKey, appName)
         devRegImageName := BuildRegistryImageName(config.ReswarmConfig.DockerRegistryURL, config.ReswarmConfig.DockerMainRepository, devImageName)
@@ -7485,6 +7529,7 @@ type ReswarmConfig struct {
         DockerRegistryURL    string `json:"docker_registry_url"`
         InsecureRegistries   string `json:"insecure-registries,omitempty"`
         DockerMainRepository string `json:"docker_main_repository"`
+        ApplianceDomain      string `json:"appliance_domain,omitempty"`
         ReswarmBaseURL       string `json:"-"`
 }
 
@@ -8181,10 +8226,9 @@ type MockClient struct {
         connectError     error // Error to return on connection failure
 
         // Client configuration (applied to created MockNexusClients)
-        clientCallLimit      int   // Max calls before client fails (0 = unlimited)
-        clientCallError      error // Error to return on Call operations
-        clientPublishError   error // Error to return on Publish operations
-        clientDontSignalDone bool  // Whether Close() should NOT signal Done()
+        clientCallLimit    int   // Max calls before client fails (0 = unlimited)
+        clientCallError    error // Error to return on Call operations
+        clientPublishError error // Error to return on Publish operations
 
         // Custom client configurator for advanced scenarios
         clientConfigurator func(*MockNexusClient)
@@ -8196,7 +8240,7 @@ type MockClient struct {
 
 // NewMockClient creates a new MockClient with default settings.
 // By default, connections succeed immediately and clients work normally.
-func NewMockClient() *MockClient <span class="cov4" title="17">{
+func NewMockClient() *MockClient <span class="cov6" title="17">{
         return &amp;MockClient{
                 connectError: ErrMockConnectionFailed,
         }
@@ -8208,7 +8252,7 @@ func NewMockClient() *MockClient <span class="cov4" title="17">{
 
 // SetConnectFailCount sets how many connection attempts should fail before succeeding.
 // Pass 0 for immediate success (default).
-func (m *MockClient) SetConnectFailCount(count int) *MockClient <span class="cov1" title="1">{
+func (m *MockClient) SetConnectFailCount(count int) *MockClient <span class="cov2" title="3">{
         m.mu.Lock()
         defer m.mu.Unlock()
         m.connectFailCount = count
@@ -8231,7 +8275,7 @@ func (m *MockClient) SetConnectError(err error) *MockClient <span class="cov0" t
 // SetClientCallLimit sets the maximum number of Call operations before
 // the created clients start returning ErrMockCallLimitExceeded.
 // Pass 0 for unlimited (default).
-func (m *MockClient) SetClientCallLimit(limit int) *MockClient <span class="cov2" title="4">{
+func (m *MockClient) SetClientCallLimit(limit int) *MockClient <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
         m.clientCallLimit = limit
@@ -8256,18 +8300,9 @@ func (m *MockClient) SetClientPublishError(err error) *MockClient <span class="c
         return m
 }</span>
 
-// SetClientDontSignalDone configures whether created clients should NOT signal Done() on Close().
-// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockClient) SetClientDontSignalDone(value bool) *MockClient <span class="cov1" title="2">{
-        m.mu.Lock()
-        defer m.mu.Unlock()
-        m.clientDontSignalDone = value
-        return m
-}</span>
-
 // SetClientConfigurator sets a custom function to configure each created MockNexusClient.
 // This is called after applying other client settings, allowing advanced customization.
-func (m *MockClient) SetClientConfigurator(fn func(*MockNexusClient)) *MockClient <span class="cov1" title="1">{
+func (m *MockClient) SetClientConfigurator(fn func(*MockNexusClient)) *MockClient <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
         m.clientConfigurator = fn
@@ -8284,7 +8319,7 @@ func (m *MockClient) SetClientConfigurator(fn func(*MockNexusClient)) *MockClien
 //
 //        mockClient := NewMockClient()
 //        session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
-func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Config) (NexusClient, error) <span class="cov8" title="482">{
+func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Config) (NexusClient, error) <span class="cov7" title="32">{
         m.mu.Lock()
         m.connectAttempts++
         attempt := m.connectAttempts
@@ -8295,31 +8330,29 @@ func (m *MockClient) ConnectNet(ctx context.Context, url string, cfg client.Conf
         callLimit := m.clientCallLimit
         callError := m.clientCallError
         publishError := m.clientPublishError
-        dontSignalDone := m.clientDontSignalDone
         configurator := m.clientConfigurator
         m.mu.Unlock()
 
         // Fail for the configured number of attempts
-        if attempt &lt;= failCount </span><span class="cov1" title="2">{
+        if attempt &lt;= failCount </span><span class="cov3" title="5">{
                 return nil, connectErr
         }</span>
 
         // Create successful client
-        <span class="cov8" title="480">nexusClient := &amp;MockNexusClient{
-                connected:      true,
-                done:           make(chan struct{}),
-                callLimit:      callLimit,
-                callError:      callError,
-                publishError:   publishError,
-                dontSignalDone: dontSignalDone,
+        <span class="cov6" title="27">nexusClient := &amp;MockNexusClient{
+                connected:    true,
+                done:         make(chan struct{}),
+                callLimit:    callLimit,
+                callError:    callError,
+                publishError: publishError,
         }
 
         // Apply custom configurator if set
-        if configurator != nil </span><span class="cov1" title="2">{
+        if configurator != nil </span><span class="cov0" title="0">{
                 configurator(nexusClient)
         }</span>
 
-        <span class="cov8" title="480">m.mu.Lock()
+        <span class="cov6" title="27">m.mu.Lock()
         m.clients = append(m.clients, nexusClient)
         m.mu.Unlock()
 
@@ -8338,7 +8371,7 @@ func (m *MockClient) ConnectAttempts() int <span class="cov1" title="1">{
 }</span>
 
 // Clients returns all MockNexusClients created by ConnectNet.
-func (m *MockClient) Clients() []*MockNexusClient <span class="cov3" title="5">{
+func (m *MockClient) Clients() []*MockNexusClient <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
         result := make([]*MockNexusClient, len(m.clients))
@@ -8347,17 +8380,17 @@ func (m *MockClient) Clients() []*MockNexusClient <span class="cov3" title="5">{
 }</span>
 
 // LastClient returns the most recently created MockNexusClient, or nil if none.
-func (m *MockClient) LastClient() *MockNexusClient <span class="cov2" title="3">{
+func (m *MockClient) LastClient() *MockNexusClient <span class="cov6" title="22">{
         m.mu.Lock()
         defer m.mu.Unlock()
         if len(m.clients) == 0 </span><span class="cov0" title="0">{
                 return nil
         }</span>
-        <span class="cov2" title="3">return m.clients[len(m.clients)-1]</span>
+        <span class="cov6" title="22">return m.clients[len(m.clients)-1]</span>
 }
 
 // ClientCount returns the number of MockNexusClients created.
-func (m *MockClient) ClientCount() int <span class="cov3" title="6">{
+func (m *MockClient) ClientCount() int <span class="cov1" title="1">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return len(m.clients)
@@ -8383,9 +8416,8 @@ type MockNexusClient struct {
         mu sync.Mutex
 
         // Connection state
-        connected      bool
-        done           chan struct{}
-        dontSignalDone bool // When true, Close() won't close the done channel
+        connected bool
+        done      chan struct{}
 
         // Error configuration
         callError      error
@@ -8415,27 +8447,15 @@ type MockNexusClient struct {
 
 // SimulateConnectionDrop simulates the server dropping the connection.
 // This closes the Done() channel and sets Connected() to false.
-func (m *MockNexusClient) SimulateConnectionDrop() <span class="cov1" title="2">{
+func (m *MockNexusClient) SimulateConnectionDrop() <span class="cov5" title="11">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        if m.connected </span><span class="cov1" title="2">{
+        if m.connected </span><span class="cov5" title="11">{
                 m.connected = false
                 close(m.done)
         }</span>
 }
-
-// SimulateBrokenConnection simulates a connection that appears connected
-// but all calls fail. The Done() channel is NOT closed, simulating
-// the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockNexusClient) SimulateBrokenConnection(callError error) <span class="cov1" title="1">{
-        m.mu.Lock()
-        defer m.mu.Unlock()
-
-        m.connected = true
-        m.callError = callError
-        m.dontSignalDone = true
-}</span>
 
 // SetCallError sets an error to be returned on Call operations.
 // Pass nil to clear the error.
@@ -8480,18 +8500,10 @@ func (m *MockNexusClient) SetCallResult(result *wamp.Result) <span class="cov0" 
 // SetOnCall sets a custom handler for Call operations.
 // This allows complex test scenarios where different calls need different results.
 // Pass nil to use the default behavior.
-func (m *MockNexusClient) SetOnCall(handler func(procedure string) (*wamp.Result, error)) <span class="cov1" title="2">{
+func (m *MockNexusClient) SetOnCall(handler func(procedure string) (*wamp.Result, error)) <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
         m.onCall = handler
-}</span>
-
-// SetDontSignalDone configures whether Close() should signal the Done() channel.
-// When true, simulates the nexus bug where ping timeout doesn't properly signal Done().
-func (m *MockNexusClient) SetDontSignalDone(value bool) <span class="cov0" title="0">{
-        m.mu.Lock()
-        defer m.mu.Unlock()
-        m.dontSignalDone = value
 }</span>
 
 // SetCallLimit sets the maximum number of calls before returning ErrMockCallLimitExceeded.
@@ -8507,7 +8519,7 @@ func (m *MockNexusClient) SetCallLimit(limit int) <span class="cov0" title="0">{
 // =============================================================================
 
 // CallCount returns the number of Call operations made.
-func (m *MockNexusClient) CallCount() int <span class="cov1" title="2">{
+func (m *MockNexusClient) CallCount() int <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return m.callCount
@@ -8538,32 +8550,30 @@ func (m *MockNexusClient) SubscribeCount() int <span class="cov0" title="0">{
 // MockNexusClient - NexusClient Interface Implementation
 // =============================================================================
 
-func (m *MockNexusClient) Close() error <span class="cov8" title="460">{
+func (m *MockNexusClient) Close() error <span class="cov6" title="17">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
-        if m.connected </span><span class="cov8" title="458">{
+        if m.connected </span><span class="cov5" title="16">{
                 m.connected = false
-                if !m.dontSignalDone </span><span class="cov8" title="457">{
-                        close(m.done)
-                }</span>
-        }
-        <span class="cov8" title="460">return nil</span>
+                close(m.done)
+        }</span>
+        <span class="cov6" title="17">return nil</span>
 }
 
-func (m *MockNexusClient) Connected() bool <span class="cov10" title="1069">{
+func (m *MockNexusClient) Connected() bool <span class="cov10" title="161">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return m.connected
 }</span>
 
-func (m *MockNexusClient) Done() &lt;-chan struct{} <span class="cov8" title="476">{
+func (m *MockNexusClient) Done() &lt;-chan struct{} <span class="cov6" title="27">{
         m.mu.Lock()
         defer m.mu.Unlock()
         return m.done
 }</span>
 
-func (m *MockNexusClient) ID() wamp.ID <span class="cov5" title="25">{
+func (m *MockNexusClient) ID() wamp.ID <span class="cov0" title="0">{
         return wamp.ID(12345)
 }</span>
 
@@ -8575,7 +8585,7 @@ func (m *MockNexusClient) Publish(topic string, options wamp.Dict, args wamp.Lis
         return m.publishError
 }</span>
 
-func (m *MockNexusClient) Subscribe(topic string, fn client.EventHandler, options wamp.Dict) error <span class="cov8" title="477">{
+func (m *MockNexusClient) Subscribe(topic string, fn client.EventHandler, options wamp.Dict) error <span class="cov6" title="27">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
@@ -8591,34 +8601,34 @@ func (m *MockNexusClient) Unsubscribe(topic string) error <span class="cov0" tit
         return nil
 }</span>
 
-func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) <span class="cov5" title="25">{
+func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) <span class="cov0" title="0">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
         m.callCount++
 
         // Check call limit
-        if m.callLimit &gt; 0 &amp;&amp; m.callCount &gt; m.callLimit </span><span class="cov1" title="2">{
+        if m.callLimit &gt; 0 &amp;&amp; m.callCount &gt; m.callLimit </span><span class="cov0" title="0">{
                 return nil, ErrMockCallLimitExceeded
         }</span>
 
         // Use custom handler if set
-        <span class="cov5" title="23">if m.onCall != nil </span><span class="cov3" title="6">{
+        <span class="cov0" title="0">if m.onCall != nil </span><span class="cov0" title="0">{
                 return m.onCall(procedure)
         }</span>
 
-        <span class="cov4" title="17">if m.callError != nil </span><span class="cov0" title="0">{
+        <span class="cov0" title="0">if m.callError != nil </span><span class="cov0" title="0">{
                 return nil, m.callError
         }</span>
 
-        <span class="cov4" title="17">if m.callResult != nil </span><span class="cov0" title="0">{
+        <span class="cov0" title="0">if m.callResult != nil </span><span class="cov0" title="0">{
                 return m.callResult, nil
         }</span>
 
-        <span class="cov4" title="17">return &amp;wamp.Result{}, nil</span>
+        <span class="cov0" title="0">return &amp;wamp.Result{}, nil</span>
 }
 
-func (m *MockNexusClient) Register(procedure string, fn client.InvocationHandler, options wamp.Dict) error <span class="cov8" title="477">{
+func (m *MockNexusClient) Register(procedure string, fn client.InvocationHandler, options wamp.Dict) error <span class="cov6" title="27">{
         m.mu.Lock()
         defer m.mu.Unlock()
 
@@ -8676,6 +8686,7 @@ import (
         "fmt"
         "os"
         "regexp"
+        "runtime/debug"
         "strings"
         "sync"
         "time"
@@ -8684,7 +8695,6 @@ import (
         "reagent/config"
         "reagent/container"
         "reagent/messenger/topics"
-        "reagent/safe"
 
         "github.com/gammazero/nexus/v3/client"
         "github.com/gammazero/nexus/v3/transport"
@@ -8694,19 +8704,30 @@ import (
         "github.com/rs/zerolog/log"
 )
 
+// reconnectBackoff is the delay between reconnect attempts after a transport
+// failure. Kept short so the agent comes back online quickly; the loop never
+// gives up while the session context is alive.
+const reconnectBackoff = time.Second
+
+// setupTestamentTimeout bounds the testament-installation Call so a stuck
+// router can never wedge the reconnect path.
+const setupTestamentTimeout = 10 * time.Second
+
+// cancelStreamsTimeout bounds the synchronous container-cleanup step that
+// runs before a reconnect attempt. If Docker is stuck, we still reconnect.
+const cancelStreamsTimeout = 5 * time.Second
+
 type WampSession struct {
         client         NexusClient
         container      container.Container
         agentConfig    *config.Config
         socketConfig   *SocketConfig
         clientProvider ClientProvider // nil means use default client.ConnectNet
-        mu             sync.Mutex
-        onConnect      func(reconnect bool) // Callback invoked after successful connection/reconnection
-        heartbeatDone  chan struct{}        // Closed by heartbeat when connection failure is detected
-}
+        onConnect      func(reconnect bool)
 
-type wampLogWrapper struct {
-        logger *zerolog.Logger
+        mu     sync.Mutex
+        ctx    context.Context
+        cancel context.CancelFunc
 }
 
 type DeviceStatus string
@@ -8719,68 +8740,33 @@ const (
 
 var ErrNotConnected = errors.New("not connected")
 
-func newWampLogger(zeroLogger *zerolog.Logger) wampLogWrapper <span class="cov9" title="479">{
-        return wampLogWrapper{logger: zeroLogger}
-}</span>
-
-func (wl wampLogWrapper) Print(v ...interface{}) <span class="cov0" title="0">{
-        // Check for connection errors that indicate the connection is broken
-        for _, val := range v </span><span class="cov0" title="0">{
-                if str, ok := val.(string); ok </span><span class="cov0" title="0">{
-                        if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") </span><span class="cov0" title="0">{
-                                log.Warn().Msgf("WAMP connection error detected: %v", str)
-                        }</span>
-                }
-        }
-        <span class="cov0" title="0">wl.logger.Print(v...)</span>
+// wampLogger adapts a zerolog.Logger to the nexus stdlog.StdLog interface
+// so the nexus client/router can write through our structured logger.
+type wampLogger struct {
+        logger *zerolog.Logger
 }
 
-func (wl wampLogWrapper) Println(v ...interface{}) <span class="cov0" title="0">{
-        // Check for connection errors
-        for _, val := range v </span><span class="cov0" title="0">{
-                if str, ok := val.(string); ok </span><span class="cov0" title="0">{
-                        if strings.Contains(str, "broken pipe") || strings.Contains(str, "connection reset") || strings.Contains(str, "write tcp") </span><span class="cov0" title="0">{
-                                log.Warn().Msgf("WAMP connection error detected: %v", str)
-                        }</span>
-                }
-        }
-        <span class="cov0" title="0">wl.logger.Print(v, "\n")</span>
-}
-
-func (wl wampLogWrapper) Printf(format string, v ...interface{}) <span class="cov0" title="0">{
-        // Check for connection errors in formatted strings
-        if strings.Contains(format, "broken pipe") || strings.Contains(format, "connection reset") || strings.Contains(format, "write tcp") </span><span class="cov0" title="0">{
-                log.Warn().Msgf("WAMP connection error detected: "+format, v...)
-        }</span>
-        <span class="cov0" title="0">wl.logger.Printf(format, v...)</span>
-}
-
-func wrapZeroLogger(zeroLogger zerolog.Logger) wampLogWrapper <span class="cov9" title="479">{
-        wrapper := newWampLogger(&amp;zeroLogger)
-        return wrapper
-}</span>
+func (l wampLogger) Print(v ...interface{})                 <span class="cov0" title="0">{ l.logger.Print(v...) }</span>
+func (l wampLogger) Println(v ...interface{})               <span class="cov0" title="0">{ l.logger.Print(v...) }</span>
+func (l wampLogger) Printf(format string, v ...interface{}) <span class="cov0" title="0">{ l.logger.Printf(format, v...) }</span>
 
 type SocketConfig struct {
         PingPongTimeout   time.Duration
         ResponseTimeout   time.Duration
         ConnectionTimeout time.Duration
-        HeartbeatInterval time.Duration // Default: 30 seconds if zero
         SetupTestament    bool
 }
 
-// DefaultHeartbeatInterval is the default interval between heartbeat checks
-const DefaultHeartbeatInterval = 30 * time.Second
-
 // ClientProvider is a function that attempts to connect and returns a NexusClient.
-// It's used to allow mocking the connection in tests.
+// Used to inject a fake client in tests.
 type ClientProvider func(ctx context.Context, url string, cfg client.Config) (NexusClient, error)
 
 var legacyEndpointRegex = regexp.MustCompile(`devices.*\.(com|io):8080`)
 
-func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*client.Config, error) <span class="cov9" title="483">{
-        reswarmConfig := config.ReswarmConfig
+func createConnectConfig(cfg *config.Config, socketConfig *SocketConfig) (*client.Config, error) <span class="cov7" title="32">{
+        reswarmConfig := cfg.ReswarmConfig
 
-        cfg := client.Config{
+        clientCfg := client.Config{
                 Realm: "realm1",
                 HelloDetails: wamp.Dict{
                         "authid": fmt.Sprintf("%d-%d", reswarmConfig.SwarmKey, reswarmConfig.DeviceKey),
@@ -8788,396 +8774,341 @@ func createConnectConfig(config *config.Config, socketConfig *SocketConfig) (*cl
                 AuthHandlers: map[string]client.AuthFunc{
                         "wampcra": clientAuthFunc(reswarmConfig.Secret),
                 },
-                Debug:  config.CommandLineArguments.DebugMessaging,
-                Logger: wrapZeroLogger(log.Logger),
+                Debug:  cfg.CommandLineArguments.DebugMessaging,
+                Logger: wampLogger{logger: &amp;log.Logger},
         }
 
-        isLegacyEndpoint := legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL))
-        if isLegacyEndpoint </span><span class="cov0" title="0">{
+        if legacyEndpointRegex.Match([]byte(reswarmConfig.DeviceEndpointURL)) </span><span class="cov0" title="0">{
                 tlscert, err := tls.X509KeyPair([]byte(reswarmConfig.Authentication.Certificate), []byte(reswarmConfig.Authentication.Key))
                 if err != nil </span><span class="cov0" title="0">{
                         return nil, err
                 }</span>
-
-                <span class="cov0" title="0">cfg.TlsCfg = &amp;tls.Config{
+                <span class="cov0" title="0">clientCfg.TlsCfg = &amp;tls.Config{
                         Certificates:       []tls.Certificate{tlscert},
                         InsecureSkipVerify: true,
                 }</span>
         }
 
-        <span class="cov9" title="482">if socketConfig.PingPongTimeout != 0 </span><span class="cov0" title="0">{
-                cfg.WsCfg = transport.WebsocketConfig{
+        <span class="cov7" title="32">if socketConfig.PingPongTimeout != 0 </span><span class="cov0" title="0">{
+                clientCfg.WsCfg = transport.WebsocketConfig{
                         KeepAlive: socketConfig.PingPongTimeout,
                 }
         }</span>
 
-        <span class="cov9" title="482">if socketConfig.ResponseTimeout != 0 </span><span class="cov1" title="2">{
-                cfg.ResponseTimeout = socketConfig.ResponseTimeout
+        <span class="cov7" title="32">if socketConfig.ResponseTimeout != 0 </span><span class="cov1" title="1">{
+                clientCfg.ResponseTimeout = socketConfig.ResponseTimeout
         }</span>
 
-        <span class="cov9" title="482">return &amp;cfg, nil</span>
+        <span class="cov7" title="32">return &amp;clientCfg, nil</span>
 }
 
-// SetOnConnect sets the callback that will be invoked after each successful connection or reconnection.
-// The callback receives a boolean indicating whether this is a reconnection (true) or initial connection (false).
-func (wampSession *WampSession) SetOnConnect(cb func(reconnect bool)) <span class="cov3" title="5">{
-        wampSession.mu.Lock()
-        defer wampSession.mu.Unlock()
-        wampSession.onConnect = cb
+// SetOnConnect sets the callback invoked after each successful connection or
+// reconnection. The callback receives a flag indicating whether this is a
+// reconnect (true) or the initial connection (false).
+func (s *WampSession) SetOnConnect(cb func(reconnect bool)) <span class="cov4" title="6">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.onConnect = cb
 }</span>
 
-// NewWampSession creates a new WampSession from a ReswarmConfig file.
-// If clientProvider is nil, the default client.ConnectNet is used.
-func NewWampSession(config *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) <span class="cov4" title="17">{
+// NewWampSession creates a new WampSession and establishes the initial WAMP
+// connection. If clientProvider is nil, the default client.ConnectNet is used.
+func NewWampSession(cfg *config.Config, socketConfig *SocketConfig, container container.Container, clientProvider ClientProvider) (*WampSession, error) <span class="cov6" title="17">{
+        ctx, cancel := context.WithCancel(context.Background())
+
         session := &amp;WampSession{
-                agentConfig:    config,
+                agentConfig:    cfg,
                 socketConfig:   socketConfig,
                 container:      container,
                 clientProvider: clientProvider,
-                heartbeatDone:  make(chan struct{}),
+                ctx:            ctx,
+                cancel:         cancel,
         }
 
-        err := session.connect()
-        if err != nil </span><span class="cov0" title="0">{
+        if err := session.connect(false); err != nil </span><span class="cov0" title="0">{
+                cancel()
                 return nil, err
         }</span>
 
-        <span class="cov4" title="17">return session, nil</span>
+        <span class="cov6" title="17">return session, nil</span>
 }
 
-// connect establishes the WAMP connection
-func (wampSession *WampSession) connect() error <span class="cov4" title="17">{
-        clientChannel := wampSession.establishSocketConnection()
-        wampSession.client = &lt;-clientChannel
-
-        if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
-                err := wampSession.SetupTestament()
-                if err != nil </span><span class="cov0" title="0">{
-                        return err
-                }</span>
-        }
-
-        // Start connection monitoring
-        <span class="cov4" title="17">wampSession.listenForDisconnect()
-        wampSession.startHeartbeat()
-
-        return nil</span>
-}
-
-// reconnect attempts to re-establish the WAMP connection.
-// Returns true if reconnection was successful, false otherwise.
-func (wampSession *WampSession) reconnect() bool <span class="cov9" title="464">{
-        wampSession.mu.Lock()
-        // Close existing client
-        if wampSession.client != nil </span><span class="cov0" title="0">{
-                wampSession.client.Close()
-                wampSession.client = nil
-        }</span>
-        <span class="cov9" title="464">wampSession.mu.Unlock()
-
-        // Establish new connection
-        clientChannel := wampSession.establishSocketConnection()
-
-        wampSession.mu.Lock()
-        wampSession.client = &lt;-clientChannel
-        wampSession.mu.Unlock()
-
-        // Check if we actually connected
-        if !wampSession.Connected() </span><span class="cov0" title="0">{
-                return false
+// connect dials the router (with retry until success or session close) and
+// installs the new client plus its disconnect watcher. When isReconnect is
+// true, the onConnect callback is invoked.
+//
+// Liveness contract: the only error returned is the one from dial() when the
+// session context is cancelled (i.e. Close() was called). Any other failure
+// during post-dial setup is logged and recovered: the watcher is always
+// spawned so a subsequent disconnect drives another reconnect cycle.
+func (s *WampSession) connect(isReconnect bool) error <span class="cov7" title="30">{
+        c, err := s.dial()
+        if err != nil </span><span class="cov2" title="3">{
+                return err
         }</span>
 
-        <span class="cov9" title="463">if wampSession.socketConfig.SetupTestament </span><span class="cov0" title="0">{
-                err := wampSession.SetupTestament()
-                if err != nil </span><span class="cov0" title="0">{
-                        log.Fatal().Stack().Err(err).Msg("failed to setup testament")
-                }</span>
-        }
+        <span class="cov6" title="27">s.mu.Lock()
+        s.client = c
+        cb := s.onConnect
+        s.mu.Unlock()
 
-        <span class="cov9" title="463">return true</span>
-}
-
-// listenForDisconnect starts a goroutine that monitors for disconnection
-// and automatically handles reconnection. When reconnection succeeds,
-// it invokes the onConnect callback (if set) with reconnect=true.
-func (wampSession *WampSession) listenForDisconnect() <span class="cov9" title="480">{
-        log.Debug().Msg("listenForDisconnect: Starting disconnect listener setup...")
-
-        // Get the current client's done channel
-        wampSession.mu.Lock()
-        client := wampSession.client
-        heartbeatDone := wampSession.heartbeatDone
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
-                log.Warn().Msg("ListenForDisconnect called but client is nil")
-                return
-        }</span>
-
-        <span class="cov9" title="480">clientDone := client.Done()
-
-        safe.Go(func() </span><span class="cov9" title="480">{
-                // Wait for either the client to signal done OR the heartbeat to detect failure
-                select </span>{
-                case &lt;-clientDone:<span class="cov7" title="85">
-                        log.Warn().Msg("Connection lost: Received done signal from WAMP client (broken pipe, timeout, or server disconnect)")</span>
-                case &lt;-heartbeatDone:<span class="cov9" title="379">
-                        log.Warn().Msg("Connection lost: Heartbeat detected connection failure")</span>
-                }
-
-                <span class="cov9" title="464">wampSession.Close()
-
-                // Cancel any active container streams
-                if wampSession.container != nil </span><span class="cov0" title="0">{
-                        err := wampSession.container.CancelAllStreams()
-                        if err != nil </span><span class="cov0" title="0">{
-                                log.Error().Err(err).Msg("error closing stream")
+        if s.socketConfig.SetupTestament </span><span class="cov0" title="0">{
+                if testErr := s.setupTestamentBounded(); testErr != nil </span><span class="cov0" title="0">{
+                        if isReconnect </span><span class="cov0" title="0">{
+                                log.Error().Err(testErr).Msg("failed to setup testament after reconnect — continuing; watcher will reconnect on next disconnect")
+                        }</span> else<span class="cov0" title="0"> {
+                                // Initial connect: caller decides what to do. Do not leak
+                                // the dialled client.
+                                _ = c.Close()
+                                s.mu.Lock()
+                                s.client = nil
+                                s.mu.Unlock()
+                                return testErr
                         }</span>
                 }
+        }
 
-                <span class="cov9" title="464">reconnectAttempt := 0
-                for </span><span class="cov9" title="464">{
-                        reconnectAttempt++
-                        log.Info().Msgf("Reconnect attempt #%d: Attempting to reconnect...", reconnectAttempt)
+        <span class="cov6" title="27">s.spawnWatcher(c)
 
-                        if wampSession.reconnect() </span><span class="cov9" title="463">{
-                                log.Info().Msgf("Reconnect attempt #%d: Successfully reconnected to WAMP router", reconnectAttempt)
+        if isReconnect &amp;&amp; cb != nil </span><span class="cov2" title="3">{
+                go func() </span><span class="cov2" title="3">{
+                        defer func() </span><span class="cov2" title="3">{
+                                if r := recover(); r != nil </span><span class="cov2" title="2">{
+                                        log.Error().Msgf("Panic in onConnect callback (recovered, agent stays online): %+v\n%s", r, debug.Stack())
+                                }</span>
+                        }()
+                        <span class="cov2" title="3">log.Info().Msg("Re-initializing after reconnection...")
+                        cb(true)
+                        log.Info().Msg("Successfully re-initialized after reconnection")</span>
+                }()
+        }
 
-                                // Invoke onConnect callback if set
-                                wampSession.mu.Lock()
-                                cb := wampSession.onConnect
-                                wampSession.mu.Unlock()
-
-                                if cb != nil </span><span class="cov3" title="5">{
-                                        safe.Go(func() </span><span class="cov3" title="5">{
-                                                log.Info().Msg("Re-initializing after reconnection...")
-                                                cb(true) // reconnect = true
-                                                log.Info().Msg("Successfully re-initialized after reconnection")
-                                        }</span>)
-                                }
-
-                                // Start listening for the next disconnect and restart heartbeat
-                                <span class="cov9" title="463">wampSession.listenForDisconnect()
-                                return</span>
-                        }
-
-                        <span class="cov0" title="0">log.Warn().Msgf("Reconnect attempt #%d: Connection failed or immediately lost, retrying in 1s...", reconnectAttempt)
-                        time.Sleep(time.Second * 1)</span>
-                }
-        })
-
-        <span class="cov9" title="480">log.Debug().Msg("Messenger: Setup disconnect listener")</span>
+        <span class="cov6" title="27">return nil</span>
 }
 
-// startHeartbeat starts a goroutine that periodically sends a heartbeat to verify
-// the connection is alive. If the heartbeat fails consecutively, it signals via heartbeatDone channel.
-func (wampSession *WampSession) startHeartbeat() <span class="cov4" title="17">{
-        heartbeatInterval := wampSession.socketConfig.HeartbeatInterval
-        if heartbeatInterval == 0 </span><span class="cov4" title="13">{
-                heartbeatInterval = DefaultHeartbeatInterval
+// spawnWatcher starts watchDisconnect in its own goroutine with a panic
+// recovery wrapper that re-spawns the watcher on panic so the reconnect
+// machinery survives unexpected failures.
+func (s *WampSession) spawnWatcher(c NexusClient) <span class="cov6" title="27">{
+        go func() </span><span class="cov6" title="27">{
+                defer func() </span><span class="cov6" title="27">{
+                        if r := recover(); r != nil </span><span class="cov0" title="0">{
+                                log.Error().Msgf("Panic in disconnect watcher (recovered): %+v\n%s", r, debug.Stack())
+                                // A panic here would otherwise leave the session with no
+                                // liveness monitor. Re-arm by triggering a reconnect cycle
+                                // directly so the agent stays self-healing.
+                                if s.ctx.Err() == nil </span><span class="cov0" title="0">{
+                                        if connErr := s.connect(true); connErr != nil </span><span class="cov0" title="0">{
+                                                log.Warn().Err(connErr).Msg("reconnect aborted after watcher panic")
+                                        }</span>
+                                }
+                        }
+                }()
+                <span class="cov6" title="27">s.watchDisconnect(c)</span>
+        }()
+}
+
+// watchDisconnect waits on the underlying client's Done channel and triggers
+// a reconnect when it fires. Exits silently if the session is closed.
+func (s *WampSession) watchDisconnect(c NexusClient) <span class="cov6" title="27">{
+        select </span>{
+        case &lt;-c.Done():<span class="cov5" title="13"></span>
+        case &lt;-s.ctx.Done():<span class="cov5" title="14">
+                return</span>
+        }
+
+        <span class="cov5" title="13">log.Warn().Msg("WAMP connection lost, reconnecting...")
+
+        s.cancelContainerStreams()
+
+        if err := s.connect(true); err != nil </span><span class="cov2" title="3">{
+                log.Warn().Err(err).Msg("reconnect aborted")
+        }</span>
+}
+
+// cancelContainerStreams runs container.CancelAllStreams in a bounded window
+// so a stuck Docker daemon cannot block reconnect.
+func (s *WampSession) cancelContainerStreams() <span class="cov5" title="13">{
+        if s.container == nil </span><span class="cov5" title="13">{
+                return
+        }</span>
+        <span class="cov0" title="0">done := make(chan error, 1)
+        go func() </span><span class="cov0" title="0">{
+                defer func() </span><span class="cov0" title="0">{
+                        if r := recover(); r != nil </span><span class="cov0" title="0">{
+                                done &lt;- fmt.Errorf("panic in CancelAllStreams: %+v", r)
+                        }</span>
+                }()
+                <span class="cov0" title="0">done &lt;- s.container.CancelAllStreams()</span>
+        }()
+        <span class="cov0" title="0">select </span>{
+        case err := &lt;-done:<span class="cov0" title="0">
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Error().Err(err).Msg("error cancelling container streams during reconnect")
+                }</span>
+        case &lt;-time.After(cancelStreamsTimeout):<span class="cov0" title="0">
+                log.Warn().Dur("timeout", cancelStreamsTimeout).Msg("container.CancelAllStreams timed out — proceeding with reconnect anyway")</span>
+        }
+}
+
+// setupTestamentBounded wraps SetupTestament with a hard timeout so the
+// testament Call cannot hang the reconnect path even if nexus's response
+// timeout is misconfigured or the router is unresponsive.
+func (s *WampSession) setupTestamentBounded() error <span class="cov0" title="0">{
+        done := make(chan error, 1)
+        go func() </span><span class="cov0" title="0">{
+                defer func() </span><span class="cov0" title="0">{
+                        if r := recover(); r != nil </span><span class="cov0" title="0">{
+                                done &lt;- fmt.Errorf("panic in SetupTestament: %+v", r)
+                        }</span>
+                }()
+                <span class="cov0" title="0">done &lt;- s.SetupTestament()</span>
+        }()
+        <span class="cov0" title="0">select </span>{
+        case err := &lt;-done:<span class="cov0" title="0">
+                return err</span>
+        case &lt;-time.After(setupTestamentTimeout):<span class="cov0" title="0">
+                return fmt.Errorf("SetupTestament timed out after %s", setupTestamentTimeout)</span>
+        }
+}
+
+// dial repeatedly attempts to establish a WAMP connection until one succeeds
+// or the session context is cancelled. Returns the connected client, or
+// context.Canceled if the session is closed during dialling.
+func (s *WampSession) dial() (NexusClient, error) <span class="cov7" title="30">{
+        if s.agentConfig.CommandLineArguments.Offline </span><span class="cov0" title="0">{
+                log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
+                &lt;-s.ctx.Done()
+                return nil, s.ctx.Err()
         }</span>
 
-        // Create a new heartbeat channel only if the current one is nil or closed
-        <span class="cov4" title="17">wampSession.mu.Lock()
-        if wampSession.heartbeatDone == nil </span><span class="cov0" title="0">{
-                wampSession.heartbeatDone = make(chan struct{})
-        }</span> else<span class="cov4" title="17"> {
-                // Check if channel is closed by trying a non-blocking receive
-                select </span>{
-                case &lt;-wampSession.heartbeatDone:<span class="cov0" title="0">
-                        // Channel was closed, create a new one
-                        wampSession.heartbeatDone = make(chan struct{})</span>
-                default:<span class="cov4" title="17"></span>
-                        // Channel is still open, keep using it
+        <span class="cov7" title="30">log.Debug().Msg("Attempting to establish a socket connection...")
+
+        for attempt := 1; ; attempt++ </span><span class="cov7" title="34">{
+                if s.ctx.Err() != nil </span><span class="cov2" title="2">{
+                        return nil, s.ctx.Err()
+                }</span>
+
+                <span class="cov7" title="32">connectionConfig, err := createConnectConfig(s.agentConfig, s.socketConfig)
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Error().Err(err).Msg("failed to create connect config")
+                        if !s.sleepOrDone(reconnectBackoff) </span><span class="cov0" title="0">{
+                                return nil, s.ctx.Err()
+                        }</span>
+                        <span class="cov0" title="0">continue</span>
                 }
+
+                <span class="cov7" title="32">dialCtx := s.ctx
+                var dialCancel context.CancelFunc
+                if s.socketConfig.ConnectionTimeout != 0 </span><span class="cov7" title="32">{
+                        dialCtx, dialCancel = context.WithTimeout(s.ctx, s.socketConfig.ConnectionTimeout)
+                }</span>
+
+                <span class="cov7" title="32">requestStart := time.Now()
+                var c NexusClient
+                if s.clientProvider != nil </span><span class="cov7" title="32">{
+                        c, err = s.clientProvider(dialCtx, s.agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+                }</span> else<span class="cov0" title="0"> {
+                        c, err = client.ConnectNet(dialCtx, s.agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
+                }</span>
+                <span class="cov7" title="32">if dialCancel != nil </span><span class="cov7" title="32">{
+                        dialCancel()
+                }</span>
+
+                <span class="cov7" title="32">if err != nil </span><span class="cov3" title="5">{
+                        if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") </span><span class="cov0" title="0">{
+                                fmt.Println("The IronFlock device connect authentication failed")
+                                os.Exit(1)
+                        }</span>
+                        <span class="cov3" title="5">log.Debug().Err(err).Msgf("Failed to establish a websocket connection (duration: %s, attempt #%d), reattempting in %s", time.Since(requestStart), attempt, reconnectBackoff)
+                        if !s.sleepOrDone(reconnectBackoff) </span><span class="cov1" title="1">{
+                                return nil, s.ctx.Err()
+                        }</span>
+                        <span class="cov3" title="4">continue</span>
+                }
+
+                // Register the device's "I am here" procedure. A second device with
+                // the same serial trying to register the same procedure is rejected
+                // by the router with ProcedureAlreadyExists, which we treat as a
+                // fatal duplicate-serial condition.
+                <span class="cov6" title="27">topic := common.BuildExternalApiTopic(s.agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
+                invokeHandler := func(ctx context.Context, _ *wamp.Invocation) client.InvokeResult </span><span class="cov0" title="0">{
+                        return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
+                }</span>
+                <span class="cov6" title="27">if regErr := c.Register(topic, invokeHandler, nil); regErr != nil </span><span class="cov0" title="0">{
+                        if strings.Contains(regErr.Error(), string(wamp.ErrProcedureAlreadyExists)) </span><span class="cov0" title="0">{
+                                fmt.Printf("a WAMP connection for %s already exists\n", s.agentConfig.ReswarmConfig.SerialNumber)
+                                os.Exit(1)
+                        }</span>
+                        // Non-duplicate Register failure: log it so we can debug, but
+                        // keep the client. If the connection is genuinely dead the
+                        // watcher's Done() will fire and trigger another reconnect.
+                        <span class="cov0" title="0">log.Debug().Err(regErr).Msg("connection-established Register failed (non-fatal)")</span>
+                }
+
+                <span class="cov6" title="27">onDestroyListener := func(_ *wamp.Event) </span><span class="cov0" title="0">{
+                        if s.container != nil </span><span class="cov0" title="0">{
+                                s.container.PruneSystem()
+                        }</span>
+                        <span class="cov0" title="0">os.Exit(1)</span>
+                }
+                <span class="cov6" title="27">if subErr := c.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{}); subErr != nil </span><span class="cov0" title="0">{
+                        log.Debug().Err(subErr).Msg("ondestroy Subscribe failed (non-fatal)")
+                }</span>
+
+                <span class="cov6" title="27">log.Debug().Msgf("Successfully established a connection (duration: %s)", time.Since(requestStart))
+                return c, nil</span>
         }
-        <span class="cov4" title="17">heartbeatDone := wampSession.heartbeatDone
-        wampSession.mu.Unlock()
-
-        safe.Go(func() </span><span class="cov4" title="17">{
-                consecutiveFailures := 0
-                const maxConsecutiveFailures = 2 // Trigger reconnect after 2 failures
-
-                for </span><span class="cov6" title="41">{
-                        time.Sleep(heartbeatInterval)
-
-                        // Check if connection is still alive
-                        if !wampSession.Connected() </span><span class="cov0" title="0">{
-                                log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
-                                consecutiveFailures = 0
-                                continue</span>
-                        }
-
-                        <span class="cov5" title="25">err := wampSession.UpdateRemoteDeviceStatus(CONNECTED)
-                        if err != nil </span><span class="cov2" title="3">{
-                                consecutiveFailures++
-                                log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
-
-                                // If we've failed multiple times, the connection is likely broken
-                                // Signal via heartbeatDone channel to trigger reconnection
-                                if consecutiveFailures &gt;= maxConsecutiveFailures </span><span class="cov1" title="1">{
-                                        log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), signaling reconnection...")
-                                        close(heartbeatDone)
-                                        return // Exit this heartbeat goroutine
-                                }</span>
-                        } else<span class="cov5" title="22"> {
-                                // Reset counter on success
-                                if consecutiveFailures &gt; 0 </span><span class="cov1" title="1">{
-                                        log.Info().Msg("Heartbeat successful, connection restored")
-                                }</span>
-                                <span class="cov5" title="22">consecutiveFailures = 0</span>
-                        }
-                }
-        })
-
-        <span class="cov4" title="17">log.Debug().Msg("Messenger: Started heartbeat")</span>
 }
 
-func (wampSession *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
+// sleepOrDone sleeps for d, returning false if the session context is
+// cancelled before the sleep completes.
+func (s *WampSession) sleepOrDone(d time.Duration) bool <span class="cov3" title="5">{
+        t := time.NewTimer(d)
+        defer t.Stop()
+        select </span>{
+        case &lt;-t.C:<span class="cov3" title="4">
+                return true</span>
+        case &lt;-s.ctx.Done():<span class="cov1" title="1">
+                return false</span>
+        }
+}
 
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) Publish(topic topics.Topic, args []interface{}, kwargs common.Dict, options common.Dict) error <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return ErrNotConnected
         }</span>
 
-        <span class="cov0" title="0">err := client.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs))
-        if err != nil </span><span class="cov0" title="0">{
+        <span class="cov0" title="0">if err := c.Publish(string(topic), wamp.Dict(options), args, wamp.Dict(kwargs)); err != nil </span><span class="cov0" title="0">{
                 log.Debug().Err(err).Str("topic", string(topic)).Msg("Failed to publish to topic")
+                return err
         }</span>
-        <span class="cov0" title="0">return err</span>
+        <span class="cov0" title="0">return nil</span>
 }
 
-// establishSocketConnection establishes a WAMP connection using the session's ClientProvider.
-// If clientProvider is nil, client.ConnectNet is used directly.
-func (wampSession *WampSession) establishSocketConnection() chan NexusClient <span class="cov9" title="481">{
-        agentConfig := wampSession.agentConfig
-        socketConfig := wampSession.socketConfig
-        container := wampSession.container
-        provider := wampSession.clientProvider
-
-        resChan := make(chan NexusClient)
-
-        // never returns a established connection
-        if agentConfig.CommandLineArguments.Offline </span><span class="cov0" title="0">{
-                log.Warn().Msg("Started in offline mode, will not establish a socket connection!")
-                return resChan
-        }</span>
-
-        <span class="cov9" title="481">log.Debug().Msg("Attempting to establish a socket connection...")
-
-        safe.Go(func() </span><span class="cov9" title="481">{
-                for </span><span class="cov9" title="483">{
-                        connectionConfig, err := createConnectConfig(agentConfig, socketConfig)
-                        if err != nil </span><span class="cov0" title="0">{
-                                log.Error().Err(err).Msg("failed to create connect config...")
-                                continue</span>
-                        }
-
-                        <span class="cov9" title="483">var ctx context.Context
-                        var cancelFunc context.CancelFunc
-
-                        if socketConfig.ConnectionTimeout == 0 </span><span class="cov0" title="0">{
-                                ctx = context.Background()
-                        }</span> else<span class="cov9" title="483"> {
-                                ctx, cancelFunc = context.WithTimeout(context.Background(), socketConfig.ConnectionTimeout)
-                        }</span>
-
-                        <span class="cov9" title="483">var duration time.Duration
-                        requestStart := time.Now() // time request
-                        var wClient NexusClient
-                        if provider != nil </span><span class="cov9" title="483">{
-                                wClient, err = provider(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
-                        }</span> else<span class="cov0" title="0"> {
-                                wClient, err = client.ConnectNet(ctx, agentConfig.ReswarmConfig.DeviceEndpointURL, *connectionConfig)
-                        }</span>
-                        <span class="cov9" title="483">if err != nil </span><span class="cov1" title="2">{
-                                if cancelFunc != nil </span><span class="cov1" title="2">{
-                                        cancelFunc()
-                                }</span>
-
-                                <span class="cov1" title="2">duration = time.Since(requestStart)
-
-                                if strings.Contains(err.Error(), "WAMP-CRA client signature is invalid") </span><span class="cov0" title="0">{
-                                        exitMessage := fmt.Sprintln("The IronFlock device connect authentication failed")
-                                        fmt.Println(exitMessage)
-                                        os.Exit(1)
-                                }</span>
-
-                                <span class="cov1" title="2">log.Debug().Stack().Err(err).Msgf("Failed to establish a websocket connection (duration: %s), reattempting... in 1s", duration.String())
-                                time.Sleep(time.Second * 1)
-                                continue</span>
-                        }
-
-                        <span class="cov9" title="481">if cancelFunc != nil </span><span class="cov9" title="481">{
-                                cancelFunc()
-                        }</span>
-
-                        // add a dummy topic that will be used as a means to check if a client has an existing session or not
-                        <span class="cov9" title="481">topic := common.BuildExternalApiTopic(agentConfig.ReswarmConfig.SerialNumber, "wamp_connection_established")
-                        invokeHandler := func(ctx context.Context, i *wamp.Invocation) client.InvokeResult </span><span class="cov0" title="0">{
-                                return client.InvokeResult{Args: wamp.List{"Hello :-)"}}
-                        }</span>
-
-                        <span class="cov9" title="481">err = wClient.Register(topic, invokeHandler, nil)
-                        if err != nil &amp;&amp; strings.Contains(err.Error(), string(wamp.ErrProcedureAlreadyExists)) </span><span class="cov0" title="0">{
-                                exitMessage := fmt.Sprintf("a WAMP connection for %s already exists", agentConfig.ReswarmConfig.SerialNumber)
-                                fmt.Println(exitMessage)
-                                os.Exit(1)
-                        }</span>
-
-                        <span class="cov9" title="481">onDestroyListener := func(event *wamp.Event) </span><span class="cov0" title="0">{
-                                container.PruneSystem()
-                                os.Exit(1)
-                        }</span>
-
-                        <span class="cov9" title="481">wClient.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{})
-
-                        if wClient.Connected() </span><span class="cov9" title="480">{
-                                duration = time.Since(requestStart)
-                                log.Debug().Msgf("Sucessfully established a connection (duration: %s)", duration.String())
-                                resChan &lt;- wClient
-                                close(resChan)
-                                return
-                        }</span>
-
-                        <span class="cov0" title="0">duration = time.Since(requestStart)
-                        if wClient != nil </span><span class="cov0" title="0">{
-                                wClient.Close()
-                        }</span>
-
-                        <span class="cov0" title="0">log.Debug().Msgf("A Session was established, but we are not connected (duration: %s)", duration.String())</span>
-                }
-        })
-
-        <span class="cov9" title="481">return resChan</span>
-}
-
-func (wampSession *WampSession) Connected() bool <span class="cov10" title="592">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-        if client == nil </span><span class="cov1" title="2">{
+func (s *WampSession) Connected() bool <span class="cov10" title="153">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov2" title="3">{
                 return false
         }</span>
-        <span class="cov9" title="590">return client.Connected()</span>
+        <span class="cov9" title="150">return c.Connected()</span>
 }
 
-// Client returns the underlying NexusClient.
-// This is primarily useful for testing to access the MockNexusClient.
-func (wampSession *WampSession) Client() NexusClient <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        defer wampSession.mu.Unlock()
-        return wampSession.client
+// Client returns the underlying NexusClient. Primarily useful for tests.
+func (s *WampSession) Client() NexusClient <span class="cov0" title="0">{
+        return s.currentClient()
 }</span>
 
-func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
+func (s *WampSession) currentClient() NexusClient <span class="cov10" title="153">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        return s.client
+}</span>
 
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return ErrNotConnected
         }</span>
 
@@ -9189,101 +9120,83 @@ func (wampSession *WampSession) Subscribe(topic topics.Topic, cb func(Result) er
                         Arguments:    []interface{}(event.Arguments),
                         ArgumentsKw:  common.Dict(event.ArgumentsKw),
                 }
-                err := cb(cbEventMap)
-                if err != nil </span><span class="cov0" title="0">{
+                if err := cb(cbEventMap); err != nil </span><span class="cov0" title="0">{
                         log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
                 }</span>
         }
 
-        <span class="cov0" title="0">return client.Subscribe(string(topic), handler, wamp.Dict(options))</span>
+        <span class="cov0" title="0">return c.Subscribe(string(topic), handler, wamp.Dict(options))</span>
 }
 
-func (wampSession *WampSession) GetConfig() *config.Config <span class="cov5" title="25">{
-        return wampSession.agentConfig
+func (s *WampSession) GetConfig() *config.Config <span class="cov0" title="0">{
+        return s.agentConfig
 }</span>
 
-func (wampSession *WampSession) SubscriptionID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) SubscriptionID(topic topics.Topic) (uint64, bool) <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return 0, false
         }</span>
-        <span class="cov0" title="0">subID, ok := client.SubscriptionID(string(topic))
+        <span class="cov0" title="0">subID, ok := c.SubscriptionID(string(topic))
         return uint64(subID), ok</span>
 }
 
-func (wampSession *WampSession) RegistrationID(topic topics.Topic) (id uint64, ok bool) <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) RegistrationID(topic topics.Topic) (uint64, bool) <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return 0, false
         }</span>
-        <span class="cov0" title="0">subID, ok := client.RegistrationID(string(topic))
-        return uint64(subID), ok</span>
+        <span class="cov0" title="0">regID, ok := c.RegistrationID(string(topic))
+        return uint64(regID), ok</span>
 }
 
-func (wampSession *WampSession) Call(
+func (s *WampSession) Call(
         ctx context.Context,
         topic topics.Topic,
         args []interface{},
         kwargs common.Dict,
         options common.Dict,
-        progCb func(Result)) (Result, error) <span class="cov5" title="25">{
-
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+        progCb func(Result),
+) (Result, error) <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return Result{}, ErrNotConnected
         }</span>
 
-        <span class="cov5" title="25">var handler func(result *wamp.Result)
+        <span class="cov0" title="0">var handler func(result *wamp.Result)
         if progCb != nil </span><span class="cov0" title="0">{
                 handler = func(result *wamp.Result) </span><span class="cov0" title="0">{
-                        cbResultMap := Result{
+                        progCb(Result{
                                 Request:     uint64(result.Request),
                                 Details:     common.Dict(result.Details),
                                 Arguments:   []interface{}(result.Arguments),
                                 ArgumentsKw: common.Dict(result.ArgumentsKw),
-                        }
-                        progCb(cbResultMap)
+                        })
                 }</span>
         }
 
-        <span class="cov5" title="25">result, err := client.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
-        if err != nil </span><span class="cov2" title="3">{
+        <span class="cov0" title="0">callResult, err := c.Call(ctx, string(topic), wamp.Dict(options), args, wamp.Dict(kwargs), handler)
+        if err != nil </span><span class="cov0" title="0">{
                 return Result{}, err
         }</span>
 
-        <span class="cov5" title="22">callResultMap := Result{
-                Request:     uint64(result.Request),
-                Details:     common.Dict(result.Details),
-                Arguments:   []interface{}(result.Arguments),
-                ArgumentsKw: common.Dict(result.ArgumentsKw),
-        }
-
-        return callResultMap, nil</span>
+        <span class="cov0" title="0">return Result{
+                Request:     uint64(callResult.Request),
+                Details:     common.Dict(callResult.Details),
+                Arguments:   []interface{}(callResult.Arguments),
+                ArgumentsKw: common.Dict(callResult.ArgumentsKw),
+        }, nil</span>
 }
 
-func (wampSession *WampSession) GetSessionID() uint64 <span class="cov5" title="25">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) GetSessionID() uint64 <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return 0
         }</span>
-
-        <span class="cov5" title="25">return uint64(client.ID())</span>
+        <span class="cov0" title="0">return uint64(c.ID())</span>
 }
 
-func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error <span class="cov0" title="0">{
-
+func (s *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error <span class="cov0" title="0">{
         invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult </span><span class="cov0" title="0">{
                 cbInvocationMap := Result{
                         Request:      uint64(invocation.Request),
@@ -9295,119 +9208,97 @@ func (wampSession *WampSession) Register(topic topics.Topic, cb func(ctx context
 
                 resultMap, invokeErr := cb(ctx, cbInvocationMap)
                 if invokeErr != nil </span><span class="cov0" title="0">{
-                        // Global error logging for any Registered WAMP topics
                         log.Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
-
                         return client.InvokeResult{
-                                Err: wamp.URI("wamp.error.canceled"), // TODO: parse Error URI from error
+                                Err: wamp.URI("wamp.error.canceled"),
                                 Args: wamp.List{
                                         wamp.Dict{"error": invokeErr.Error()},
                                 },
                         }
                 }</span>
 
-                <span class="cov0" title="0">kwargs := resultMap.ArgumentsKw
-
-                return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(kwargs)}</span>
+                <span class="cov0" title="0">return client.InvokeResult{Args: resultMap.Arguments, Kwargs: wamp.Dict(resultMap.ArgumentsKw)}</span>
         }
 
-        <span class="cov0" title="0">wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+        <span class="cov0" title="0">c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return ErrNotConnected
         }</span>
 
-        <span class="cov0" title="0">err := client.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})
-        if err != nil </span><span class="cov0" title="0">{
-                return err
-        }</span>
-
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov0" title="0">return c.Register(string(topic), invocationHandler, wamp.Dict{"force_reregister": true})</span>
 }
 
-func (wampSession *WampSession) Unregister(topic topics.Topic) error <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) Unregister(topic topics.Topic) error <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return ErrNotConnected
         }</span>
-
-        <span class="cov0" title="0">return client.Unregister(string(topic))</span>
+        <span class="cov0" title="0">return c.Unregister(string(topic))</span>
 }
 
-func (wampSession *WampSession) Unsubscribe(topic topics.Topic) error <span class="cov0" title="0">{
-        wampSession.mu.Lock()
-        client := wampSession.client
-        wampSession.mu.Unlock()
-
-        if client == nil </span><span class="cov0" title="0">{
+func (s *WampSession) Unsubscribe(topic topics.Topic) error <span class="cov0" title="0">{
+        c := s.currentClient()
+        if c == nil </span><span class="cov0" title="0">{
                 return ErrNotConnected
         }</span>
-
-        <span class="cov0" title="0">return client.Unsubscribe(string(topic))</span>
+        <span class="cov0" title="0">return c.Unsubscribe(string(topic))</span>
 }
 
-// SetupTestament will setup the device's crossbar testament
-func (wampSession *WampSession) SetupTestament() error <span class="cov0" title="0">{
-        ctx := context.Background()
+// SetupTestament installs the device's WAMP testament on the router so the
+// router publishes a DISCONNECTED status if the session drops uncleanly.
+func (s *WampSession) SetupTestament() error <span class="cov0" title="0">{
+        cfg := s.GetConfig()
 
-        config := wampSession.GetConfig()
-
-        // https://github.com/gammazero/nexus/blob/v3/router/realm.go#L1042 on how to form payload
         args := []interface{}{
                 topics.SetDeviceTestament,
                 []interface{}{
                         common.Dict{
-                                "swarm_key":       config.ReswarmConfig.SwarmKey,
-                                "device_key":      config.ReswarmConfig.DeviceKey,
-                                "serial_number":   config.ReswarmConfig.SerialNumber,
-                                "wamp_session_id": wampSession.GetSessionID(),
+                                "swarm_key":       cfg.ReswarmConfig.SwarmKey,
+                                "device_key":      cfg.ReswarmConfig.DeviceKey,
+                                "serial_number":   cfg.ReswarmConfig.SerialNumber,
+                                "wamp_session_id": s.GetSessionID(),
                         },
                 },
                 common.Dict{},
         }
 
-        _, err := wampSession.Call(ctx, topics.MetaProcAddSessionTestament, args, nil, nil, nil)
-        if err != nil </span><span class="cov0" title="0">{
-                return err
-        }</span>
+        _, err := s.Call(context.Background(), topics.MetaProcAddSessionTestament, args, nil, nil, nil)
+        return err
+}</span>
 
-        <span class="cov0" title="0">return nil</span>
+// Close cancels the session's reconnect loop and closes the underlying
+// client. Safe to call multiple times.
+func (s *WampSession) Close() <span class="cov9" title="118">{
+        s.cancel()
+
+        s.mu.Lock()
+        c := s.client
+        s.client = nil
+        s.mu.Unlock()
+
+        if c != nil </span><span class="cov6" title="17">{
+                _ = c.Close()
+        }</span>
 }
 
-func (wampSession *WampSession) Close() <span class="cov9" title="578">{
-        wampSession.mu.Lock()
-        clientToClose := wampSession.client
-        wampSession.client = nil
-        wampSession.mu.Unlock()
-
-        if clientToClose != nil </span><span class="cov9" title="460">{
-                clientToClose.Close()
-        }</span>
-}
-
-func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) <span class="cov9" title="479">{
+func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.Dict) <span class="cov7" title="32">{
         return func(c *wamp.Challenge) (string, wamp.Dict) </span><span class="cov0" title="0">{
                 return crsign.RespondChallenge(deviceSecret, c, nil), wamp.Dict{}
         }</span>
 }
 
-func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov5" title="25">{
-        config := wampSession.GetConfig()
-        ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*10)
-        defer cancelFunc()
+func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error <span class="cov0" title="0">{
+        cfg := s.GetConfig()
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
 
         stats := common.GetStats()
 
         payload := common.Dict{
-                "swarm_key":       config.ReswarmConfig.SwarmKey,
-                "device_key":      config.ReswarmConfig.DeviceKey,
+                "swarm_key":       cfg.ReswarmConfig.SwarmKey,
+                "device_key":      cfg.ReswarmConfig.DeviceKey,
                 "status":          string(status),
-                "wamp_session_id": wampSession.GetSessionID(),
+                "wamp_session_id": s.GetSessionID(),
                 "stats": common.Dict{
                         "cpu_count":           stats.CPUCount,
                         "cpu_usage":           stats.CPUUsagePercent,
@@ -9424,12 +9315,12 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
                 },
         }
 
-        res, err := wampSession.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)
-        if err != nil </span><span class="cov2" title="3">{
+        res, err := s.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)
+        if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
 
-        <span class="cov5" title="22">if res.Arguments == nil || res.Arguments[0] == nil </span><span class="cov5" title="22">{
+        <span class="cov0" title="0">if res.Arguments == nil || res.Arguments[0] == nil </span><span class="cov0" title="0">{
                 return nil
         }</span>
 
@@ -9438,9 +9329,8 @@ func (wampSession *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) er
                 return nil
         }</span>
 
-        <span class="cov0" title="0">reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"])
-        if reswarmBaseURL != "" </span><span class="cov0" title="0">{
-                wampSession.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+        <span class="cov0" title="0">if reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"]); reswarmBaseURL != "" </span><span class="cov0" title="0">{
+                s.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
         }</span>
 
         <span class="cov0" title="0">return nil</span>
@@ -9820,6 +9710,7 @@ func (m *MockMessenger) Reset() <span class="cov0" title="0">{
 
 import (
         "fmt"
+        "net"
         "net/url"
         "os"
         "path/filepath"
@@ -9936,10 +9827,20 @@ func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localP
 func initialize(cfg *config.Config) TunnelConfigBuilder <span class="cov0" title="0">{
         frpcConfigPath := filepath.Join(cfg.CommandLineArguments.AgentDir, "frpc.yaml")
 
-        // Extract server address from device_endpoint_url
+        // Extract server address. Order of precedence:
+        //   1. ReswarmConfig.ApplianceDomain (set on appliance installs from
+        //      APPLIANCE_DOMAIN — the operator's tunnel domain, already correct).
+        //   2. device_endpoint_url with the leading subdomain replaced by "app"
+        //      (cloud case: api.ironflock.com -&gt; app.ironflock.com). This rewrite
+        //      is skipped when the hostname is an IP literal, since splitting on
+        //      "." would mangle e.g. 192.168.0.21 into "app.168.0.21".
+        //   3. Environment-based default.
         serverAddr := PROD_SERVER_ADDR // Default fallback
 
-        if cfg.ReswarmConfig.DeviceEndpointURL != "" </span><span class="cov0" title="0">{
+        if cfg.ReswarmConfig.ApplianceDomain != "" </span><span class="cov0" title="0">{
+                serverAddr = cfg.ReswarmConfig.ApplianceDomain
+                log.Debug().Msgf("Using tunnel server address from appliance_domain: %s", serverAddr)
+        }</span> else<span class="cov0" title="0"> if cfg.ReswarmConfig.DeviceEndpointURL != "" </span><span class="cov0" title="0">{
                 parsedURL, err := url.Parse(cfg.ReswarmConfig.DeviceEndpointURL)
                 if err != nil </span><span class="cov0" title="0">{
                         log.Warn().Err(err).Msgf("Failed to parse device_endpoint_url, using default: %s", serverAddr)
@@ -9947,10 +9848,13 @@ func initialize(cfg *config.Config) TunnelConfigBuilder <span class="cov0" title
                         // Extract hostname (without port)
                         hostname := parsedURL.Hostname()
                         if hostname != "" </span><span class="cov0" title="0">{
-                                // For localhost, use as-is; otherwise replace subdomain with "app"
-                                if hostname == "localhost" || hostname == "127.0.0.1" </span><span class="cov0" title="0">{
-                                        serverAddr = hostname
-                                }</span> else<span class="cov0" title="0"> {
+                                switch </span>{
+                                case hostname == "localhost" || hostname == "127.0.0.1":<span class="cov0" title="0">
+                                        serverAddr = hostname</span>
+                                case net.ParseIP(hostname) != nil:<span class="cov0" title="0">
+                                        // IP literal — no subdomain to replace; use as-is.
+                                        serverAddr = hostname</span>
+                                default:<span class="cov0" title="0">
                                         // Replace subdomain with "app"
                                         // e.g., "api.ironflock.com" -&gt; "app.ironflock.com"
                                         parts := strings.Split(hostname, ".")
@@ -10207,7 +10111,16 @@ func (builder *TunnelConfigBuilder) SaveConfig() <span class="cov0" title="0">{
 }
 </pre>
 		
-		<pre class="file" id="file54" style="display: none">package tunnel
+		<pre class="file" id="file54" style="display: none">//go:build !linux
+
+package tunnel
+
+import "os/exec"
+
+func setPdeathsig(_ *exec.Cmd) {<span class="cov0" title="0">}</span>
+</pre>
+		
+		<pre class="file" id="file55" style="display: none">package tunnel
 
 import (
         "bufio"
@@ -10470,6 +10383,7 @@ func (frpTm *FrpTunnelManager) Start() error <span class="cov0" title="0">{
         ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
         frpCommand := exec.CommandContext(ctx, frpcPath, "-c", frpTm.configBuilder.ConfigPath)
         frpCommand.Dir = filepath.Dir(frpcPath)
+        setPdeathsig(frpCommand)
 
         frpTm.clientProcess = frpCommand
 
