@@ -1,8 +1,10 @@
 package apps
 
 import (
+	"math/rand"
 	"reagent/common"
 	"reagent/safe"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -17,18 +19,36 @@ type CrashLoop struct {
 	Retries uint
 }
 
+var (
+	jitterRand     = rand.New(rand.NewSource(time.Now().UnixNano()))
+	jitterRandLock sync.Mutex
+)
+
+// calculateLoopSleepTime returns the backoff duration before the next restart
+// attempt. The curve is quadratic (5s * retries^2) capped at 1 hour, with ±20%
+// jitter to avoid synchronized retries across a fleet. The polynomial shape is
+// deliberately gentler than exponential so that apps waiting on slow
+// dependencies (peer machines coming online, network ready, mounts appearing)
+// get many patient retries before the interval stretches to the cap.
 func calculateLoopSleepTime(retries uint) time.Duration {
-	var sleepTime time.Duration
 	if retries == 0 {
-		sleepTime = time.Second * 5
-	} else {
-		sleepTime = time.Second * 5 * time.Duration(retries)
+		retries = 1
+	}
+	// Guard against overflow; the cap kicks in well before this anyway.
+	if retries > 100 {
+		retries = 100
 	}
 
-	// cap to 2,5 minutes
-	sleepTime = time.Duration(common.Min(int64(sleepTime), int64(time.Second*150)))
+	sleepTime := time.Second * 5 * time.Duration(retries) * time.Duration(retries)
+	if sleepTime > time.Hour {
+		sleepTime = time.Hour
+	}
 
-	return sleepTime
+	jitterRandLock.Lock()
+	jitter := 0.8 + jitterRand.Float64()*0.4 // factor in [0.8, 1.2)
+	jitterRandLock.Unlock()
+
+	return time.Duration(float64(sleepTime) * jitter)
 }
 
 func (clm *AppManager) retry(crashTask *CrashLoop) {
@@ -36,18 +56,11 @@ func (clm *AppManager) retry(crashTask *CrashLoop) {
 
 	safe.Go(func() {
 
-		// cap to 2,5 minutes
 		sleepTime := calculateLoopSleepTime(crashTask.Retries)
 
 		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
 		time.Sleep(sleepTime)
-
-		if crashTask.Retries == 30 {
-			clm.crashLoopLock.Lock()
-			crashTask.Retries = 0
-			clm.crashLoopLock.Unlock()
-		}
 
 		// exit the goroutine if the crashloop was canceled in the meantime
 		clm.crashLoopLock.Lock()

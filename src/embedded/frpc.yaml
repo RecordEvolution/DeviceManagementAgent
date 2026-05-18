@@ -5,7 +5,7 @@ transport:
         enable: true
 webServer:
     addr: 127.0.0.1
-    port: 30002
+    port: 30001
 log:
     to: /var/log/frpc.log
     level: debug
