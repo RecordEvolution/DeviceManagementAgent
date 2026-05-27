@@ -285,6 +285,14 @@ func (c *Compose) Down(dockerComposePath string) (chan string, *exec.Cmd, error)
 	return c.composeCommand(dockerComposePath, "down", "-v")
 }
 
+// DownRemoveOrphans tears down the whole compose project — services in the
+// file plus any orphan containers tagged with the same project name (services
+// that were removed or renamed in a new compose file). Volumes are preserved
+// (no `-v`) so user data survives the update.
+func (c *Compose) DownRemoveOrphans(dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommand(dockerComposePath, "down", "--remove-orphans")
+}
+
 func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {
 	composeListEntry, err := c.List()
 	if err != nil {
