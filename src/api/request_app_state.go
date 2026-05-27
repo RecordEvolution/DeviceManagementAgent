@@ -52,6 +52,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	currentStateKw2 := kwargs["state"]
 	requestorAccountKeyKw := kwargs["requestor_account_key"]
 	requestorAccountKeyKw2 := kwargs["account_id"]
+	deviceOwnerAccountKeyKw := kwargs["device_owner_account_key"]
 	environmentKw := kwargs["environment"]
 	portsKw := kwargs["ports"]
 	// dtaKeyKw := kwargs["device_to_app_key"]
@@ -70,6 +71,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var newReleaseKey uint64
 	var requestorAccountKey uint64
 	var requestorAccountKey2 uint64
+	var deviceOwnerAccountKey uint64
 	var appName string
 	var stage string
 	var requestedState string
@@ -177,6 +179,27 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 				return common.TransitionPayload{}, err
 			}
 			requestorAccountKey2 = uint64(value)
+		}
+	}
+
+	// device_owner_account_key comes from device.f_read_sync_status on the cloud
+	// side and lets RequestAppState mint the registry token under the device
+	// owner instead of the requestor — required when the requestor is not the
+	// app owner (determine_registry_access in auth.ts requires app.account_key
+	// to match the JWT caller).
+	if deviceOwnerAccountKeyKw != nil {
+		deviceOwnerAccountKey, ok = deviceOwnerAccountKeyKw.(uint64)
+		if !ok {
+			deviceOwnerAccountKeyString, ok := deviceOwnerAccountKeyKw.(string)
+			if !ok {
+				return common.TransitionPayload{}, fmt.Errorf("%w deviceOwnerAccountKey", errdefs.ErrFailedToParse)
+			}
+
+			value, err := strconv.Atoi(deviceOwnerAccountKeyString)
+			if err != nil {
+				return common.TransitionPayload{}, err
+			}
+			deviceOwnerAccountKey = uint64(value)
 		}
 	}
 
@@ -336,6 +359,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 		common.AppState(requestedState), releaseKey, newReleaseKey, config,
 	)
 
+	payload.DeviceOwnerAccountKey = deviceOwnerAccountKey
 	payload.RequestUpdate = requestUpdate
 
 	// Version used to publish a release

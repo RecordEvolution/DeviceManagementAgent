@@ -34,6 +34,30 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
+	if err == nil {
+
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
+		if err != nil {
+			return err
+		}
+
+		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		// should return 'container not found' error, this way we know it's removed successfully
+		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
+		err := <-errC
+		if !errdefs.IsContainerNotFound(err) {
+			return err
+		}
+	}
+
 	config := sm.Container.GetConfig()
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
 	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
@@ -46,10 +70,7 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	// Pull the new image while the old container keeps serving. Docker images are
-	// content-addressable, so the running container is unaffected by the new layers
-	// landing on disk. If the pull fails we return early without touching the
-	// container, so the app keeps running on its current version.
+	// Need to authenticate to private registry to determine proper privileges to pull the app
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
 		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
@@ -91,31 +112,6 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		}
 
 		return streamErr
-	}
-
-	// Pull succeeded — now swap: stop+remove the old container so the observer
-	// can spawn a fresh one from the new image when transitioning to RUNNING.
-	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
-	if err == nil {
-		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
-		if err != nil {
-			return err
-		}
-
-		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-
-		// should return 'container not found' error, this way we know it's removed successfully
-		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
-		err := <-errC
-		if !errdefs.IsContainerNotFound(err) {
-			return err
-		}
 	}
 
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
@@ -181,6 +177,20 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	// Tear down the whole project (services in the new file + any orphan
+	// containers tagged with the same project name). Stop+Remove against the
+	// new file alone would leave behind containers for services that were
+	// renamed or dropped in the new compose. Volumes are preserved (no `-v`).
+	_, cmd, err := compose.DownRemoveOrphans(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
 	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
 	if err != nil {
@@ -201,10 +211,6 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	// Pull the new images while the old stack keeps serving. compose.Pull uses
-	// the freshly-written compose file (new image tags), but the running
-	// containers are unaffected by new layers landing on disk. If the pull fails
-	// we return early without touching the stack, so the app keeps running.
 	pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
 	if err != nil {
 		return err
@@ -216,21 +222,6 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	}
 
 	err = pullCmd.Wait()
-	if err != nil {
-		return err
-	}
-
-	// Pull succeeded — now swap: tear down the old stack so the observer can
-	// bring up a fresh one from the new images when transitioning to RUNNING.
-	// Use down --remove-orphans (not stop+rm) so containers belonging to
-	// services that were renamed or removed in the new compose file are also
-	// cleaned up — otherwise they keep running on the old image as orphans.
-	_, cmd, err := compose.DownRemoveOrphans(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
 	if err != nil {
 		return err
 	}
