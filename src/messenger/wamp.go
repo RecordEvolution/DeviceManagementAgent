@@ -38,6 +38,11 @@ const setupTestamentTimeout = 10 * time.Second
 // runs before a reconnect attempt. If Docker is stuck, we still reconnect.
 const cancelStreamsTimeout = 5 * time.Second
 
+// DefaultHeartbeatInterval is the interval between application-level heartbeats
+// (a device-status update that doubles as a liveness probe + periodic stats
+// report) used when SocketConfig.HeartbeatInterval is zero.
+const DefaultHeartbeatInterval = 30 * time.Second
+
 type WampSession struct {
 	client         NexusClient
 	container      container.Container
@@ -45,6 +50,7 @@ type WampSession struct {
 	socketConfig   *SocketConfig
 	clientProvider ClientProvider // nil means use default client.ConnectNet
 	onConnect      func(reconnect bool)
+	heartbeatDone  chan struct{} // closed by the heartbeat when it detects a dead connection; re-created per connect()
 
 	mu     sync.Mutex
 	ctx    context.Context
@@ -75,6 +81,7 @@ type SocketConfig struct {
 	PingPongTimeout   time.Duration
 	ResponseTimeout   time.Duration
 	ConnectionTimeout time.Duration
+	HeartbeatInterval time.Duration // Default: 30s (DefaultHeartbeatInterval) if zero
 	SetupTestament    bool
 }
 
@@ -171,6 +178,10 @@ func (s *WampSession) connect(isReconnect bool) error {
 	s.mu.Lock()
 	s.client = c
 	cb := s.onConnect
+	// Fresh per-connection heartbeat channel: the heartbeat closes it on
+	// repeated failures and the watcher treats that as a lost connection.
+	hbDone := make(chan struct{})
+	s.heartbeatDone = hbDone
 	s.mu.Unlock()
 
 	if s.socketConfig.SetupTestament {
@@ -189,7 +200,8 @@ func (s *WampSession) connect(isReconnect bool) error {
 		}
 	}
 
-	s.spawnWatcher(c)
+	s.spawnWatcher(c, hbDone)
+	s.startHeartbeat(hbDone)
 
 	if isReconnect && cb != nil {
 		go func() {
@@ -210,7 +222,7 @@ func (s *WampSession) connect(isReconnect bool) error {
 // spawnWatcher starts watchDisconnect in its own goroutine with a panic
 // recovery wrapper that re-spawns the watcher on panic so the reconnect
 // machinery survives unexpected failures.
-func (s *WampSession) spawnWatcher(c NexusClient) {
+func (s *WampSession) spawnWatcher(c NexusClient, hbDone chan struct{}) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -225,26 +237,93 @@ func (s *WampSession) spawnWatcher(c NexusClient) {
 				}
 			}
 		}()
-		s.watchDisconnect(c)
+		s.watchDisconnect(c, hbDone)
 	}()
 }
 
-// watchDisconnect waits on the underlying client's Done channel and triggers
-// a reconnect when it fires. Exits silently if the session is closed.
-func (s *WampSession) watchDisconnect(c NexusClient) {
+// watchDisconnect waits on the underlying client's Done channel OR the
+// heartbeat's failure signal and triggers a reconnect when either fires.
+// Exits silently if the session is closed.
+func (s *WampSession) watchDisconnect(c NexusClient, hbDone chan struct{}) {
 	select {
 	case <-c.Done():
+		log.Warn().Msg("WAMP connection lost, reconnecting...")
+	case <-hbDone:
+		log.Warn().Msg("Heartbeat detected connection failure, reconnecting...")
 	case <-s.ctx.Done():
 		return
 	}
-
-	log.Warn().Msg("WAMP connection lost, reconnecting...")
 
 	s.cancelContainerStreams()
 
 	if err := s.connect(true); err != nil {
 		log.Warn().Err(err).Msg("reconnect aborted")
 	}
+}
+
+// startHeartbeat periodically sends a device-status update (CONNECTED) that
+// doubles as an application-level liveness probe and a periodic stats report.
+// After maxConsecutiveFailures failed sends it closes hbDone, which the
+// disconnect watcher treats as a lost connection and uses to drive a reconnect.
+// hbDone is the per-connection channel created in connect(); once a newer
+// connection replaces s.heartbeatDone this goroutine exits, so heartbeats never
+// accumulate across reconnects.
+func (s *WampSession) startHeartbeat(hbDone chan struct{}) {
+	heartbeatInterval := s.socketConfig.HeartbeatInterval
+	if heartbeatInterval == 0 {
+		heartbeatInterval = DefaultHeartbeatInterval
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Msgf("Panic in heartbeat (recovered): %+v\n%s", r, debug.Stack())
+			}
+		}()
+
+		consecutiveFailures := 0
+		const maxConsecutiveFailures = 2 // trigger reconnect after 2 failures
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(heartbeatInterval):
+			}
+
+			// A newer connection has taken over (e.g. after a transport-level
+			// reconnect): stop this heartbeat so only one runs at a time.
+			s.mu.Lock()
+			current := s.heartbeatDone
+			s.mu.Unlock()
+			if current != hbDone {
+				return
+			}
+
+			if !s.Connected() {
+				log.Warn().Msg("Connection lost detected in heartbeat, waiting for reconnection...")
+				consecutiveFailures = 0
+				continue
+			}
+
+			if err := s.UpdateRemoteDeviceStatus(CONNECTED); err != nil {
+				consecutiveFailures++
+				log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
+				if consecutiveFailures >= maxConsecutiveFailures {
+					log.Error().Msg("Connection appears to be broken (multiple heartbeat failures), signaling reconnection...")
+					close(hbDone)
+					return
+				}
+			} else {
+				if consecutiveFailures > 0 {
+					log.Info().Msg("Heartbeat successful, connection restored")
+				}
+				consecutiveFailures = 0
+			}
+		}
+	}()
+
+	log.Debug().Msg("Messenger: Started heartbeat")
 }
 
 // cancelContainerStreams runs container.CancelAllStreams in a bounded window
