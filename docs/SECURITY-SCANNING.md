@@ -85,15 +85,31 @@ gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagemen
 Because CI both attests and publishes the same bytes, the attestation matches what ships —
 as long as releases go through CI (tag push) rather than a local `just rollout`.
 
-## Remediation notes (from the initial baseline)
+## Remediation status
 
-- **Most of our own findings are Go standard-library CVEs** (e.g. `crypto/tls`,
-  `net/url`) — fixed by **bumping the Go toolchain** (build with the latest `1.25.x`).
-  CI's `setup-go` already uses the latest patch for the `go.mod` version.
-- **The frpc binary carries its own (larger) set of CVEs** because the pinned release
-  is built with an older Go and bundles older deps. Remediate by **bumping
-  `FRP_VERSION`** (and the matching constant in `src/embedded/frpc.go` /
-  `scripts/build.sh`) to a newer frpc release.
+- **Go standard-library CVEs** (the bulk of our findings — `crypto/tls`, `crypto/x509`,
+  `net/url`, `net/http`, …) are fixed by the **Go toolchain**. We pin **`toolchain go1.26.4`**
+  in `src/go.mod` (and `golang:1.26-alpine` in the builder `Dockerfile`); CI's `setup-go`
+  reads `go.mod`. This cleared all 14 reachable stdlib CVEs. Bump the toolchain as new ones
+  are disclosed.
+- **frpc binary CVEs** — remediated by bumping **`FRP_VERSION`** to a newer release (kept in
+  sync across `Justfile`, `scripts/build.sh`, and `src/embedded/frpc.go`).
+
+### Accepted findings (not actionable)
+
+`govulncheck` reports two CVEs in `github.com/docker/docker` as reachable; they are
+**accepted / not applicable**:
+
+- **GO-2026-4887** (AuthZ-plugin bypass) and **GO-2026-4883** (plugin-privilege off-by-one)
+  are **daemon-side** Moby issues. reagent is a Docker **client** — it manages containers and
+  never runs an authorization plugin or installs plugins, so the vulnerable code paths are not
+  exercised. govulncheck flags them only because importing the client SDK pulls the module's
+  `init()` chain into the call graph.
+- There is **no fix in `github.com/docker/docker`** (all versions affected, incl. v28.x); the
+  fix lives only in the renamed, still-**beta** module `github.com/moby/moby/v2@2.0.0-beta.8`.
+  Migrating a production agent to a beta Docker SDK isn't warranted for a non-applicable issue.
+
+Revisit when `github.com/moby/moby/v2` reaches a stable release (then migrate the SDK import).
 
 ## Roadmap: report-only → gating
 

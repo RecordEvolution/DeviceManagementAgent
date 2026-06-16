@@ -70,7 +70,7 @@ func (docker *Docker) ListenForContainerEvents(ctx context.Context) (<-chan even
 	eventFilters := filters.NewArgs()
 	eventFilters.Add("type", "container")
 
-	return docker.client.Events(ctx, types.EventsOptions{Filters: eventFilters})
+	return docker.client.Events(ctx, events.ListOptions{Filters: eventFilters})
 }
 
 // TODO: simplifiy option parsing
@@ -639,14 +639,14 @@ func (docker *Docker) ResizeExecContainer(ctx context.Context, execID string, di
 }
 
 func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shell string) (HijackedResponse, error) {
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		AttachStderr: true,
 		AttachStdout: true,
 		AttachStdin:  true,
 		Tty:          true,
 		Cmd:          []string{shell},
 	}
-	execOptions := types.ExecStartCheck{
+	execOptions := container.ExecAttachOptions{
 		Tty: true,
 	}
 
@@ -673,13 +673,13 @@ func (docker *Docker) ExecAttach(ctx context.Context, containerName string, shel
 }
 
 func (docker *Docker) ExecCommand(ctx context.Context, containerName string, cmd []string) (HijackedResponse, error) {
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		AttachStderr: true,
 		AttachStdout: true,
 		Tty:          false,
 		Cmd:          cmd,
 	}
-	execOptions := types.ExecStartCheck{}
+	execOptions := container.ExecAttachOptions{}
 
 	container, err := docker.GetContainer(ctx, containerName)
 	if err != nil {
