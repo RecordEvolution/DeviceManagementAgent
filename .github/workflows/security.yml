@@ -32,11 +32,12 @@ jobs:
     name: govulncheck (→ Security tab)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
-      - uses: extractions/setup-just@v2
+          cache-dependency-path: src/go.sum
+      - uses: extractions/setup-just@v4
 
       # Generates build/sarif/govulncheck-{code,frpc}.sarif. `just sarif` runs
       # `download-frpc` first (the source build pulls in //go:embed frpc_binary).
@@ -55,7 +56,7 @@ jobs:
       - name: Upload code SARIF → Security tab
         if: always()
         continue-on-error: true # no-op without Code scanning / GHAS
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: build/sarif/govulncheck-code.sarif
           category: govulncheck-code
@@ -63,14 +64,14 @@ jobs:
       - name: Upload frpc SARIF → Security tab
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: build/sarif/govulncheck-frpc.sarif
           category: govulncheck-frpc
 
       - name: Upload SARIF artifact (fallback)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: govulncheck-sarif
           path: build/sarif/*.sarif
@@ -80,13 +81,14 @@ jobs:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
-      - uses: extractions/setup-just@v2
+          cache-dependency-path: src/go.sum
+      - uses: extractions/setup-just@v4
       - run: just sbom
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: build/sbom/*.cdx.json

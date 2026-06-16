@@ -66,7 +66,7 @@ func TestTransientToActualState(t *testing.T) {
 		{PRESENT, PRESENT},
 		{FAILED, FAILED},
 		{STOPPED, STOPPED},
-		{BUILT, BUILT},     // transient but not remapped
+		{BUILT, BUILT}, // transient but not remapped
 		{PUBLISHED, PUBLISHED},
 	}
 	for _, tt := range tests {

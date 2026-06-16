@@ -92,35 +92,35 @@ type PortForwardRule struct {
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.
 type TransitionPayload struct {
-	RequestedState         AppState
-	CurrentState           AppState
-	Stage                  Stage
-	RequestorAccountKey    uint64
-	DeviceOwnerAccountKey  uint64
-	DeviceToAppKey         uint64
-	AppKey               uint64
-	CallerAuthID         int
-	AppName              string
-	ImageName            StageBasedResult
-	PresentImageName     string
-	RegistryImageName    StageBasedResult
-	ContainerName        StageBasedResult
-	DockerCredentials    map[string]DockerCredential
-	EnvironmentVariables map[string]any
-	EnvironmentTemplate  map[string]any
-	DockerCompose        map[string]any
-	NewDockerCompose     map[string]any
-	Ports                []any
-	PublishContainerName string
-	RegisteryToken       string
-	NewestVersion        string
-	PresentVersion       string
-	ReleaseKey           uint64
-	NewReleaseKey        uint64
-	Version              string
-	RequestUpdate        bool
-	Retrying             bool
-	CancelTransition     bool
+	RequestedState        AppState
+	CurrentState          AppState
+	Stage                 Stage
+	RequestorAccountKey   uint64
+	DeviceOwnerAccountKey uint64
+	DeviceToAppKey        uint64
+	AppKey                uint64
+	CallerAuthID          int
+	AppName               string
+	ImageName             StageBasedResult
+	PresentImageName      string
+	RegistryImageName     StageBasedResult
+	ContainerName         StageBasedResult
+	DockerCredentials     map[string]DockerCredential
+	EnvironmentVariables  map[string]any
+	EnvironmentTemplate   map[string]any
+	DockerCompose         map[string]any
+	NewDockerCompose      map[string]any
+	Ports                 []any
+	PublishContainerName  string
+	RegisteryToken        string
+	NewestVersion         string
+	PresentVersion        string
+	ReleaseKey            uint64
+	NewReleaseKey         uint64
+	Version               string
+	RequestUpdate         bool
+	Retrying              bool
+	CancelTransition      bool
 }
 
 func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,

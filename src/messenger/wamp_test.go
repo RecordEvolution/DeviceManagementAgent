@@ -503,4 +503,3 @@ func TestWampSession_Reconnection(t *testing.T) {
 		assert.False(t, session.Connected())
 	})
 }
-

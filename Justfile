@@ -79,6 +79,39 @@ coverage-badge: test-coverage
 test-race: download-frpc
     cd src && go test -short -race ./...
 
+# go vet excludes the generated networkmanager bindings (benign codegen vet note).
+# Static checks: gofmt, go mod tidy, go vet, and a full compile.
+lint: download-frpc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    echo "==> gofmt"
+    unformatted=$(gofmt -l .)
+    if [ -n "$unformatted" ]; then echo "unformatted (run: gofmt -w src):"; echo "$unformatted"; exit 1; fi
+    echo "==> go mod tidy (diff)"
+    go mod tidy -diff
+    echo "==> go vet"
+    go vet -tags integration $(go list ./... | grep -v '/networkmanager')
+    echo "==> go build"
+    go build ./...
+    echo "==> lint OK"
+
+# Runs EVERYTHING: lint, then unit tests under the race detector + randomized
+# order, then the full integration suite with coverage. (Integration runs WITHOUT
+# -race — docker/PTY + race is timing-flaky; tests self-skip absent resources.)
+# The slowest, most thorough local check — what CI must pass to release.
+test-all: lint
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    echo "==> unit tests (race + shuffle, no cache)"
+    go test -race -shuffle=on -count=1 ./...
+    echo "==> integration suite + coverage (no race; self-skips absent resources)"
+    go test -tags integration -covermode=atomic -coverprofile=coverage.out -count=1 ./...
+    echo "==> coverage:"
+    go tool cover -func=coverage.out | tail -1
+    echo "==> ALL checks passed"
+
 # Regenerate testify mocks into src/testutil/mocks from .mockery.yaml.
 test-generate-mocks:
     cd src && go run github.com/vektra/mockery/v3@{{MOCKERY_VERSION}}
@@ -123,6 +156,11 @@ sarif: download-frpc
     mkdir -p build/sarif
     (cd src && go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif ./... > ../build/sarif/govulncheck-code.sarif)
     go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif -mode=binary src/embedded/frpc_binary > build/sarif/govulncheck-frpc.sarif
+    # govulncheck's SARIF can emit duplicate entries in result.stacks, which GitHub
+    # code-scanning rejects ("contains duplicate item"). Dedup them before upload.
+    for f in build/sarif/govulncheck-code.sarif build/sarif/govulncheck-frpc.sarif; do
+        jq '.runs |= map(.results |= map(if .stacks then .stacks |= unique else . end))' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    done
     echo "SARIF written to build/sarif/"
 
 # Scans are inlined (not `just vuln-go`) so a "vulns found" non-zero exit doesn't

@@ -74,14 +74,14 @@ func TestBuildTransitionPayload(t *testing.T) {
 	}
 
 	payload := BuildTransitionPayload(
-		6,           // appKey
-		"MyApp",     // appName
-		99,          // requestorAccountKey
-		PROD,        // stage
-		PRESENT,     // currentState
-		RUNNING,     // requestedState
-		11,          // releaseKey
-		12,          // newReleaseKey
+		6,       // appKey
+		"MyApp", // appName
+		99,      // requestorAccountKey
+		PROD,    // stage
+		PRESENT, // currentState
+		RUNNING, // requestedState
+		11,      // releaseKey
+		12,      // newReleaseKey
 		cfg,
 	)
 

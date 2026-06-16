@@ -268,12 +268,12 @@ func TestMin(t *testing.T) {
 
 func TestParseContainerName(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantStage   Stage
-		wantAppKey  uint64
-		wantName    string
-		expectErr   bool
+		name       string
+		input      string
+		wantStage  Stage
+		wantAppKey uint64
+		wantName   string
+		expectErr  bool
 	}{
 		{"prod simple", "prod_6_myapp", PROD, 6, "myapp", false},
 		{"dev simple", "dev_42_netdata", DEV, 42, "netdata", false},
