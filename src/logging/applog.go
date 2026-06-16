@@ -752,22 +752,6 @@ func (lm *LogManager) setPublishStateByContainerName(containerName string, subsc
 
 }
 
-func (lm *LogManager) setPublishStateBySubscriptionID(subscriptionID string, state bool) {
-
-	lm.logProcessEntriesMutex.Lock()
-	for _, logProcess := range lm.logProcessEntries {
-
-		// If this stream already exists in the array, do not add it
-		if logProcess.SubscriptionID == subscriptionID {
-			logProcess.subscriptionStateMutex.Lock()
-			logProcess.Publish = state
-			logProcess.subscriptionStateMutex.Unlock()
-		}
-	}
-
-	lm.logProcessEntriesMutex.Unlock()
-}
-
 func (lm *LogManager) SetupEndpoints() error {
 	err := lm.Messenger.Subscribe(topics.MetaEventSubOnCreate, func(r messenger.Result) error {
 		safe.Go(func() {
@@ -842,15 +826,29 @@ func (lm *LogManager) SetupEndpoints() error {
 			id := fmt.Sprint(r.Arguments[1]) // the id of the subscription that was deleted, in the delete we only receive the ID
 
 			subscription := lm.GetLogTaskBySubscriptionID(id)
+			if subscription == nil {
+				return
+			}
 
-			if subscription != nil {
-				lm.setPublishStateBySubscriptionID(subscription.SubscriptionID, false)
-
-				// no clients are subscribed, should stop publishing
-				subscription.subscriptionStateMutex.Lock()
+			// Close the gate atomically AND only if this is still the active
+			// subscription. on_create / on_delete arrive on separate goroutines,
+			// so a browser refresh — which deletes the old subscription and
+			// creates a new one almost simultaneously — can interleave as:
+			//   1. this on_delete reads the task (id still == old)
+			//   2. on_create adopts the new id and sets Publish = true
+			//   3. this on_delete writes Publish = false  ← wedges it OFF
+			// Re-checking SubscriptionID == id under the same lock that on_create
+			// uses makes the check-and-set atomic: once on_create has adopted the
+			// new id, this delete is a no-op, so the refreshed page keeps getting
+			// logs regardless of goroutine ordering.
+			subscription.subscriptionStateMutex.Lock()
+			stillActive := subscription.SubscriptionID == id
+			if stillActive {
 				subscription.Publish = false
-				subscription.subscriptionStateMutex.Unlock()
+			}
+			subscription.subscriptionStateMutex.Unlock()
 
+			if stillActive {
 				log.Print("Log Manager: Stopped publishing logs for ", subscription.ContainerName)
 			}
 		})
