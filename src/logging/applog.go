@@ -104,6 +104,135 @@ func NewLogManager(cont container.Container, msg messenger.Messenger, db persist
 // Amount of lines that will be stored for each app
 const historyStorageLimit = 100
 
+// Log forwarding over WAMP is coalesced and rate-limited. A chatty container
+// can emit log lines far faster than the shared WAMP connection can drain them
+// to the browser; publishing one message per line backs up the single outbound
+// websocket queue, stalls keepalive ping/pong, and gets the device dropped by
+// the router (and ultimately restarted on reconnect). Batching + a hard
+// per-window cap keep one container from ever saturating the connection.
+const (
+	// logFlushInterval is how often buffered container log lines are published
+	// as a single batched (newline-joined) message.
+	logFlushInterval = 200 * time.Millisecond
+	// maxFlushBytes caps how many bytes of log data are published per flush.
+	// Anything beyond this in a single window is dropped (with a marker) so a
+	// runaway container cannot saturate the WAMP connection.
+	maxFlushBytes = 256 * 1024
+	// maxBufferBytes bounds the in-memory backlog between flushes so a stalled
+	// publisher can't grow the agent's heap without limit.
+	maxBufferBytes = 1024 * 1024
+	// maxLogLineBytes is the largest single log line we will read before the
+	// line is force-split. Prevents one pathological long line from silently
+	// ending the stream (bufio.Scanner's default 64 KB limit does exactly that).
+	maxLogLineBytes = 1024 * 1024
+)
+
+// logBatcher coalesces container log lines and publishes them over WAMP at a
+// bounded rate. It decouples the log read loop from the WAMP write path: the
+// read loop only ever appends to an in-memory buffer (and never blocks on the
+// shared connection), while a single goroutine flushes that buffer on a timer.
+// The browser consumer already splits incoming chunks on "\n", so a batched
+// multi-line message renders identically to the previous per-line messages.
+type logBatcher struct {
+	publish func(joined string)
+
+	mu      sync.Mutex
+	lines   []string
+	bytes   int
+	dropped int
+
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
+}
+
+func newLogBatcher(publish func(joined string)) *logBatcher {
+	b := &logBatcher{
+		publish: publish,
+		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	safe.Go(b.run)
+	return b
+}
+
+func (b *logBatcher) run() {
+	defer close(b.done)
+	ticker := time.NewTicker(logFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			b.flush()
+		case <-b.stop:
+			b.flush() // final flush of whatever is still buffered
+			return
+		}
+	}
+}
+
+// add buffers a single log line. It never blocks: if the in-memory backlog is
+// already at its cap, the line is dropped and counted so the next flush can
+// surface a "lines dropped" marker.
+func (b *logBatcher) add(line string) {
+	b.mu.Lock()
+	if b.bytes+len(line)+1 > maxBufferBytes {
+		b.dropped++
+		b.mu.Unlock()
+		return
+	}
+	b.lines = append(b.lines, line)
+	b.bytes += len(line) + 1
+	b.mu.Unlock()
+}
+
+func (b *logBatcher) flush() {
+	b.mu.Lock()
+	if len(b.lines) == 0 && b.dropped == 0 {
+		b.mu.Unlock()
+		return
+	}
+	lines := b.lines
+	dropped := b.dropped
+	b.lines = nil
+	b.bytes = 0
+	b.dropped = 0
+	b.mu.Unlock()
+
+	var sb strings.Builder
+	used := 0
+	for i, line := range lines {
+		if used+len(line)+1 > maxFlushBytes {
+			dropped += len(lines) - i
+			break
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(line)
+		used += len(line) + 1
+	}
+
+	if dropped > 0 {
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		fmt.Fprintf(&sb, "… %d log line(s) dropped (rate limit)", dropped)
+	}
+
+	if sb.Len() > 0 {
+		b.publish(sb.String())
+	}
+}
+
+// close performs a final flush and stops the flush goroutine.
+func (b *logBatcher) close() {
+	b.stopOnce.Do(func() {
+		close(b.stop)
+	})
+	<-b.done
+}
+
 type JSONProgress struct {
 	terminalFd uintptr
 	Current    int64  `json:"current,omitempty"`
@@ -230,6 +359,13 @@ func (lm *LogManager) emitChannelStream(logEntry *LogProccess) error {
 	logEntry.Active = true
 	logEntry.subscriptionStateMutex.Unlock()
 
+	batcher := newLogBatcher(func(joined string) {
+		if err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{joined}, nil, nil); err != nil {
+			log.Error().Err(err).Msgf("failed to publish to %s in publish loop", topic)
+		}
+	})
+	defer batcher.close()
+
 	// var lastChunk string
 	// if theres an error it will always be the last chunk of the stream
 	for chunk := range logEntry.ChannelStream {
@@ -245,10 +381,7 @@ func (lm *LogManager) emitChannelStream(logEntry *LogProccess) error {
 		logEntry.subscriptionStateMutex.Unlock()
 
 		if shouldPublish {
-			err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
-			if err != nil {
-				log.Error().Err(err).Msgf("failed to publish to %s in publish loop", topic)
-			}
+			batcher.add(chunk)
 		}
 
 		// lastChunk = chunk
@@ -287,6 +420,9 @@ func (lm *LogManager) emitStream(logEntry *LogProccess) error {
 
 	topic := lm.buildTopic(logEntry.ContainerName)
 	scanner := bufio.NewScanner(logEntry.Stream)
+	// Raise the per-line cap above bufio.Scanner's 64 KB default; a single
+	// longer line otherwise stops the scan silently and freezes the stream.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineBytes)
 
 	// cleanup func, closes the stream + saves the current logs in the database
 	defer func() {
@@ -339,6 +475,13 @@ func (lm *LogManager) emitStream(logEntry *LogProccess) error {
 	logEntry.Active = true
 	logEntry.subscriptionStateMutex.Unlock()
 
+	batcher := newLogBatcher(func(joined string) {
+		if err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{joined}, nil, nil); err != nil {
+			log.Error().Err(err).Msgf("failed to publish to %s in publish loop", topic)
+		}
+	})
+	defer batcher.close()
+
 	var lastChunk string // if theres an error it will always be the last chunk of the stream
 	for scanner.Scan() {
 		chunk := scanner.Text()
@@ -355,10 +498,7 @@ func (lm *LogManager) emitStream(logEntry *LogProccess) error {
 		logEntry.subscriptionStateMutex.Unlock()
 
 		if shouldPublish {
-			err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{chunk}, nil, nil)
-			if err != nil {
-				log.Error().Err(err).Msgf("failed to publish to %s in publish loop", topic)
-			}
+			batcher.add(chunk)
 		}
 
 		lastChunk = chunk

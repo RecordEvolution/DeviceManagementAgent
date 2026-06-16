@@ -30,6 +30,16 @@ import (
 // gives up while the session context is alive.
 const reconnectBackoff = time.Second
 
+// maxDuplicateSerialAttempts bounds how many consecutive reconnects may hit
+// ProcedureAlreadyExists when registering the connection-established procedure
+// before we conclude a second device is genuinely using this serial. After a
+// transient drop (e.g. keepalive stalled by a log flood) the router may not
+// have reaped our previous session yet, so the re-register races its teardown.
+// Tolerating a few attempts (~maxDuplicateSerialAttempts * reconnectBackoff)
+// lets that clear without restarting the agent, while a real duplicate serial
+// — which never clears — still trips the exit.
+const maxDuplicateSerialAttempts = 8
+
 // setupTestamentTimeout bounds the testament-installation Call so a stuck
 // router can never wedge the reconnect path.
 const setupTestamentTimeout = 10 * time.Second
@@ -384,6 +394,7 @@ func (s *WampSession) dial() (NexusClient, error) {
 
 	log.Debug().Msg("Attempting to establish a socket connection...")
 
+	dupRegisterFailures := 0
 	for attempt := 1; ; attempt++ {
 		if s.ctx.Err() != nil {
 			return nil, s.ctx.Err()
@@ -437,14 +448,31 @@ func (s *WampSession) dial() (NexusClient, error) {
 		}
 		if regErr := c.Register(topic, invokeHandler, nil); regErr != nil {
 			if strings.Contains(regErr.Error(), string(wamp.ErrProcedureAlreadyExists)) {
-				fmt.Printf("a WAMP connection for %s already exists\n", s.agentConfig.ReswarmConfig.SerialNumber)
-				os.Exit(1)
+				// Usually our OWN previous session hasn't been reaped by the
+				// router yet after a transient drop (e.g. a log flood stalled
+				// keepalive, the router dropped us, and we reconnected before it
+				// cleaned up). That race must NOT restart the agent. Only treat
+				// it as a genuine duplicate serial — a second physical device on
+				// this serial — once it persists across several reconnects,
+				// because that condition never clears on its own.
+				dupRegisterFailures++
+				if dupRegisterFailures >= maxDuplicateSerialAttempts {
+					fmt.Printf("a WAMP connection for %s already exists\n", s.agentConfig.ReswarmConfig.SerialNumber)
+					os.Exit(1)
+				}
+				log.Warn().Err(regErr).Msgf("connection-established Register hit ProcedureAlreadyExists (%d/%d); old session likely not yet reaped, retrying", dupRegisterFailures, maxDuplicateSerialAttempts)
+				_ = c.Close()
+				if !s.sleepOrDone(reconnectBackoff) {
+					return nil, s.ctx.Err()
+				}
+				continue
 			}
 			// Non-duplicate Register failure: log it so we can debug, but
 			// keep the client. If the connection is genuinely dead the
 			// watcher's Done() will fire and trigger another reconnect.
 			log.Debug().Err(regErr).Msg("connection-established Register failed (non-fatal)")
 		}
+		dupRegisterFailures = 0
 
 		onDestroyListener := func(_ *wamp.Event) {
 			if s.container != nil {
