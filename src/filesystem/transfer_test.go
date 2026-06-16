@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func newTestChunk(containerName, fileName, filePath, id, data string, total uint64) FileChunk {
@@ -30,40 +32,24 @@ func TestWriteFullTransfer(t *testing.T) {
 	total := uint64(len(payload))
 
 	err := fSys.Write(newTestChunk(container, fileName, dir, id, "BEGIN", total))
-	if err != nil {
-		t.Fatalf("BEGIN failed: %v", err)
-	}
+	require.NoError(t, err, "BEGIN failed")
 
 	transfer := fSys.GetActiveTransfer(container)
-	if transfer == nil {
-		t.Fatal("expected active transfer after BEGIN")
-	}
+	require.NotNil(t, transfer, "expected active transfer after BEGIN")
 
 	err = fSys.Write(newTestChunk(container, fileName, dir, id, hexData, total))
-	if err != nil {
-		t.Fatalf("DATA chunk failed: %v", err)
-	}
+	require.NoError(t, err, "DATA chunk failed")
 
-	if transfer.Current != total {
-		t.Fatalf("expected Current=%d, got %d", total, transfer.Current)
-	}
+	require.Equal(t, total, transfer.Current)
 
 	err = fSys.Write(newTestChunk(container, fileName, dir, id, "END", total))
-	if err != nil {
-		t.Fatalf("END failed: %v", err)
-	}
+	require.NoError(t, err, "END failed")
 
-	if fSys.GetActiveTransfer(container) != nil {
-		t.Fatal("expected no active transfer after END")
-	}
+	require.Nil(t, fSys.GetActiveTransfer(container), "expected no active transfer after END")
 
 	got, err := os.ReadFile(filepath.Join(dir, fileName))
-	if err != nil {
-		t.Fatalf("reading result file: %v", err)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("file content mismatch: got %q, want %q", got, payload)
-	}
+	require.NoError(t, err, "reading result file")
+	require.Equal(t, string(payload), string(got), "file content mismatch")
 }
 
 func TestWriteMultipleChunks(t *testing.T) {
@@ -83,10 +69,7 @@ func TestWriteMultipleChunks(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, id, "END", total))
 
 	got, _ := os.ReadFile(filepath.Join(dir, fileName))
-	want := "first-part-second-part"
-	if string(got) != want {
-		t.Fatalf("file content mismatch: got %q, want %q", got, want)
-	}
+	require.Equal(t, "first-part-second-part", string(got), "file content mismatch")
 }
 
 func TestWriteSecondTransferReplacesFirst(t *testing.T) {
@@ -107,10 +90,7 @@ func TestWriteSecondTransferReplacesFirst(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, "id-2", "END", uint64(len(newPayload))))
 
 	got, _ := os.ReadFile(filepath.Join(dir, fileName))
-	if string(got) != string(newPayload) {
-		t.Fatalf("second transfer did not fully replace first: got %q (len %d), want %q (len %d)",
-			got, len(got), newPayload, len(newPayload))
-	}
+	require.Equal(t, string(newPayload), string(got), "second transfer did not fully replace first")
 }
 
 func TestWriteBeginMidTransferReplacesOld(t *testing.T) {
@@ -130,9 +110,7 @@ func TestWriteBeginMidTransferReplacesOld(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, "id-2", "END", uint64(len(newPayload))))
 
 	got, _ := os.ReadFile(filepath.Join(dir, fileName))
-	if string(got) != string(newPayload) {
-		t.Fatalf("restarted transfer has stale data: got %q, want %q", got, newPayload)
-	}
+	require.Equal(t, string(newPayload), string(got), "restarted transfer has stale data")
 }
 
 func TestWriteChunkWithoutBeginFails(t *testing.T) {
@@ -140,9 +118,7 @@ func TestWriteChunkWithoutBeginFails(t *testing.T) {
 	fSys := New()
 
 	err := fSys.Write(newTestChunk("no-begin", "app.tgz", dir, "id-1", hex.EncodeToString([]byte("data")), 4))
-	if err == nil {
-		t.Fatal("expected error when writing chunk without BEGIN")
-	}
+	require.Error(t, err, "expected error when writing chunk without BEGIN")
 }
 
 func TestWriteCanceledTransfer(t *testing.T) {
@@ -157,9 +133,7 @@ func TestWriteCanceledTransfer(t *testing.T) {
 	fSys.CancelFileTransfer(container)
 
 	err := fSys.Write(newTestChunk(container, fileName, dir, id, hex.EncodeToString([]byte("data")), 100))
-	if err == nil || err.Error() != "canceled" {
-		t.Fatalf("expected canceled error, got: %v", err)
-	}
+	require.EqualError(t, err, "canceled")
 }
 
 func TestWriteWrongIDIgnored(t *testing.T) {
@@ -173,17 +147,13 @@ func TestWriteWrongIDIgnored(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, "id-current", "BEGIN", uint64(len(correctPayload))))
 
 	err := fSys.Write(newTestChunk(container, fileName, dir, "id-stale", hex.EncodeToString([]byte("stale")), 100))
-	if err != nil {
-		t.Fatalf("expected stale chunk to be silently ignored, got: %v", err)
-	}
+	require.NoError(t, err, "expected stale chunk to be silently ignored")
 
 	fSys.Write(newTestChunk(container, fileName, dir, "id-current", hex.EncodeToString(correctPayload), uint64(len(correctPayload))))
 	fSys.Write(newTestChunk(container, fileName, dir, "id-current", "END", uint64(len(correctPayload))))
 
 	got, _ := os.ReadFile(filepath.Join(dir, fileName))
-	if string(got) != string(correctPayload) {
-		t.Fatalf("got %q, want %q", got, correctPayload)
-	}
+	require.Equal(t, string(correctPayload), string(got))
 }
 
 func TestCleanupFailedTransferClosesFile(t *testing.T) {
@@ -196,20 +166,15 @@ func TestCleanupFailedTransferClosesFile(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, "id-1", "BEGIN", 100))
 
 	transfer := fSys.GetActiveTransfer(container)
-	if transfer == nil || transfer.File == nil {
-		t.Fatal("expected active transfer with open file")
-	}
+	require.NotNil(t, transfer, "expected active transfer with open file")
+	require.NotNil(t, transfer.File, "expected active transfer with open file")
 
 	fSys.CleanupFailedTransfer(container)
 
-	if fSys.GetActiveTransfer(container) != nil {
-		t.Fatal("expected no active transfer after cleanup")
-	}
+	require.Nil(t, fSys.GetActiveTransfer(container), "expected no active transfer after cleanup")
 
 	_, err := transfer.File.Write([]byte("test"))
-	if err == nil {
-		t.Fatal("expected error writing to closed file")
-	}
+	require.Error(t, err, "expected error writing to closed file")
 }
 
 func TestCancelFileTransferClosesFile(t *testing.T) {
@@ -222,20 +187,15 @@ func TestCancelFileTransferClosesFile(t *testing.T) {
 	fSys.Write(newTestChunk(container, fileName, dir, "id-1", "BEGIN", 100))
 
 	transfer := fSys.GetActiveTransfer(container)
-	if transfer == nil || transfer.File == nil {
-		t.Fatal("expected active transfer with open file")
-	}
+	require.NotNil(t, transfer, "expected active transfer with open file")
+	require.NotNil(t, transfer.File, "expected active transfer with open file")
 
 	fSys.CancelFileTransfer(container)
 
-	if !transfer.Canceled {
-		t.Fatal("expected transfer to be marked canceled")
-	}
+	require.True(t, transfer.Canceled, "expected transfer to be marked canceled")
 
 	_, err := transfer.File.Write([]byte("test"))
-	if err == nil {
-		t.Fatal("expected error writing to closed file")
-	}
+	require.Error(t, err, "expected error writing to closed file")
 }
 
 func TestCancelNonExistentTransfer(t *testing.T) {

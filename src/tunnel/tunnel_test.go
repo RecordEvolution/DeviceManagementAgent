@@ -1,3 +1,7 @@
+//go:build integration
+
+// This test requires a live frps server. It is excluded from `just test` and
+// runs only under `just test-integration` (-tags integration). See src/TESTING.md.
 package tunnel
 
 import (

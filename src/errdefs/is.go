@@ -26,7 +26,7 @@ func IsContainerRemovalAlreadyInProgress(err error) bool {
 }
 
 func IsRegistrationHandlerFailed(err error) bool {
-	_, ok := err.(ErrContainerRemovalAlreadyInProgress)
+	_, ok := err.(ErrRegistrationHandlerFailed)
 	return ok
 }
 

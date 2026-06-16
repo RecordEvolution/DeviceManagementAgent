@@ -1,0 +1,31 @@
+# mockery v3 configuration — regenerate with `just test-generate-mocks`.
+#
+# Generates testify/mock-based mocks into testutil/mocks (package "mocks", an
+# importable package so any package's tests can use them).
+#
+# IMPORTANT: only INTERFACES can be listed here. Concrete structs are NOT
+# mockable — do not add container.Compose, store.AppStore, or apps.{StateMachine,
+# StateObserver,AppManager}. Test those with real-but-isolated deps (in-memory
+# sqlite + fakes). See src/TESTING.md.
+template: testify
+formatter: goimports
+dir: "testutil/mocks"
+filename: "{{.InterfaceName | snakecase}}.go"
+pkgname: "mocks"
+structname: "{{.InterfaceName}}"
+packages:
+  reagent/container:
+    interfaces:
+      Container:
+  reagent/messenger:
+    interfaces:
+      Messenger:
+  reagent/persistence:
+    interfaces:
+      Database:
+  reagent/network:
+    interfaces:
+      Network:
+  reagent/tunnel:
+    interfaces:
+      TunnelManager:

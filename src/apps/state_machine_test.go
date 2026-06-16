@@ -2,9 +2,8 @@ package apps
 
 import (
 	"reagent/common"
-	"reagent/config"
-	"reagent/container"
 	"reagent/store"
+	"reagent/testutil/mocks"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,29 +15,8 @@ import (
 // Test Setup Helpers
 // =============================================================================
 
-func testConfig() *config.Config {
-	return &config.Config{
-		CommandLineArguments: &config.CommandLineArguments{
-			AgentDir:       "/opt/reagent",
-			AppsDirectory:  "/opt/reagent/apps",
-			AppsBuildDir:   "/opt/reagent/apps/build",
-			AppsComposeDir: "/opt/reagent/apps/compose",
-			AppsSharedDir:  "/opt/reagent/apps/shared",
-			DownloadDir:    "/opt/reagent/downloads",
-			PrettyLogging:  true,
-			Debug:          true,
-		},
-		ReswarmConfig: &config.ReswarmConfig{
-			Environment:       string(common.PRODUCTION),
-			DeviceKey:         12345,
-			Secret:            "test-secret",
-			DockerRegistryURL: "registry.test.com",
-		},
-	}
-}
-
-func setupTestStateMachine() (*StateMachine, *MockContainer, *StateObserver) {
-	mockContainer := NewMockContainer()
+func setupTestStateMachine(t *testing.T) (*StateMachine, *mocks.Container, *StateObserver) {
+	mockContainer := mocks.NewContainer(t)
 
 	// Create a minimal AppStore for testing
 	appStore := &store.AppStore{}
@@ -87,7 +65,7 @@ func createTestPayload(appName string, requestedState common.AppState, stage com
 // =============================================================================
 
 func TestGetTransitionFunc(t *testing.T) {
-	sm, _, _ := setupTestStateMachine()
+	sm, _, _ := setupTestStateMachine(t)
 
 	t.Run("returns function for valid REMOVED->PRESENT transition", func(t *testing.T) {
 		transitionFunc := sm.getTransitionFunc(common.REMOVED, common.PRESENT)
@@ -197,7 +175,7 @@ func TestStateTransitionMatrix(t *testing.T) {
 		{"PRESENT->STOPPED", common.PRESENT, common.STOPPED, true, "Not defined"},
 	}
 
-	sm, _, _ := setupTestStateMachine()
+	sm, _, _ := setupTestStateMachine(t)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -216,7 +194,7 @@ func TestStateTransitionMatrix(t *testing.T) {
 // =============================================================================
 
 func TestNoActionTransition(t *testing.T) {
-	sm, _, _ := setupTestStateMachine()
+	sm, _, _ := setupTestStateMachine(t)
 
 	t.Run("noActionTransitionFunc returns NoActionTransition error", func(t *testing.T) {
 		app := createTestApp("test-app", common.PRESENT, common.PROD)
@@ -388,79 +366,24 @@ func TestContainerStateToAppState(t *testing.T) {
 }
 
 // =============================================================================
-// TestMockContainer - Tests for MockContainer functionality
-// =============================================================================
-
-func TestMockContainer(t *testing.T) {
-	t.Run("tracks method calls", func(t *testing.T) {
-		mock := NewMockContainer()
-
-		mock.GetConfig()
-		mock.Ping(nil)
-		mock.Pull(nil, "", container.PullOptions{})
-
-		assert.True(t, mock.HasCall("Ping"))
-		assert.True(t, mock.HasCall("Pull"))
-		assert.False(t, mock.HasCall("Push"))
-	})
-
-	t.Run("returns configured errors", func(t *testing.T) {
-		mock := NewMockContainer()
-		mock.PullError = assert.AnError
-
-		_, err := mock.Pull(nil, "test-image", container.PullOptions{})
-		assert.Error(t, err)
-	})
-
-	t.Run("reset clears call history", func(t *testing.T) {
-		mock := NewMockContainer()
-		mock.Ping(nil)
-		assert.True(t, mock.HasCall("Ping"))
-
-		mock.ResetCalls()
-		assert.False(t, mock.HasCall("Ping"))
-	})
-}
-
-// =============================================================================
-// Placeholder tests for actual transition execution
-// These require more setup and will be expanded
-// =============================================================================
-
-func TestInitTransition(t *testing.T) {
-	t.Skip("TODO: Implement full transition execution tests")
-
-	// Example structure for future tests:
-	// sm, mockContainer, _ := setupTestStateMachine()
-	// app := createTestApp("test-app", common.REMOVED, common.PROD)
-	// payload := createTestPayload("test-app", common.PRESENT, common.PROD)
-	//
-	// errChan := sm.InitTransition(app, payload)
-	// err := <-errChan
-	//
-	// assert.NoError(t, err)
-	// assert.True(t, mockContainer.HasCall("Pull"))
-}
-
-// =============================================================================
 // TestCancelTransfer - Tests for cancel file transfer functionality
 // =============================================================================
 
 func TestCancelTransfer(t *testing.T) {
 	t.Run("TRANSFERING state has transition to REMOVED", func(t *testing.T) {
-		sm, _, _ := setupTestStateMachine()
+		sm, _, _ := setupTestStateMachine(t)
 		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.REMOVED)
 		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->REMOVED")
 	})
 
 	t.Run("TRANSFERING state has transition to UNINSTALLED", func(t *testing.T) {
-		sm, _, _ := setupTestStateMachine()
+		sm, _, _ := setupTestStateMachine(t)
 		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.UNINSTALLED)
 		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->UNINSTALLED")
 	})
 
 	t.Run("TRANSFERING state has transition to PRESENT", func(t *testing.T) {
-		sm, _, _ := setupTestStateMachine()
+		sm, _, _ := setupTestStateMachine(t)
 		transitionFunc := sm.getTransitionFunc(common.TRANSFERING, common.PRESENT)
 		assert.NotNil(t, transitionFunc, "Expected transition function for TRANSFERING->PRESENT")
 	})
@@ -475,7 +398,7 @@ func TestCancelTransfer(t *testing.T) {
 	})
 
 	t.Run("cancelTransfer returns error for non-DEV stage", func(t *testing.T) {
-		sm, _, _ := setupTestStateMachine()
+		sm, _, _ := setupTestStateMachine(t)
 		app := createTestApp("test-app", common.TRANSFERING, common.PROD)
 		payload := createTestPayload("test-app", common.REMOVED, common.PROD)
 

@@ -2,6 +2,7 @@
 
 ROOT_DIR := justfile_directory()
 FRP_VERSION := "0.65.0"
+MOCKERY_VERSION := "v3.7.1"
 
 # Arch detection for local frpc download (cached). Linux/Darwin/x86_64/aarch64/arm64.
 FRP_OS := if os() == "linux" { "linux" } else if os() == "macos" { "darwin" } else { "windows" }
@@ -16,29 +17,16 @@ AGENT_IMAGE_VERSION := "v" + `cat src/release/version.txt`
 default:
     @just --list
 
-# Run unit tests (packages without embedded binary dependency)
+# Run unit tests (integration-tagged tests excluded; needs frpc — see src/TESTING.md).
 test: download-frpc
-    cd src && go test -short reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe reagent/apps reagent/api reagent/tunnel
-
-# Run all unit tests (requires frpc binary)
-test-all: download-frpc
     cd src && go test -short ./...
 
-# Run unit tests with verbose output
-test-verbose:
-    cd src && go test -v -short reagent/messenger reagent/testutil
+# Run integration tests (need external resources: frps server, docker daemon, dbus).
+test-integration: download-frpc
+    cd src && go test -tags integration ./...
 
-# Run tests with coverage report
-test-coverage:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd src
-    go test -short -coverprofile=coverage.out -covermode=atomic reagent/messenger reagent/testutil reagent/common reagent/config reagent/debounce reagent/errdefs reagent/safe reagent/apps reagent/api reagent/tunnel
-    go tool cover -html=coverage.out -o coverage.html
-    echo "Coverage report generated at src/coverage.html"
-
-# Run all unit tests with coverage (requires frpc binary)
-test-coverage-all: download-frpc
+# Run unit tests with an HTML coverage report at src/coverage.html.
+test-coverage: download-frpc
     #!/usr/bin/env bash
     set -euo pipefail
     cd src
@@ -60,17 +48,13 @@ coverage-badge: test-coverage
     curl -s "https://img.shields.io/badge/coverage-${COVERAGE}%25-${COLOR}" > ../assets/coverage-badge.svg
     echo "Badge saved to assets/coverage-badge.svg"
 
-# Run tests with race detector
-test-race:
-    cd src && go test -short -race reagent/messenger reagent/testutil
+# Run unit tests with the race detector.
+test-race: download-frpc
+    cd src && go test -short -race ./...
 
-# Run messenger package tests only
-test-messenger:
-    cd src && go test -v reagent/messenger
-
-# Run tunnel package tests only
-test-tunnel:
-    cd src && go test -v reagent/tunnel
+# Regenerate testify mocks into src/testutil/mocks from .mockery.yaml.
+test-generate-mocks:
+    cd src && go run github.com/vektra/mockery/v3@{{MOCKERY_VERSION}}
 
 # Download frpc binary for local development (with caching)
 download-frpc:

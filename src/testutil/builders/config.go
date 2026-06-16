@@ -1,11 +1,16 @@
-package testutil
+// Package builders provides constructors for test fixtures (config, apps,
+// transition payloads). Pure data only — no behavior, no external deps — so it
+// is safe to import from any package's tests without creating import cycles.
+package builders
 
 import (
-"reagent/common"
-"reagent/config"
+	"reagent/common"
+	"reagent/config"
 )
 
-// DefaultTestConfig returns a minimal test configuration
+// DefaultTestConfig returns a minimal, valid test configuration. It is the
+// single source of truth for test config across all packages; package-local
+// testConfig() helpers should delegate here.
 func DefaultTestConfig() *config.Config {
 	return &config.Config{
 		CommandLineArguments: &config.CommandLineArguments{
@@ -25,67 +30,67 @@ func DefaultTestConfig() *config.Config {
 	}
 }
 
-// TestConfigBuilder provides a fluent interface for building test configs
+// TestConfigBuilder provides a fluent interface for building test configs.
 type TestConfigBuilder struct {
 	config *config.Config
 }
 
-// NewTestConfigBuilder creates a new builder with default values
+// NewTestConfigBuilder creates a new builder seeded with DefaultTestConfig.
 func NewTestConfigBuilder() *TestConfigBuilder {
 	return &TestConfigBuilder{
 		config: DefaultTestConfig(),
 	}
 }
 
-// WithSwarmKey sets the swarm key
+// WithSwarmKey sets the swarm key.
 func (b *TestConfigBuilder) WithSwarmKey(key int) *TestConfigBuilder {
 	b.config.ReswarmConfig.SwarmKey = key
 	return b
 }
 
-// WithDeviceKey sets the device key
+// WithDeviceKey sets the device key.
 func (b *TestConfigBuilder) WithDeviceKey(key int) *TestConfigBuilder {
 	b.config.ReswarmConfig.DeviceKey = key
 	return b
 }
 
-// WithSerialNumber sets the serial number
+// WithSerialNumber sets the serial number.
 func (b *TestConfigBuilder) WithSerialNumber(serial string) *TestConfigBuilder {
 	b.config.ReswarmConfig.SerialNumber = serial
 	return b
 }
 
-// WithEnvironment sets the environment
+// WithEnvironment sets the environment.
 func (b *TestConfigBuilder) WithEnvironment(env string) *TestConfigBuilder {
 	b.config.ReswarmConfig.Environment = env
 	return b
 }
 
-// WithEndpointURL sets the device endpoint URL
+// WithEndpointURL sets the device endpoint URL.
 func (b *TestConfigBuilder) WithEndpointURL(url string) *TestConfigBuilder {
 	b.config.ReswarmConfig.DeviceEndpointURL = url
 	return b
 }
 
-// WithOfflineMode sets the offline mode flag
+// WithOfflineMode sets the offline mode flag.
 func (b *TestConfigBuilder) WithOfflineMode(offline bool) *TestConfigBuilder {
 	b.config.CommandLineArguments.Offline = offline
 	return b
 }
 
-// WithAgentDir sets the agent directory
+// WithAgentDir sets the agent directory.
 func (b *TestConfigBuilder) WithAgentDir(dir string) *TestConfigBuilder {
 	b.config.CommandLineArguments.AgentDir = dir
 	return b
 }
 
-// WithDebug sets debug mode
+// WithDebug sets debug mode.
 func (b *TestConfigBuilder) WithDebug(debug bool) *TestConfigBuilder {
 	b.config.CommandLineArguments.Debug = debug
 	return b
 }
 
-// Build returns the configured config
+// Build returns the configured config.
 func (b *TestConfigBuilder) Build() *config.Config {
 	return b.config
 }
