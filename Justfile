@@ -1,8 +1,10 @@
 # IronFlock device management agent (reagent). Run `just` to list recipes.
 
 ROOT_DIR := justfile_directory()
-FRP_VERSION := "0.65.0"
+FRP_VERSION := "0.69.1"
 MOCKERY_VERSION := "v3.7.1"
+GOVULNCHECK_VERSION := "v1.3.0"
+CYCLONEDX_GOMOD_VERSION := "v1.10.0"
 
 # Arch detection for local frpc download (cached). Linux/Darwin/x86_64/aarch64/arm64.
 FRP_OS := if os() == "linux" { "linux" } else if os() == "macos" { "darwin" } else { "windows" }
@@ -81,6 +83,73 @@ test-race: download-frpc
 test-generate-mocks:
     cd src && go run github.com/vektra/mockery/v3@{{MOCKERY_VERSION}}
 
+# -----------------------------------------------------------------------------
+# Security / CVE screening (report-only). Scans the production artifact: our Go
+# code + all module dependencies, plus the embedded third-party frpc binary.
+# The Docker images and the edge host OS are out of scope (the agent ships as a
+# bare binary that runs on the device host). See docs/SECURITY-SCANNING.md.
+# -----------------------------------------------------------------------------
+
+# Reachability-aware; honours the nexus `replace`. Exit 3 = reachable vulns found.
+# Scan our Go code + all module dependencies for CVEs.
+vuln-go:
+    cd src && go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} ./...
+
+# Flags CVEs in frp itself + its bundled deps; remediate by bumping FRP_VERSION.
+# Scan the embedded third-party frpc binary (not tracked in go.mod) for CVEs.
+vuln-frpc: download-frpc
+    go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -mode=binary src/embedded/frpc_binary
+
+# Generate CycloneDX SBOMs (Go module graph + the frpc binary) into build/sbom/.
+sbom: download-frpc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p build/sbom
+    VERSION=$(cat src/release/version.txt)
+    (cd src && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@{{CYCLONEDX_GOMOD_VERSION}} mod -licenses -json -output "../build/sbom/reagent-${VERSION}.cdx.json" .)
+    go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@{{CYCLONEDX_GOMOD_VERSION}} bin -json -output "build/sbom/frpc-{{FRP_VERSION}}.cdx.json" src/embedded/frpc_binary
+    echo "SBOMs written to build/sbom/"
+
+# Used by the CI SBOM-attestation workflow; bin mode reads the actual build info.
+# Generate a CycloneDX SBOM for ONE compiled binary (writes <binary>.cdx.json).
+sbom-bin BINARY:
+    go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@{{CYCLONEDX_GOMOD_VERSION}} bin -json -output "{{BINARY}}.cdx.json" "{{BINARY}}"
+
+# Uploaded to the GitHub Security tab by CI; SARIF exits 0 even with findings.
+# Generate govulncheck SARIF reports into build/sarif/ for GitHub code scanning.
+sarif: download-frpc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p build/sarif
+    (cd src && go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif ./... > ../build/sarif/govulncheck-code.sarif)
+    go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif -mode=binary src/embedded/frpc_binary > build/sarif/govulncheck-frpc.sarif
+    echo "SARIF written to build/sarif/"
+
+# Scans are inlined (not `just vuln-go`) so a "vulns found" non-zero exit doesn't
+# print a confusing "Recipe failed" line; the pinned version stays single-sourced.
+# Full CVE screening (report-only — never fails). Runs all scans + SBOMs.
+security: download-frpc
+    #!/usr/bin/env bash
+    set +e
+    echo "==> govulncheck: Go code + dependencies"
+    (cd src && go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} ./...)
+    echo "==> govulncheck: embedded frpc binary"
+    go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -mode=binary src/embedded/frpc_binary
+    echo "==> SBOM generation"
+    just sbom
+    echo "==> security screening complete (report-only)"
+    exit 0
+
+# Needs a prior `just build-all-docker`; validates the exact shipped artifacts.
+# Optional: CVE-scan every cross-compiled binary in build/ (heavier).
+vuln-binaries:
+    #!/usr/bin/env bash
+    set +e
+    for bin in build/reagent-*; do
+        echo "==> $bin"
+        go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -mode=binary "$bin"
+    done
+
 # Download frpc binary for local development (with caching)
 download-frpc:
     #!/usr/bin/env bash
@@ -118,16 +187,53 @@ build-all-docker: clean
     docker build --platform linux/amd64 . -t agent-builder
     docker run --name agent_builder -v {{ROOT_DIR}}/build:/app/reagent/build -v {{ROOT_DIR}}/.cache/frp:/app/reagent/.cache/frp agent-builder
 
+# Follow with `just release` to tag + trigger the build/publish CI.
+# Bump the patch version in src/release/version.txt and commit it.
+bump-patch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    current=$(tr -d '[:space:]' < src/release/version.txt)
+    if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$current'" >&2
+        exit 1
+    fi
+    IFS=. read -r major minor patch <<< "$current"
+    next="${major}.${minor}.$((patch + 1))"
+    printf '%s' "$next" > src/release/version.txt
+    echo "Bumped $current -> $next. Now commit everything andrun: just release"
+
+# Requires a clean working tree; promote afterwards with `just promote`.
+# Tag the current commit as v<version.txt> and push (triggers build/publish CI).
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "working tree is not clean — commit everything first (e.g. just bump-patch)" >&2
+        exit 1
+    fi
+    version=$(tr -d '[:space:]' < src/release/version.txt)
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$version'" >&2
+        exit 1
+    fi
+    git tag -a "v${version}" -m "release v${version}"
+    git push origin "$(git rev-parse --abbrev-ref HEAD)"
+    git push origin "v${version}"
+    echo "Pushed v${version}; the release workflow will build + publish. Promote with: just promote"
+
 # Do everything in one step
-rollout: build-all-docker publish release
+rollout: build-all-docker publish promote
 
 clean:
     docker rm -f agent_builder
     rm -f build/*
     rm -f src/embedded/frpc_binary
 
-# Publish the new metadata
-release: publish-version publish-latestVersions
+# Promote a staged version to live: publish version.txt + availableVersions.json.
+# This is the manual release gate — agents read availableVersions.json.
+promote: publish-version publish-latestVersions
 
 # Publish the binaries from the build folder
 publish:

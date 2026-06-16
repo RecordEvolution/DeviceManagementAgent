@@ -22,13 +22,13 @@ running in containers on the device and retrieve their result and logs.
   - [Usage](#usage)
   - [Development](#development)
   - [Build, Publish and Release](#build-publish-and-release)
-    - [Build (with Docker)](#build-with-docker)
+    - [Release via CI (tag push)](#release-via-ci-tag-push)
+    - [Promote a version (manual release)](#promote-a-version-manual-release)
+    - [One-time CI setup (Workload Identity Federation)](#one-time-ci-setup-workload-identity-federation)
     - [Targets](#targets)
     - [Target platform and architecture limitations](#target-platform-and-architecture-limitations)
     - [Versioning](#versioning)
-    - [Publishing](#publishing)
-    - [Release](#release)
-    - [Rollout](#rollout)
+    - [Local build/publish (fallback)](#local-buildpublish-fallback)
   - [Implementation](#implementation)
     - [WAMP](#wamp)
       - [References](#references)
@@ -102,18 +102,17 @@ Read more on `.flock` files and how they work here: https://docs.ironflock.com/#
 
 The agent embeds the frp client into the binary. For that to work locally you first have to download the frp client.
 
-```
-make download_frpc
+```Shell
+just download-frpc
 ```
 
 Once Go has been [downloaded and installed](https://go.dev/doc/install), users can run the project locally by running the following command :
 
-```
-make run
+```Shell
+just run
 
 # or on a mac
-make run_mac
-
+just run_mac
 ```
 
 During development the `/opt/reagent` folder is used as the agent directory. There you can find additional config like the frpc.ini for the tunnel configuration.
@@ -124,17 +123,66 @@ If you encounter any privilege issues, please try removing the agent home direct
 
 ## Build, Publish and Release
 
-Using `go`'s built-in (cross-)compilation and some _shell_ scripts we can easily build, publish and release a binary for a lot of different architectures and operating systems.
+Building and publishing is done by **CI** (GitHub Actions). The pipeline is deliberately split into a CI-automated **build + publish** step and a **manual release (promotion)** step, so a version can be staged and verified before any device picks it up.
 
-### Build (with Docker)
+### Release via CI (tag push)
 
-It is recommended to build the agent within Docker, to do so you can run `make build-all-docker` in the root of this project.
+1. `just bump-patch` — bumps the patch in [`src/release/version.txt`](src/release/version.txt) and commits it (or edit the file yourself and commit; see [Versioning](#versioning)).
+2. `just release` — tags the current commit `vX.Y.Z` (read from `version.txt`) and pushes it. Requires a clean working tree.
+3. [`.github/workflows/release.yml`](.github/workflows/release.yml) then, for every entry in the [`targets`](targets) file: builds the binary, generates a CycloneDX SBOM, records a sigstore-signed **SBOM attestation** bound to the binary's digest, publishes the binary to `gs://re-agent/<os>/<arch>/<version>/`, and pushes the multi-arch agent images to Artifact Registry. It can also be run manually from the Actions tab (`workflow_dispatch`).
 
-While **not recommended** users can also build the IronFlock Agent on the host machine using the `make build-all` command.
+This **stages** the version — the binaries and images now exist, but **agents will not update to it yet**. The agent decides what to install from `availableVersions.json` (see the next step).
 
-Both commands make use of the [_targets_](#targets) file to determine the target platform(s) and architecture(s).
+Verify a published binary's provenance any time with:
+```Shell
+gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagementAgent
+```
 
-Once building has completed, the resulting binaries can be found within the `build/` directory at the root of this project.
+### Promote a version (manual release)
+
+Making a staged version **live** is a deliberate manual step. Update `availableVersions.json` for the target environment(s), then:
+
+```Shell
+just promote   # publishes src/release/version.txt + availableVersions.json to gs://re-agent
+```
+
+Agents read `availableVersions.json` to determine the latest version, so this publish **is** the release gate. (To promote only the available-versions list: `just publish-latestVersions`.)
+
+### One-time CI setup (Workload Identity Federation)
+
+The release workflow authenticates to Google Cloud **keylessly** via Workload Identity Federation — no long-lived key in GitHub. Set it up once:
+
+```Shell
+PROJECT=record-1283
+POOL=github-pool
+PROVIDER=github-provider
+REPO=RecordEvolution/DeviceManagementAgent
+SA=reagent-release@${PROJECT}.iam.gserviceaccount.com
+
+# 1. Workload Identity Pool + GitHub OIDC provider (locked to this repo)
+gcloud iam workload-identity-pools create $POOL --project=$PROJECT --location=global --display-name="GitHub Actions"
+gcloud iam workload-identity-pools providers create-oidc $PROVIDER \
+  --project=$PROJECT --location=global --workload-identity-pool=$POOL \
+  --display-name="GitHub" --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='${REPO}'"
+
+# 2. Service account with publish permissions
+gcloud iam service-accounts create reagent-release --project=$PROJECT --display-name="reagent release"
+gsutil iam ch "serviceAccount:${SA}:roles/storage.objectAdmin" gs://re-agent
+gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:${SA}" --role="roles/artifactregistry.writer"
+
+# 3. Let the repo impersonate the SA via the pool
+PROJNUM=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
+gcloud iam service-accounts add-iam-policy-binding $SA --project=$PROJECT \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJNUM}/locations/global/workloadIdentityPools/${POOL}/attribute.repository/${REPO}"
+```
+
+Then add two **repository variables** (Settings → Secrets and variables → Actions → Variables):
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER` = `projects/<projNum>/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
+- `GCP_SERVICE_ACCOUNT` = `reagent-release@record-1283.iam.gserviceaccount.com`
 
 ### Targets
 
@@ -181,27 +229,14 @@ Once built the version of a binary can be verified with:
 ./reagent -version
 ```
 
-### Publishing
+### Local build/publish (fallback)
 
-Once the IronFlock Agent has been built into the platform(s) and architecture(s) of your needs the binaries can then be published into our remote bucket.
+CI (above) is the primary path. The original local recipes still work for ad-hoc builds and manual recovery, but require local `gcloud`/`docker` auth:
 
-The `make publish` command will publish all binaries that are found within the `build/` folder to our [re-agent](https://console.cloud.google.com/storage/browser/re-agent) gcloud bucket.
-
-### Release
-
-Once the new binaries have been published they need to be made public for each _IronFlock_ environment (local, production and test cloud).
-
-To update the latest available IronFlock Agent binary, the `availableVersions.json` must be updated and published.
-
-Once updated, the file can be published using the `make publish-latestVersions` command.
-
-### Rollout
-
-**!!!!! USE WITH CAUTION !!!!!**
-
-`make rollout` can be used to build, publish the binary and publish the version files in one step.
-
-Before doing so make sure the version files (`availableVersions.json`, `src/release/version.txt`) have been updated properly as explained in the [Versioning](#versioning) and [Release](#release) sections.
+- `just build-all-docker` — cross-compile every target inside the builder image into `build/`.
+- `just publish` — upload the `build/` binaries to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) bucket.
+- `just push-docker-image` — build + push the multi-arch agent images.
+- `just rollout` — **!!! USE WITH CAUTION !!!** build + publish + promote (incl. `availableVersions.json`) in one local step; make sure `src/release/version.txt` and `availableVersions.json` are correct first.
 
 
 ## Implementation

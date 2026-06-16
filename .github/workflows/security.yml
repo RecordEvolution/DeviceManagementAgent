@@ -1,0 +1,93 @@
+# CVE / dependency security screening for the reagent agent.
+#
+# Scope = the production artifact (the bare Go binary): our Go code + all module
+# dependencies + the embedded third-party frpc binary. The Docker images and the
+# edge host OS are intentionally out of scope (the agent ships as a bare binary
+# that runs directly on the device host). See docs/SECURITY-SCANNING.md.
+#
+# REPORT-ONLY: govulncheck SARIF is uploaded to the GitHub Security tab (Code
+# scanning) but nothing here fails the build. The weekly schedule re-scans
+# unchanged code so CVEs disclosed after the fact still surface.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    # Mondays 06:17 UTC — catch CVEs newly disclosed against unchanged code.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required to publish SARIF results to the Security tab (Code scanning).
+  # Note: on PRIVATE repos this needs GitHub Advanced Security; without it the
+  # upload steps no-op (continue-on-error) and the SARIF artifact + the log
+  # summary remain the fallback.
+  security-events: write
+
+jobs:
+  govulncheck:
+    name: govulncheck (→ Security tab)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+      - uses: extractions/setup-just@v2
+
+      # Generates build/sarif/govulncheck-{code,frpc}.sarif. `just sarif` runs
+      # `download-frpc` first (the source build pulls in //go:embed frpc_binary).
+      - name: Generate govulncheck SARIF
+        run: just sarif
+
+      - name: Summarize findings (log fallback)
+        if: always()
+        run: |
+          for f in build/sarif/*.sarif; do
+            echo "## $f"
+            echo "results: $(jq '[.runs[].results[]] | length' "$f")"
+            jq -r '.runs[].results[].ruleId' "$f" | sort -u | sed 's/^/  - /'
+          done
+
+      - name: Upload code SARIF → Security tab
+        if: always()
+        continue-on-error: true # no-op without Code scanning / GHAS
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: build/sarif/govulncheck-code.sarif
+          category: govulncheck-code
+
+      - name: Upload frpc SARIF → Security tab
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: build/sarif/govulncheck-frpc.sarif
+          category: govulncheck-frpc
+
+      - name: Upload SARIF artifact (fallback)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-sarif
+          path: build/sarif/*.sarif
+          if-no-files-found: error
+
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+      - uses: extractions/setup-just@v2
+      - run: just sbom
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: build/sbom/*.cdx.json
+          if-no-files-found: error

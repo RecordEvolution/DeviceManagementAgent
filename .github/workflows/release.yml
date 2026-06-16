@@ -1,0 +1,128 @@
+# Build + publish the reagent agent (binaries to GCS, multi-arch images to
+# Artifact Registry) and record a signed SBOM attestation per binary.
+#
+# This STAGES a version: binaries land at gs://re-agent/<os>/<arch>/<version>/
+# and images are pushed, but agents do NOT pick it up until the version is
+# promoted by the MANUAL release step (`just promote` -> version.txt +
+# availableVersions.json). See README "Build, Publish and Release".
+#
+# Trigger: push a tag `vX.Y.Z` matching src/release/version.txt (or run manually).
+# Auth: Workload Identity Federation (keyless) — see README one-time setup.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # WIF (GCP) + sigstore attestation signing
+  attestations: write # store the SBOM attestations
+
+jobs:
+  # Single source of truth for the build matrix: the repo's `targets` file.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.targets.outputs.json }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: targets
+        run: echo "json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' targets)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.setup.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+      - uses: extractions/setup-just@v2
+
+      - name: Build (${{ matrix.target }})
+        run: scripts/build.sh src build "${{ matrix.target }}"
+
+      - name: Resolve binary name
+        id: bin
+        run: |
+          IFS=/ read -r os arch variant <<< "${{ matrix.target }}"
+          name="reagent-${os}-${arch}"
+          [ -n "${variant:-}" ] && name="reagent-${os}-${arch}v${variant}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SBOM
+        run: just sbom-bin "build/${{ steps.bin.outputs.name }}"
+
+      - name: Attest SBOM (sigstore-signed, bound to the binary digest)
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: build/${{ steps.bin.outputs.name }}
+          sbom-path: build/${{ steps.bin.outputs.name }}.cdx.json
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ steps.bin.outputs.name }}
+          path: build/${{ steps.bin.outputs.name }}
+          if-no-files-found: error
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ steps.bin.outputs.name }}
+          path: build/${{ steps.bin.outputs.name }}.cdx.json
+          if-no-files-found: error
+
+  publish:
+    name: publish to GCS + push images
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v2
+
+      # Collect every built binary back into build/ (bin-* only — not the SBOMs,
+      # so scripts/publish.sh's `ls build` sees only reagent-* binaries).
+      - name: Collect built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          pattern: bin-*
+          merge-multiple: true
+
+      - name: Verify tag matches src/release/version.txt
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          want="v$(cat src/release/version.txt)"
+          if [ "${GITHUB_REF_NAME}" != "$want" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version.txt ($want)"; exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Publish binaries to gs://re-agent
+        run: scripts/publish.sh
+
+      - name: Configure Docker auth for Artifact Registry
+        run: gcloud auth configure-docker europe-docker.pkg.dev --quiet
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build + push multi-arch agent images
+        run: just push-docker-image
+
+      - name: Release reminder
+        run: |
+          echo "::notice::Version staged. Promote it manually with: just promote  (publishes version.txt + availableVersions.json)"

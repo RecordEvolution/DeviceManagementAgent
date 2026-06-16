@@ -9,8 +9,8 @@ target_arch=$(echo $target_string | cut -d "/" -f 2)
 target_arch_variant=$(echo $target_string | cut -d "/" -f 3)
 build_arch="$target_arch"
 
-# FRP version must match RETunnel
-FRP_VERSION="0.65.0"
+# FRP version must match RETunnel and src/embedded/frpc.go
+FRP_VERSION="0.69.1"
 
 if [ -z "$target_arch" ]; then
     echo "the first argument should be the target architecture"

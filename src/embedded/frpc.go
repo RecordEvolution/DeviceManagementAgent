@@ -10,7 +10,7 @@ import (
 )
 
 // FRP_VERSION must match the version used in RETunnel
-const FRP_VERSION = "0.65.0"
+const FRP_VERSION = "0.69.1"
 
 // frpcBinary holds the embedded frpc binary for the target platform
 // The actual binary path is determined at build time based on GOOS/GOARCH
