@@ -713,7 +713,6 @@ func (ast *AppStateDatabase) ClearAllLogHistory(appName string, appKey uint64, s
 func (ast *AppStateDatabase) UpsertLogHistory(appName string, appKey uint64, stage common.Stage, logs []string) error {
 	tx, err := ast.db.Begin()
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 

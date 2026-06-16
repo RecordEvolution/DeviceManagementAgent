@@ -12,7 +12,10 @@ func Go(f func()) {
 			err := recover()
 
 			if err != nil {
-				log.Fatal().Msgf("Panic: %+v \n Stack Trace: %s", err, debug.Stack())
+				// Recover and log — never os.Exit. The whole point of safe.Go is
+				// to contain a panic in a background goroutine; using log.Fatal
+				// here would crash the entire agent on any recovered panic.
+				log.Error().Msgf("Recovered panic in safe.Go: %+v \n Stack Trace: %s", err, debug.Stack())
 			}
 		}()
 

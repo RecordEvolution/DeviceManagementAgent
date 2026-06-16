@@ -51,14 +51,21 @@ func calculateLoopSleepTime(retries uint) time.Duration {
 	return time.Duration(float64(sleepTime) * jitter)
 }
 
-func (clm *AppManager) retry(crashTask *CrashLoop) {
+func (clm *AppManager) retry(crashTask *CrashLoop) uint {
+	// Mutate and snapshot Retries under the lock; the spawned goroutine reads
+	// only the snapshot. Without this, the next retry() call's Retries++ races
+	// with this goroutine's read (crashTask is a shared pointer reused across
+	// retries). Payload is immutable after task creation, so it is safe to read.
+	clm.crashLoopLock.Lock()
 	crashTask.Retries++
+	retries := crashTask.Retries
+	clm.crashLoopLock.Unlock()
 
 	safe.Go(func() {
 
-		sleepTime := calculateLoopSleepTime(crashTask.Retries)
+		sleepTime := calculateLoopSleepTime(retries)
 
-		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", crashTask.Retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
+		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
 		time.Sleep(sleepTime)
 
@@ -80,14 +87,24 @@ func (clm *AppManager) retry(crashTask *CrashLoop) {
 
 		clm.crashLoopLock.Unlock()
 
-		app, _ := clm.AppStore.GetApp(crashTask.Payload.AppKey, crashTask.Payload.Stage)
-		if app.CurrentState != crashTask.Payload.RequestedState {
+		app, err := clm.AppStore.GetApp(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+		if err != nil || app == nil {
+			return
+		}
+
+		app.StateLock.Lock()
+		currentState := app.CurrentState
+		app.StateLock.Unlock()
+
+		if currentState != crashTask.Payload.RequestedState {
 			clm.RequestAppState(crashTask.Payload)
 		} else {
 			clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 		}
 
 	})
+
+	return retries
 }
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {
@@ -124,10 +141,10 @@ func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) (uin
 
 	if existingCrash != nil {
 		log.Debug().Msgf("retrying an existing crashloop for %s (%s)", payload.AppName, payload.Stage)
-		clm.retry(existingCrash)
+		retries := clm.retry(existingCrash)
 
-		sleepTime := calculateLoopSleepTime(existingCrash.Retries)
-		return existingCrash.Retries, sleepTime
+		sleepTime := calculateLoopSleepTime(retries)
+		return retries, sleepTime
 	} else {
 		payload.Retrying = true
 		crashLoopTask := &CrashLoop{Payload: payload, Retries: 0}
@@ -137,9 +154,9 @@ func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) (uin
 		clm.crashLoopLock.Unlock()
 
 		log.Debug().Msgf("created a new crash loop for %s (%s)", payload.AppName, payload.Stage)
-		clm.retry(crashLoopTask)
+		retries := clm.retry(crashLoopTask)
 
-		sleepTime := calculateLoopSleepTime(crashLoopTask.Retries)
-		return crashLoopTask.Retries, sleepTime
+		sleepTime := calculateLoopSleepTime(retries)
+		return retries, sleepTime
 	}
 }

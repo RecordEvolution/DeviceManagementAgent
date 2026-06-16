@@ -34,6 +34,31 @@ test-coverage: download-frpc
     go tool cover -html=coverage.out -o coverage.html
     echo "Coverage report generated at src/coverage.html"
 
+# Integration tests self-skip when their resource (docker/dbus/frps) is absent,
+# so this is safe to run anywhere; it just covers more where they exist.
+# Coverage INCLUDING integration-tagged tests.
+test-coverage-integration: download-frpc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    go test -tags integration -coverprofile=coverage.out -covermode=atomic ./...
+    go tool cover -html=coverage.out -o coverage.html
+    echo "Coverage (incl. integration) report generated at src/coverage.html"
+
+# Excludes generated D-Bus bindings (networkmanager), generated test doubles
+# (testutil), and tooling (embedded, benchmark) from the denominator, and
+# includes integration tests — you do not unit-test generated code or your mocks.
+# Production-scoped coverage (the meaningful number).
+test-coverage-prod: download-frpc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd src
+    PKGS=$(go list ./... | grep -vE '/(testutil|networkmanager|embedded|benchmark)(/|$)')
+    COVERPKG=$(echo "$PKGS" | paste -sd, -)
+    go test -tags integration -covermode=atomic -coverpkg="$COVERPKG" -coverprofile=coverage.out $PKGS
+    echo "----- production-scoped coverage (generated + test-infra excluded) -----"
+    go tool cover -func=coverage.out | grep total
+
 # Generate coverage badge
 coverage-badge: test-coverage
     #!/usr/bin/env bash

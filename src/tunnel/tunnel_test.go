@@ -78,9 +78,11 @@ func setupTunnel() *FrpTunnelManager {
 }
 
 func TestAddTunnel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping tunnel integration test - requires connection to frps server")
-	}
+	// Skip cleanly unless a real frps server is reachable. Without this gate the
+	// test reaches setupTunnel() -> frpc Start(), which blocks retrying the
+	// connection and hangs until the go-test timeout. requireFrpsReachable lives
+	// in tunnel_more_integration_test.go (same package + integration tag).
+	requireFrpsReachable(t)
 
 	assert := assert.New(t)
 
