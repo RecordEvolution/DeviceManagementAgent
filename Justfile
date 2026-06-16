@@ -156,11 +156,18 @@ sarif: download-frpc
     mkdir -p build/sarif
     (cd src && go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif ./... > ../build/sarif/govulncheck-code.sarif)
     go run golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}} -format sarif -mode=binary src/embedded/frpc_binary > build/sarif/govulncheck-frpc.sarif
-    # govulncheck's SARIF can emit duplicate entries in result.stacks, which GitHub
-    # code-scanning rejects ("contains duplicate item"). Dedup them before upload.
+    # Post-process so GitHub Code Scanning accepts the code SARIF:
+    #  - dedup result.stacks (rejected as "contains duplicate item");
+    #  - prefix file URIs with src/ — govulncheck runs inside src/, so its paths
+    #    (e.g. go.mod) are src-relative and must resolve at the repo root.
+    # The frpc binary SARIF has NO source locations (it scans a compiled binary),
+    # so it cannot go to Code Scanning — security.yml uploads only the code SARIF;
+    # frpc findings remain in the job's log summary + the SARIF artifact.
     for f in build/sarif/govulncheck-code.sarif build/sarif/govulncheck-frpc.sarif; do
         jq '.runs |= map(.results |= map(if .stacks then .stacks |= unique else . end))' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
     done
+    jq 'walk(if (type=="object" and (.uri? | type=="string") and (.uri|test("^(src/|/|[a-z]+://)")|not)) then .uri |= "src/" + . else . end)' build/sarif/govulncheck-code.sarif > build/sarif/govulncheck-code.sarif.tmp
+    mv build/sarif/govulncheck-code.sarif.tmp build/sarif/govulncheck-code.sarif
     echo "SARIF written to build/sarif/"
 
 # Scans are inlined (not `just vuln-go`) so a "vulns found" non-zero exit doesn't

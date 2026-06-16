@@ -22,7 +22,7 @@ if [ -z "$target_os" ]; then
     exit 1
 fi
 
-go_version=$(go version &>/dev/null)
+go_version=$(go version >/dev/null 2>&1)
 if [ "$?" -ne 0 ]; then
     echo "go is not installed"
     exit 1
@@ -44,7 +44,7 @@ export GOOS="$target_os"
 export GOARCH="$target_arch"
 export CGO_ENABLED=0
 
-if [ "$target_arch" == "arm" ]; then
+if [ "$target_arch" = "arm" ]; then
     if [ -z "$target_arch_variant" ]; then
         echo "when specifying arm the architecture variant cannot be empty"
         exit 1
@@ -58,13 +58,13 @@ fi
 # FRP releases: linux_arm (soft float, ARMv5/v6), linux_arm_hf (hard float, ARMv7+), linux_arm64
 frp_arch="$target_arch"
 frp_suffix=""
-if [ "$target_arch" == "arm" ]; then
+if [ "$target_arch" = "arm" ]; then
     if [ "$target_arch_variant" -ge 7 ]; then
         # ARMv7+ uses hard float
         frp_suffix="_hf"
     fi
     # frp_arch stays as "arm", suffix differentiates
-elif [ "$target_arch" == "amd64" ]; then
+elif [ "$target_arch" = "amd64" ]; then
     frp_arch="amd64"
 fi
 
@@ -75,7 +75,7 @@ embedded_dir="${src_path}/embedded"
 mkdir -p "$cache_dir" "$embedded_dir"
 
 # Skip frpc for Windows - tunnels are not supported on Windows
-if [ "$target_os" == "windows" ]; then
+if [ "$target_os" = "windows" ]; then
     echo "Skipping frpc for Windows (tunnels not supported)"
     # Create empty placeholder for go:embed directive
     touch "$embedded_dir/frpc_binary"

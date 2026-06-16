@@ -53,6 +53,9 @@ jobs:
             jq -r '.runs[].results[].ruleId' "$f" | sort -u | sed 's/^/  - /'
           done
 
+      # Only the CODE SARIF goes to Code Scanning. The frpc binary SARIF has no
+      # source locations (Code Scanning requires one per result), so it is shipped
+      # as the log summary above + the artifact below, not the Security tab.
       - name: Upload code SARIF → Security tab
         if: always()
         continue-on-error: true # no-op without Code scanning / GHAS
@@ -61,15 +64,7 @@ jobs:
           sarif_file: build/sarif/govulncheck-code.sarif
           category: govulncheck-code
 
-      - name: Upload frpc SARIF → Security tab
-        if: always()
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: build/sarif/govulncheck-frpc.sarif
-          category: govulncheck-frpc
-
-      - name: Upload SARIF artifact (fallback)
+      - name: Upload SARIF artifact (incl. frpc)
         if: always()
         uses: actions/upload-artifact@v7
         with:
