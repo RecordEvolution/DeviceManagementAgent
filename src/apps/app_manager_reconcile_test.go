@@ -82,6 +82,33 @@ func TestCreateOrUpdateApp(t *testing.T) {
 		app.StateLock.Unlock()
 		assert.Equal(t, common.PRESENT, reqState, "requested state should be left untouched")
 	})
+
+	t.Run("honours an explicit teardown request for an already-BUILT app", func(t *testing.T) {
+		am, _, _, st, _, _ := amHarness(t)
+
+		// Same setup as the guard above (BUILT, awaiting promotion to PRESENT),
+		// but an explicit UNINSTALLED must override the guard — otherwise a BUILT
+		// app can never be uninstalled.
+		app := amSeed(t, st, 13, "built-teardown", common.BUILT, common.DEV)
+		app.StateLock.Lock()
+		app.RequestedState = common.PRESENT
+		app.StateLock.Unlock()
+
+		payload := amPayload(13, "built-teardown", common.UNINSTALLED, common.DEV)
+		payload.RequestedState = common.UNINSTALLED
+
+		err := am.CreateOrUpdateApp(payload)
+		require.NoError(t, err)
+
+		app.StateLock.Lock()
+		reqState := app.RequestedState
+		app.StateLock.Unlock()
+		assert.Equal(t, common.UNINSTALLED, reqState, "teardown must override the BUILT guard")
+
+		got, err := st.GetRequestedState(13, common.DEV)
+		require.NoError(t, err)
+		assert.Equal(t, common.UNINSTALLED, got.RequestedState)
+	})
 }
 
 func TestUpdateCurrentAppState(t *testing.T) {
@@ -131,7 +158,7 @@ func TestUpdateCurrentAppState(t *testing.T) {
 }
 
 func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {
-	t.Run("creates prod apps from the remote payloads and ignores dev", func(t *testing.T) {
+	t.Run("creates apps from the remote payloads for both prod and dev stages", func(t *testing.T) {
 		am, _, _, st, _, _ := amHarness(t)
 
 		prod := amPayload(30, "remote-prod", common.RUNNING, common.PROD)
@@ -147,10 +174,11 @@ func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, gotProd)
 
-		// The dev app was skipped entirely (no row created).
+		// The dev app is materialized too: the sync query derives DEV target
+		// states, so the agent honours them just like PROD.
 		gotDev, err := st.GetApp(31, common.DEV)
 		require.NoError(t, err)
-		assert.Nil(t, gotDev, "dev payloads are not materialized by this method")
+		require.NotNil(t, gotDev, "dev payloads are materialized by this method")
 	})
 
 	t.Run("empty remote list is a clean no-op", func(t *testing.T) {

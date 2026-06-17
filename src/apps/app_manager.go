@@ -549,6 +549,9 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 			currentAppState := app.CurrentState
 			app.StateLock.Unlock()
 
+			// IsInvalidOfflineTransition skips heavy/online-only transitions on boot
+			// (notably BUILT builds and PROD image pulls), so DEV apps reconcile but a
+			// restart never triggers a build or download.
 			if !IsInvalidOfflineTransition(app, payload) && currentAppState != payload.RequestedState {
 				err := am.RequestAppState(payload)
 				if err != nil {
@@ -663,7 +666,10 @@ func (am *AppManager) CreateOrUpdateApp(payload common.TransitionPayload) error 
 
 	app.StateLock.Lock()
 
-	if app.CurrentState == common.BUILT && app.RequestedState != common.BUILT {
+	// A BUILT app keeps its requested state (the build auto-progresses to PRESENT),
+	// but explicit teardown must still be honoured so it can be uninstalled/removed.
+	isTeardown := payload.RequestedState == common.UNINSTALLED || payload.RequestedState == common.REMOVED
+	if app.CurrentState == common.BUILT && app.RequestedState != common.BUILT && !isTeardown {
 		app.StateLock.Unlock()
 		log.Debug().Str("app", payload.AppName).Msg("Skipping update of requestedState as app is already built")
 		return nil
@@ -689,9 +695,11 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 	for i := range payloads {
 		payload := payloads[i]
 
-		// do not execute publishes on reconnect
-		if payload.Stage == common.DEV || payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
-			log.Debug().Str("app", payload.AppName).Msg("Skipping publish on reconnect for DEV/PUBLISHED/BUILT state")
+		// Skip only the heavy one-shot work on reconnect: a BUILT build pulls base
+		// images + compiles, a PUBLISHED push uploads to the registry. Everything
+		// else — including DEV — is reconciled so RUNNING/UNINSTALLED/etc. converge.
+		if payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
+			log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for PUBLISHED/BUILT")
 			continue
 		}
 
@@ -713,21 +721,11 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote(newestPayloads []c
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
 
-		// portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
-		// if err != nil {
-		// 	return err
-		// }
-
-		if payload.Stage == common.PROD {
-			_, err := am.AppStore.GetApp(payload.AppKey, common.PROD)
-			if err != nil {
-				return err
-			}
-
-			err = am.CreateOrUpdateApp(payload)
-			if err != nil {
-				return err
-			}
+		// Apply for all stages: the sync query derives DEV target states too,
+		// so the agent must honour them just like PROD.
+		err := am.CreateOrUpdateApp(payload)
+		if err != nil {
+			return err
 		}
 	}
 
