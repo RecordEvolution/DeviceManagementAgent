@@ -48,7 +48,13 @@ type ReswarmConfig struct {
 	InsecureRegistries   string `json:"insecure-registries,omitempty"`
 	DockerMainRepository string `json:"docker_main_repository"`
 	ApplianceDomain      string `json:"appliance_domain,omitempty"`
-	ReswarmBaseURL       string `json:"-"`
+	// UpdateURL, when set, overrides the --remoteUpdateURL base for OTA
+	// self-updates. Appliance-managed agents carry the appliance's
+	// registry-proxy /dl base here so their binary downloads route through
+	// instance-registry.ironflock.com instead of storage.googleapis.com.
+	// Cloud/field agents leave it empty and keep the default GCS bucket.
+	UpdateURL      string `json:"update_url,omitempty"`
+	ReswarmBaseURL string `json:"-"`
 }
 
 type CommandLineArguments struct {

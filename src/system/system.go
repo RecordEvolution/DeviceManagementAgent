@@ -69,10 +69,21 @@ func (sys *System) RestartAgent() error {
 
 // ------------------------------------------------------------------------- //
 
+// updateBaseURL returns the base URL for OTA downloads. A per-device
+// update_url in the .flock config (set for appliance-managed agents) wins over
+// the --remoteUpdateURL flag default, so appliances pull through the
+// appliance's registry-proxy /dl routes instead of storage.googleapis.com.
+func (sys *System) updateBaseURL() string {
+	if sys.config.ReswarmConfig != nil && sys.config.ReswarmConfig.UpdateURL != "" {
+		return sys.config.ReswarmConfig.UpdateURL
+	}
+	return sys.config.CommandLineArguments.RemoteUpdateURL
+}
+
 func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, progressCallback func(filesystem.DownloadProgress)) error {
 	isWindows := runtime.GOOS == "windows"
 	agentHomedir := sys.config.CommandLineArguments.AgentDir
-	remoteUpdateURL := sys.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
+	remoteUpdateURL := sys.updateBaseURL() + "/" + bucketName
 	agentURL := fmt.Sprintf("%s/%s/%s/%s/%s", remoteUpdateURL, runtime.GOOS, release.GetBuildArch(), versionString, fileName)
 	if isWindows {
 		agentURL += ".exe"
@@ -235,7 +246,7 @@ func GetEnvironment(config *config.Config) string {
 }
 
 func (system *System) GetLatestVersion(bucketName string) (string, error) {
-	fullBucketName := system.config.CommandLineArguments.RemoteUpdateURL + "/" + bucketName
+	fullBucketName := system.updateBaseURL() + "/" + bucketName
 	resp, err := filesystem.GetRemoteFile(fullBucketName + "/availableVersions.json")
 	if err != nil {
 		return "", err
