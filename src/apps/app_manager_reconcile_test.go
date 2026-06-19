@@ -158,7 +158,7 @@ func TestUpdateCurrentAppState(t *testing.T) {
 }
 
 func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {
-	t.Run("creates apps from the remote payloads for both prod and dev stages", func(t *testing.T) {
+	t.Run("creates prod apps from the remote payloads and ignores dev", func(t *testing.T) {
 		am, _, _, st, _, _ := amHarness(t)
 
 		prod := amPayload(30, "remote-prod", common.RUNNING, common.PROD)
@@ -174,11 +174,11 @@ func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, gotProd)
 
-		// The dev app is materialized too: the sync query derives DEV target
-		// states, so the agent honours them just like PROD.
+		// DEV apps are NOT materialized by the bulk sync — they are driven by the
+		// developer's interactive actions, not overwritten from the cloud sync.
 		gotDev, err := st.GetApp(31, common.DEV)
 		require.NoError(t, err)
-		require.NotNil(t, gotDev, "dev payloads are materialized by this method")
+		assert.Nil(t, gotDev, "dev payloads are not materialized by this method")
 	})
 
 	t.Run("empty remote list is a clean no-op", func(t *testing.T) {

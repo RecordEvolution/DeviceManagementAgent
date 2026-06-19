@@ -695,11 +695,10 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 	for i := range payloads {
 		payload := payloads[i]
 
-		// Skip only the heavy one-shot work on reconnect: a BUILT build pulls base
-		// images + compiles, a PUBLISHED push uploads to the registry. Everything
-		// else — including DEV — is reconciled so RUNNING/UNINSTALLED/etc. converge.
-		if payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
-			log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for PUBLISHED/BUILT")
+		// Do not auto-reconcile DEV apps on reconnect (they are driven by the
+		// developer's interactive actions), nor redo one-shot publishes/builds.
+		if payload.Stage == common.DEV || payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
+			log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for DEV/PUBLISHED/BUILT")
 			continue
 		}
 
@@ -721,11 +720,14 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote(newestPayloads []c
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
 
-		// Apply for all stages: the sync query derives DEV target states too,
-		// so the agent must honour them just like PROD.
-		err := am.CreateOrUpdateApp(payload)
-		if err != nil {
-			return err
+		// Only PROD apps are reconciled from the bulk sync. DEV apps are driven by
+		// the developer's interactive actions, not overwritten from the cloud sync
+		// (overwriting them races an active dev session: build/run/stop).
+		if payload.Stage == common.PROD {
+			err := am.CreateOrUpdateApp(payload)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
