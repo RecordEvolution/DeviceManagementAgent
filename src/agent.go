@@ -63,6 +63,14 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		log.Error().Stack().Err(err).Msg("failed to register all external endpoints")
 	}
 
+	// Re-establish per-terminal control registrations (term_write/term_resize)
+	// for any open device terminals after a reconnect — the router dropped them
+	// on the disconnect and the WampSession does not replay dynamic regs, so an
+	// open terminal would otherwise lose input/resize until the agent restarts.
+	if reconnect {
+		terminal.ReregisterControlTopics(agent.Messenger)
+	}
+
 	// Due to an issue with frp, the client is falsely flagged as a virus in Windows
 	// To work around this for now, we do not support tunnels in Windows
 	if runtime.GOOS != "windows" && !reconnect {

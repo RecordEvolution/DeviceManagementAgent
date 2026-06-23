@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
+
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
@@ -39,7 +41,14 @@ type PseudoTerminal struct {
 
 var pseudoTerminals = make(map[string]*PseudoTerminal)
 
+// pseudoTerminalsMu guards pseudoTerminals: terminals are created on init calls
+// and nil'd on cleanup, while ReregisterControlTopics iterates the map from the
+// agent's reconnect handler — concurrent access would otherwise race/panic.
+var pseudoTerminalsMu sync.RWMutex
+
 func GetPseudoTerminal(id string) *PseudoTerminal {
+	pseudoTerminalsMu.RLock()
+	defer pseudoTerminalsMu.RUnlock()
 	return pseudoTerminals[id]
 }
 
@@ -50,43 +59,19 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 	dataTopic := common.BuildExternalApiTopic(config.ReswarmConfig.SerialNumber, fmt.Sprintf("data.%s", sessionID))
 	resizeTopic := common.BuildExternalApiTopic(config.ReswarmConfig.SerialNumber, fmt.Sprintf("term_resize.%s", sessionID))
 
-	session.Subscribe(topics.Topic(writeTopic), func(r messenger.Result) error {
-		dataArg := r.Arguments[0]
+	pT.SessionID = sessionID
+	pT.WriteTopic = writeTopic
+	pT.ResizeTopic = resizeTopic
+	pT.DataTopic = dataTopic
 
-		data, ok := dataArg.(string)
-		if !ok {
-			return errors.New("failed to parse args")
-		}
-
-		pT.Input <- data
-
-		return nil
-	}, nil)
-
-	session.Register(topics.Topic(resizeTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
-		payloadArg := invocation.Arguments[0]
-		payload, ok := payloadArg.(map[string]interface{})
-		if !ok {
-			return nil, errors.New("failed to parse args")
-		}
-
-		heightKw := payload["height"]
-		widthKw := payload["width"]
-
-		height, ok := heightKw.(uint64)
-		if !ok {
-			return nil, errors.New("failed to parse height")
-		}
-
-		width, ok := widthKw.(uint64)
-		if !ok {
-			return nil, errors.New("failed to parse width")
-		}
-
-		pT.Resize <- TerminalSize{Cols: uint16(width), Rows: uint16(height)}
-
-		return &messenger.InvokeResult{}, nil
-	}, nil)
+	// Establish the write-subscription and resize-registration. Split into
+	// registerControlTopics so the agent can re-run it on every reconnect
+	// (see ReregisterControlTopics): the router drops these per-terminal
+	// registrations on a disconnect and the WampSession has no dynamic-reg
+	// replay, so an already-open terminal would otherwise silently lose
+	// input/resize (output still flows on the live session) until reagent
+	// restarts.
+	pT.registerControlTopics(session)
 
 	safe.Go(func() {
 		for output := range pT.Output {
@@ -115,21 +100,91 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 		close(pT.Cleanup)
 
 		sessionID := pT.SessionID
+		pseudoTerminalsMu.Lock()
 		pseudoTerminals[pT.Id] = nil
+		pseudoTerminalsMu.Unlock()
 
 		log.Debug().Msgf("Cleaned up the pty with ID %s", sessionID)
 	})
-
-	pT.SessionID = sessionID
-	pT.WriteTopic = writeTopic
-	pT.ResizeTopic = resizeTopic
-	pT.DataTopic = dataTopic
 
 	return common.Dict{
 		"sessionID":   sessionID,
 		"writeTopic":  writeTopic,
 		"dataTopic":   dataTopic,
 		"resizeTopic": resizeTopic,
+	}
+}
+
+// registerControlTopics (re)establishes this terminal's write-subscription and
+// resize-registration against the given session. Safe to call again after a
+// reconnect: Register uses force_reregister and the prior subscription is gone
+// router-side after a disconnect. Errors are logged rather than discarded so a
+// failed (re)registration is visible in the agent logs.
+func (pT *PseudoTerminal) registerControlTopics(session messenger.Messenger) {
+	err := session.Subscribe(topics.Topic(pT.WriteTopic), func(r messenger.Result) error {
+		dataArg := r.Arguments[0]
+
+		data, ok := dataArg.(string)
+		if !ok {
+			return errors.New("failed to parse args")
+		}
+
+		pT.Input <- data
+
+		return nil
+	}, nil)
+	if err != nil {
+		log.Error().Err(err).Msgf("terminal: failed to subscribe write topic %s", pT.WriteTopic)
+	}
+
+	err = session.Register(topics.Topic(pT.ResizeTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
+		payloadArg := invocation.Arguments[0]
+		payload, ok := payloadArg.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("failed to parse args")
+		}
+
+		heightKw := payload["height"]
+		widthKw := payload["width"]
+
+		height, ok := heightKw.(uint64)
+		if !ok {
+			return nil, errors.New("failed to parse height")
+		}
+
+		width, ok := widthKw.(uint64)
+		if !ok {
+			return nil, errors.New("failed to parse width")
+		}
+
+		pT.Resize <- TerminalSize{Cols: uint16(width), Rows: uint16(height)}
+
+		return &messenger.InvokeResult{}, nil
+	}, nil)
+	if err != nil {
+		log.Error().Err(err).Msgf("terminal: failed to register resize topic %s", pT.ResizeTopic)
+	}
+}
+
+// ReregisterControlTopics re-establishes the write-subscription and
+// resize-registration for every live cached PseudoTerminal against the given
+// (reconnected) session. The agent calls this from OnConnect after a reconnect:
+// the router lost these per-terminal registrations on the disconnect and the
+// WampSession has no dynamic-registration replay, so an already-open device
+// terminal would otherwise silently lose input/resize until reagent restarts.
+func ReregisterControlTopics(session messenger.Messenger) {
+	pseudoTerminalsMu.RLock()
+	terms := make([]*PseudoTerminal, 0, len(pseudoTerminals))
+	for _, pT := range pseudoTerminals {
+		if pT != nil {
+			terms = append(terms, pT)
+		}
+	}
+	pseudoTerminalsMu.RUnlock()
+
+	for _, pT := range terms {
+		log.Info().Msgf("terminal: re-registering control topics for caller %s (terminal %s) after reconnect", pT.Id, pT.SessionID)
+		pT.registerControlTopics(session)
 	}
 }
 
@@ -179,7 +234,10 @@ func NewPseudoTerminal(id string) (*PseudoTerminal, error) {
 		}
 	})
 
+	pseudoTerminalsMu.Lock()
 	pseudoTerminals[id] = &PseudoTerminal{Id: id, ptyFile: ptmx, Input: inputChan, Cleanup: cleanupChan, Output: outputChan, Error: errChan, Resize: resizeChan}
+	newTerm := pseudoTerminals[id]
+	pseudoTerminalsMu.Unlock()
 
-	return pseudoTerminals[id], nil
+	return newTerm, nil
 }
