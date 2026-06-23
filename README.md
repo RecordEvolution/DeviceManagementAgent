@@ -90,7 +90,7 @@ Usage of ./reagent:
 
 The `config` parameter needs to be populated with the path to a local `.flock` file. This `.flock` file contains all the neccessary device configuration and authentication data required to run the agent.
 
-Read more on `.flock` files and how they work here: https://docs.ironflock.com/#/en/Reswarm/reflasher
+Read more on `.flock` files and how they work here: https://ironflock.com/en/docs/device-management/flockflasher
 
 **Example Usage**
 ```

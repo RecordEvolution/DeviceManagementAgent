@@ -159,6 +159,10 @@ func DownloadURL(filePath string, url string, callback func(DownloadProgress)) e
 
 	client := http.Client{
 		Transport: &http.Transport{
+			// Honour HTTP(S)_PROXY/NO_PROXY for the OTA binary download — a
+			// custom Transport otherwise ignores them, stranding agents behind
+			// a corporate proxy on their first-installed version.
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout: 10 * time.Second,
 			}).DialContext,

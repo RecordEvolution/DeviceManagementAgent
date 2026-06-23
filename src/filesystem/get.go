@@ -11,6 +11,11 @@ import (
 func GetRemoteFile(url string) (io.ReadCloser, error) {
 	client := http.Client{
 		Transport: &http.Transport{
+			// A custom Transport defaults to no proxy; without this the agent
+			// ignores HTTP(S)_PROXY/NO_PROXY and can't reach the update server
+			// from a host behind a corporate proxy (it stays frozen on its
+			// first-installed version). DefaultTransport sets the same.
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout: 5 * time.Second,
 			}).DialContext,
