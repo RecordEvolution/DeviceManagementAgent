@@ -92,11 +92,22 @@ else
         frpc_tar="/tmp/frp_${target_os}_${frp_arch}${frp_suffix}.tar.gz"
         frpc_dir="/tmp/frp_${FRP_VERSION}_${target_os}_${frp_arch}${frp_suffix}"
 
-        # Download and extract
-        curl -L "$frpc_url" -o "$frpc_tar" || {
+        # Download and extract.
+        # -f makes curl fail on HTTP errors (e.g. 404/5xx) instead of saving the
+        # error page; --retry handles transient GitHub CDN hiccups (we've seen the
+        # release-assets host return a short HTML page instead of the tarball).
+        curl -fL --retry 5 --retry-delay 2 --retry-all-errors "$frpc_url" -o "$frpc_tar" || {
             echo "Failed to download frpc from $frpc_url"
             exit 1
         }
+
+        # Guard against a truncated/HTML response slipping through as a "success".
+        if ! gzip -t "$frpc_tar" 2>/dev/null; then
+            echo "Downloaded frpc is not a valid gzip archive (got $(wc -c < "$frpc_tar") bytes from $frpc_url):"
+            head -c 512 "$frpc_tar"
+            echo
+            exit 1
+        fi
 
         mkdir -p "$frpc_dir"
         tar -xzf "$frpc_tar" -C "$frpc_dir" --strip-components=1 || {
