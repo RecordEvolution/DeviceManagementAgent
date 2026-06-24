@@ -302,30 +302,30 @@ func TestClearLogHistoryClearsInMemoryAndDatabase(t *testing.T) {
 }
 
 func TestGetActiveSubscriptionID(t *testing.T) {
-	t.Run("returns stringified id from lookup", func(t *testing.T) {
+	t.Run("returns first stringified id from match list", func(t *testing.T) {
 		lm, _, msg, _ := newTestManager(t)
 
-		msg.SetCallResponse(string(topics.MetaProcLookupSubscription), messenger.Result{
-			Arguments: []interface{}{uint64(987654)},
+		// wamp.subscription.match returns a list of matching subscription IDs.
+		msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
+			Arguments: []interface{}{[]interface{}{uint64(987654)}},
 		}, nil)
 
 		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
 		require.NoError(t, err)
 		assert.Equal(t, "987654", id)
 
-		// Verify the lookup used the right topic and the built log topic as the
-		// first argument.
+		// Verify match was called with the built log topic as the only argument.
 		require.Len(t, msg.CallCalls, 1)
 		call := msg.CallCalls[0]
-		assert.Equal(t, topics.MetaProcLookupSubscription, call.Topic)
-		require.Len(t, call.Args, 2)
+		assert.Equal(t, topics.MetaProcMatchSubscription, call.Topic)
+		require.Len(t, call.Args, 1)
 		assert.Equal(t, lm.buildTopic("prod_1_myapp"), call.Args[0])
 	})
 
 	t.Run("empty arguments yields empty id", func(t *testing.T) {
 		lm, _, msg, _ := newTestManager(t)
 
-		msg.SetCallResponse(string(topics.MetaProcLookupSubscription), messenger.Result{
+		msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
 			Arguments: []interface{}{},
 		}, nil)
 
@@ -334,11 +334,23 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 		assert.Equal(t, "", id)
 	})
 
-	t.Run("nil id yields empty id", func(t *testing.T) {
+	t.Run("nil result (no match) yields empty id", func(t *testing.T) {
 		lm, _, msg, _ := newTestManager(t)
 
-		msg.SetCallResponse(string(topics.MetaProcLookupSubscription), messenger.Result{
+		msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
 			Arguments: []interface{}{nil},
+		}, nil)
+
+		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
+		require.NoError(t, err)
+		assert.Equal(t, "", id)
+	})
+
+	t.Run("empty match list yields empty id", func(t *testing.T) {
+		lm, _, msg, _ := newTestManager(t)
+
+		msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
+			Arguments: []interface{}{[]interface{}{}},
 		}, nil)
 
 		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
@@ -349,7 +361,7 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 	t.Run("propagates call error", func(t *testing.T) {
 		lm, _, msg, _ := newTestManager(t)
 
-		msg.SetCallError(string(topics.MetaProcLookupSubscription), assert.AnError)
+		msg.SetCallError(string(topics.MetaProcMatchSubscription), assert.AnError)
 
 		_, err := lm.getActiveSubscriptionID("prod_1_myapp")
 		require.Error(t, err)
@@ -406,8 +418,8 @@ func TestStreamLogsChannelRegistersProcess(t *testing.T) {
 	containerName := "prod_1_myapp"
 
 	// No active subscription -> Publish stays false.
-	msg.SetCallResponse(string(topics.MetaProcLookupSubscription), messenger.Result{
-		Arguments: []interface{}{},
+	msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
+		Arguments: []interface{}{nil},
 	}, nil)
 
 	ch := make(chan string, 1)
@@ -431,8 +443,8 @@ func TestStreamLogsChannelEnablesPublishWhenSubscribed(t *testing.T) {
 
 	containerName := "prod_3_subbed"
 
-	msg.SetCallResponse(string(topics.MetaProcLookupSubscription), messenger.Result{
-		Arguments: []interface{}{uint64(555)},
+	msg.SetCallResponse(string(topics.MetaProcMatchSubscription), messenger.Result{
+		Arguments: []interface{}{[]interface{}{uint64(555)}},
 	}, nil)
 
 	ch := make(chan string, 1)

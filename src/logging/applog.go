@@ -911,6 +911,11 @@ func (lm *LogManager) SetupEndpoints() error {
 			}
 
 			topicSplit := strings.Split(uri, ".")
+			// expected shape: reswarm.logs.<serial>.<container> (4 segments)
+			if len(topicSplit) < 4 {
+				log.Debug().Msgf("Log Manager: ignoring log subscription with unexpected uri %q", uri)
+				return
+			}
 			serialNumber := topicSplit[2]
 			containerName := topicSplit[3]
 
@@ -1049,25 +1054,35 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 
 func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, error) {
 	ctx := context.Background()
-	result, err := lm.Messenger.Call(ctx, topics.MetaProcLookupSubscription, []interface{}{lm.buildTopic(containerName), common.Dict{"match": "wildcard"}}, nil, nil, nil)
+	// Use wamp.subscription.match (routing-match), not wamp.subscription.lookup:
+	// lookup only finds a subscription whose registered URI is *identical* to the
+	// topic, so it never saw the cloudbridge prefix subscription (reswarm.logs.)
+	// that bridges appliance container logs to the cloud. match models broker
+	// dispatch and returns every subscription whose pattern (exact/prefix/wildcard)
+	// routes this topic to it, so a container starting mid-session begins
+	// publishing immediately instead of waiting for the next ReviveDeadLogs.
+	result, err := lm.Messenger.Call(ctx, topics.MetaProcMatchSubscription, []interface{}{lm.buildTopic(containerName)}, nil, nil, nil)
 	if err != nil {
 		return "", err
 	}
 
-	if result.Arguments == nil {
+	if result.Arguments == nil || len(result.Arguments) == 0 {
 		return "", nil
 	}
 
-	if len(result.Arguments) == 0 {
+	// match returns a list of matching subscription IDs (or nil if none).
+	switch ids := result.Arguments[0].(type) {
+	case nil:
 		return "", nil
+	case []interface{}:
+		if len(ids) == 0 {
+			return "", nil
+		}
+		return fmt.Sprint(ids[0]), nil
+	default:
+		// tolerate a router returning a bare id
+		return fmt.Sprint(ids), nil
 	}
-
-	id := result.Arguments[0]
-	if id != nil {
-		return fmt.Sprint(id), nil
-	}
-
-	return "", nil
 }
 
 func (lm *LogManager) getLogStream(containerName string) (io.ReadCloser, error) {
