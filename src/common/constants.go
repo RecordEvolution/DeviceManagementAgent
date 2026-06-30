@@ -41,6 +41,28 @@ func GetCurrentLogType(currentState AppState) LogType {
 	return logType
 }
 
+// IsDiskGrowingState reports whether transitioning an app to this state would
+// pull, build, or start it — operations that consume disk. Used to reject such
+// transitions while the device is in a disk-emergency (see package diskguard).
+// BUILT/PUBLISHED/UPDATING are included because they entail a build/download;
+// PRESENT is included because reaching it from a not-yet-downloaded app pulls
+// the image. (A RUNNING->PRESENT stop is moot under emergency since the guard
+// has already force-stopped the containers.)
+func IsDiskGrowingState(appState AppState) bool {
+	switch appState {
+	case RUNNING,
+		PRESENT,
+		BUILT,
+		BUILDING,
+		PUBLISHING,
+		PUBLISHED,
+		DOWNLOADING,
+		UPDATING:
+		return true
+	}
+	return false
+}
+
 func TransientToActualState(appState AppState) AppState {
 	switch appState {
 	case BUILDING,

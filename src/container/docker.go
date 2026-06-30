@@ -362,6 +362,18 @@ func (docker *Docker) PruneDanglingImages() (string, error) {
 	return string(output), nil
 }
 
+// PruneBuildCache removes the dangling build cache (docker builder prune).
+func (docker *Docker) PruneBuildCache() (string, error) {
+	cmd := exec.Command("docker", "builder", "prune", "-f")
+	cmd.Stderr = cmd.Stdout
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
 // ListImages lists all images available on the host.
 func (docker *Docker) ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error) {
 	allKw := options["all"]

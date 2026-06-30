@@ -15,6 +15,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/container"
+	"reagent/diskguard"
 	"reagent/messenger/topics"
 
 	"github.com/gammazero/nexus/v3/client"
@@ -73,6 +74,10 @@ const (
 	CONNECTED    DeviceStatus = "CONNECTED"
 	DISCONNECTED DeviceStatus = "DISCONNECTED"
 	CONFIGURING  DeviceStatus = "CONFIGURING"
+	// EMERGENCY is reported in place of CONNECTED while the device is critically
+	// low on disk (see package diskguard): it is stopping non-platform containers
+	// and refusing new app start/build/download.
+	EMERGENCY DeviceStatus = "EMERGENCY"
 )
 
 var ErrNotConnected = errors.New("not connected")
@@ -719,6 +724,12 @@ func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 	cfg := s.GetConfig()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// While the device is in a disk-emergency, report EMERGENCY in place of the
+	// healthy CONNECTED status so the cloud/UI can flag it (see package diskguard).
+	if status == CONNECTED && diskguard.IsEmergency() {
+		status = EMERGENCY
+	}
 
 	stats := common.GetStats()
 

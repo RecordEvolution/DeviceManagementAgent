@@ -1,8 +1,10 @@
 package apps
 
 import (
+	"fmt"
 	"reagent/common"
 	"reagent/container"
+	"reagent/diskguard"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/logging"
@@ -192,6 +194,17 @@ func (sm *StateMachine) CancelTransition(app *common.App, payload common.Transit
 }
 
 func (sm *StateMachine) InitTransition(app *common.App, payload common.TransitionPayload) chan error {
+	// While the device is in a disk-emergency, refuse transitions that would
+	// pull, build, or start an app and consume more disk. Fail fast: the caller
+	// marks the app FAILED and reports it to the cloud.
+	if diskguard.IsEmergency() && common.IsDiskGrowingState(payload.RequestedState) {
+		log.Warn().Msgf("disk-emergency: refusing transition to %s for %s (%s)", payload.RequestedState, payload.AppName, payload.Stage)
+		errChannel := make(chan error, 1)
+		errChannel <- fmt.Errorf("disk emergency: device is critically low on storage; refusing to transition %s (%s) to %s", payload.AppName, payload.Stage, payload.RequestedState)
+		close(errChannel)
+		return errChannel
+	}
+
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
 	app.StateLock.Unlock()

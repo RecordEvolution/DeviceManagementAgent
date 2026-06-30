@@ -8,6 +8,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/container"
+	"reagent/diskguard"
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/messenger"
@@ -257,6 +258,30 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	} else {
 		// TODO: write implementations for other environments. (issue: https://github.com/RecordEvolution/DeviceManagementAgent/issues/41)
 		networkInstance = network.NewDummyNetwork()
+	}
+
+	// Disk-full guard: keep the device online and remotely reachable by capping
+	// the unbounded log sinks now and, as the disk runs low, reclaiming space
+	// safely and entering a disk-emergency state (see diskguard.IsEmergency) that
+	// stops non-platform containers and is reported to the cloud, while the state
+	// machine fails new RUNNING/BUILDING/DOWNLOADING transitions.
+	if runtime.GOOS == "linux" {
+		diskguard.EnsurePreventionConfig()
+		guard := diskguard.New(container, diskguard.Config{
+			// On recovery, reinstate the apps' requested states (which were
+			// stopped/blocked during the emergency).
+			OnRecover: func() {
+				if err := appManager.EnsureLocalRequestedStates(); err != nil {
+					log.Error().Stack().Err(err).Msg("diskguard recovery: failed to reinstate app states")
+				}
+			},
+		})
+		// Synchronously evaluate disk BEFORE EnsureLocalRequestedStates below, so
+		// if the device boots disk-critical the emergency flag (and the app-start
+		// gate) is active before any container is started — and any containers
+		// Docker auto-restarted are stopped — instead of racing the Run loop.
+		guard.CheckNow()
+		safe.Go(func() { guard.Run(context.Background()) })
 	}
 
 	err = stateObserver.CorrectAppStates(false)

@@ -1586,6 +1586,59 @@ func (_c *Container_PruneDanglingImages_Call) RunAndReturn(run func() (string, e
 	return _c
 }
 
+// PruneBuildCache provides a mock function for the type Container
+func (_mock *Container) PruneBuildCache() (string, error) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PruneBuildCache")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func() error); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Container_PruneBuildCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PruneBuildCache'
+type Container_PruneBuildCache_Call struct {
+	*mock.Call
+}
+
+// PruneBuildCache is a helper method to define mock.On call
+func (_e *Container_Expecter) PruneBuildCache() *Container_PruneBuildCache_Call {
+	return &Container_PruneBuildCache_Call{Call: _e.mock.On("PruneBuildCache")}
+}
+
+func (_c *Container_PruneBuildCache_Call) Run(run func()) *Container_PruneBuildCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Container_PruneBuildCache_Call) Return(s string, err error) *Container_PruneBuildCache_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *Container_PruneBuildCache_Call) RunAndReturn(run func() (string, error)) *Container_PruneBuildCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PruneImages provides a mock function for the type Container
 func (_mock *Container) PruneImages(ctx context.Context, options common.Dict) error {
 	ret := _mock.Called(ctx, options)

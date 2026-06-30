@@ -106,6 +106,7 @@ type Container interface {
 	PruneSystem() (string, error)
 	PruneAllImages() (string, error)
 	PruneDanglingImages() (string, error)
+	PruneBuildCache() (string, error)
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	WaitForDaemon(retryTimeout ...time.Duration) error
