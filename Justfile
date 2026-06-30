@@ -246,7 +246,7 @@ bump-patch:
     IFS=. read -r major minor patch <<< "$current"
     next="${major}.${minor}.$((patch + 1))"
     printf '%s' "$next" > src/release/version.txt
-    echo "Bumped $current -> $next. Now commit everything andrun: just release"
+    echo "Bumped $current -> $next. Now commit everything and run: just release"
 
 # Requires a clean working tree; promote afterwards with `just promote`.
 # Tag the current commit as v<version.txt> and push (triggers build/publish CI).
@@ -266,7 +266,7 @@ release:
     git tag -a "v${version}" -m "release v${version}"
     git push origin "$(git rev-parse --abbrev-ref HEAD)"
     git push origin "v${version}"
-    echo "Pushed v${version}; the release workflow will build + publish. Promote with: just promote"
+    echo "Pushed v${version}; the release workflow will build + publish. Adjust availableVersions.json and promote with: just promote"
 
 # Do everything in one step
 rollout: build-all-docker publish promote
