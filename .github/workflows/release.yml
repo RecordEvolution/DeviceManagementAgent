@@ -69,7 +69,7 @@ jobs:
         run: just sbom-bin "build/${{ steps.bin.outputs.name }}"
 
       - name: Attest SBOM (sigstore-signed, bound to the binary digest)
-        uses: actions/attest-sbom@v4
+        uses: actions/attest@v4 # actions/attest-sbom is deprecated; attest takes sbom-path directly
         with:
           subject-path: build/${{ steps.bin.outputs.name }}
           sbom-path: build/${{ steps.bin.outputs.name }}.cdx.json
