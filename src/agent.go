@@ -247,6 +247,13 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		if err != nil {
 			log.Fatal().Stack().Err(err).Msg("failed to setup network")
 		}
+
+		// Keep the device reachable: make NetworkManager retry activation indefinitely
+		// instead of giving up after 4 tries, so a transient DHCP/router outage doesn't
+		// leave a headless device permanently offline until it is rebooted.
+		if err := networkInstance.SetInfiniteAutoconnectRetries(); err != nil {
+			log.Error().Stack().Err(err).Msg("failed to set infinite autoconnect-retries")
+		}
 	} else {
 		// TODO: write implementations for other environments. (issue: https://github.com/RecordEvolution/DeviceManagementAgent/issues/41)
 		networkInstance = network.NewDummyNetwork()

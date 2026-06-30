@@ -45,6 +45,10 @@ func (dw DummyNetwork) AddWiFi(mac string, credentials WiFiCredentials) error {
 	return nil
 }
 
+func (dw DummyNetwork) SetInfiniteAutoconnectRetries() error {
+	return nil
+}
+
 func (dw DummyNetwork) Reload() error {
 	return nil
 }

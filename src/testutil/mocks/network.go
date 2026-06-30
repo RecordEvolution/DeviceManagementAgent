@@ -426,6 +426,50 @@ func (_c *Network_Reload_Call) RunAndReturn(run func() error) *Network_Reload_Ca
 	return _c
 }
 
+// SetInfiniteAutoconnectRetries provides a mock function for the type Network
+func (_mock *Network) SetInfiniteAutoconnectRetries() error {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetInfiniteAutoconnectRetries")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func() error); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Network_SetInfiniteAutoconnectRetries_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetInfiniteAutoconnectRetries'
+type Network_SetInfiniteAutoconnectRetries_Call struct {
+	*mock.Call
+}
+
+// SetInfiniteAutoconnectRetries is a helper method to define mock.On call
+func (_e *Network_Expecter) SetInfiniteAutoconnectRetries() *Network_SetInfiniteAutoconnectRetries_Call {
+	return &Network_SetInfiniteAutoconnectRetries_Call{Call: _e.mock.On("SetInfiniteAutoconnectRetries")}
+}
+
+func (_c *Network_SetInfiniteAutoconnectRetries_Call) Run(run func()) *Network_SetInfiniteAutoconnectRetries_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Network_SetInfiniteAutoconnectRetries_Call) Return(err error) *Network_SetInfiniteAutoconnectRetries_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Network_SetInfiniteAutoconnectRetries_Call) RunAndReturn(run func() error) *Network_SetInfiniteAutoconnectRetries_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveWifi provides a mock function for the type Network
 func (_mock *Network) RemoveWifi(ssid string) error {
 	ret := _mock.Called(ssid)

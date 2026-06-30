@@ -62,6 +62,7 @@ type Network interface {
 	GetActiveWirelessDeviceConfig() ([]IPv4AddressData, []IPv6AddressData, error)
 	SetIPv4Address(mac string, interfaceName string, ip string, prefix uint32) error
 	AddWiFi(mac string, credentials WiFiCredentials) error
+	SetInfiniteAutoconnectRetries() error
 	Reload() error
 }
 

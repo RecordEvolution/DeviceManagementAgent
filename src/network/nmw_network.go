@@ -143,6 +143,50 @@ func (n NWMNetwork) Reload() error {
 	return n.nm.Reload(0)
 }
 
+// SetInfiniteAutoconnectRetries forces autoconnect-retries to 0 (infinite) on every
+// ethernet and wifi connection profile. By default NetworkManager gives up activating
+// a connection after 4 failed attempts, which can leave a headless device permanently
+// offline after a transient DHCP/router outage (e.g. a router reboot on a home network)
+// until it is manually rebooted. Failures on individual connections are logged and
+// skipped so one bad profile can't block the rest.
+func (n NWMNetwork) SetInfiniteAutoconnectRetries() error {
+	connections, err := n.settings.ListConnections()
+	if err != nil {
+		return err
+	}
+
+	for _, connection := range connections {
+		settings, err := connection.GetSettings()
+		if err != nil {
+			continue
+		}
+
+		connSettings := settings["connection"]
+		if connSettings == nil {
+			continue
+		}
+
+		connType := fmt.Sprint(connSettings["type"])
+		if connType != "802-3-ethernet" && connType != "802-11-wireless" {
+			continue
+		}
+
+		// already infinite, nothing to do
+		if retries, ok := connSettings["autoconnect-retries"].(int32); ok && retries == 0 {
+			continue
+		}
+
+		connSettings["autoconnect-retries"] = int32(0)
+
+		if err := connection.Update(settings); err != nil {
+			log.Error().Err(err).Msgf("failed to set autoconnect-retries on connection %v", connSettings["id"])
+			continue
+		}
+	}
+
+	return nil
+}
+
 func (n NWMNetwork) getConnectionBySSID(ssid string) (networkmanager.Connection, error) {
 	savedConnections, err := n.settings.ListConnections()
 	if err != nil {
@@ -241,6 +285,8 @@ func (n NWMNetwork) AddWiFi(mac string, credentials WiFiCredentials) error {
 	newConnection["connection"] = make(map[string]interface{})
 	newConnection["connection"]["id"] = ssid
 	newConnection["connection"]["autoconnect-priority"] = credentials.Priority
+	// never give up reconnecting after transient outages (default would stop after 4 tries)
+	newConnection["connection"]["autoconnect-retries"] = int32(0)
 
 	newConnection["802-11-wireless"] = make(map[string]interface{})
 	newConnection["802-11-wireless"]["ssid"] = []byte(ssid)
