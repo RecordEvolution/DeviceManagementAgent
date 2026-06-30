@@ -138,7 +138,12 @@ fi
 
 echo "Building reagent for ${target_os}/${build_arch}..."
 cd $src_path && go build -v -a -ldflags "-X 'reagent/release.BuildArch=$build_arch'" -o "$target_path/$binary_name"
+build_status=$?
 
-# Cleanup embedded binary after build
+# Cleanup embedded binary after build (don't let this mask a build failure: the
+# script's exit code must reflect `go build`, or CI's build step passes on a
+# broken build and the failure only surfaces later — e.g. at the SBOM step).
 rm -f "$embedded_dir/frpc_binary"
+
+exit $build_status
 
