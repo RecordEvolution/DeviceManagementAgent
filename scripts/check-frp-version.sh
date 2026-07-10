@@ -6,13 +6,24 @@
 # another repo.
 set -euo pipefail
 
+# The recipe file is tracked as "Justfile"; resolve case-robustly so this works
+# on both case-sensitive (Linux CI) and case-insensitive (macOS) filesystems.
+if [ -f Justfile ]; then
+    justfile_path="Justfile"
+elif [ -f justfile ]; then
+    justfile_path="justfile"
+else
+    echo "ERROR: no Justfile/justfile found" >&2
+    exit 1
+fi
+
 embedded=$(grep -oE 'FRP_VERSION = "[^"]+"' src/embedded/frpc.go | cut -d'"' -f2)
 buildsh=$(grep -oE 'FRP_VERSION="[^"]+"' scripts/build.sh | head -1 | cut -d'"' -f2)
-justf=$(grep -oE 'FRP_VERSION := "[^"]+"' justfile | cut -d'"' -f2)
+justf=$(grep -oE 'FRP_VERSION := "[^"]+"' "$justfile_path" | cut -d'"' -f2)
 
 echo "src/embedded/frpc.go: $embedded"
 echo "scripts/build.sh:     $buildsh"
-echo "justfile:             $justf"
+echo "$justfile_path:             $justf"
 
 if [ "$embedded" != "$buildsh" ] || [ "$embedded" != "$justf" ]; then
     echo "ERROR: FRP_VERSION pins disagree across the repo" >&2
