@@ -26,16 +26,48 @@ func (sm *StateMachine) buildApp(payload common.TransitionPayload, app *common.A
 	return sm.buildDevApp(payload, app, false)
 }
 
-func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App) (string, error) {
-	var dotEnvFileContents string
+// isValidDotEnvKey reports whether key can safely serve as a variable name in
+// the .env-compose file. docker compose's dotenv parser rejects the WHOLE file
+// when a key contains whitespace ("key cannot contain a space"), an '=' inside
+// the name would truncate it, and a leading '#' silently turns the line into a
+// comment.
+func isValidDotEnvKey(key string) bool {
+	if key == "" || strings.HasPrefix(key, "#") {
+		return false
+	}
+	return !strings.ContainsAny(key, " \t\r\n=")
+}
+
+// filterValidDotEnvLines splits KEY=VALUE lines into the ones safe to write to
+// the .env-compose file and the names of the ones that would break docker
+// compose's dotenv parsing (which aborts `compose up` for the whole app).
+func filterValidDotEnvLines(envLines []string) (valid []string, skippedKeys []string) {
+	for _, line := range envLines {
+		key, _, found := strings.Cut(line, "=")
+		// compose trims whitespace around the key itself, so a padded but
+		// otherwise valid name still parses.
+		key = strings.TrimSpace(key)
+		if !found || !isValidDotEnvKey(key) {
+			if key == "" {
+				key = strings.TrimSpace(line)
+			}
+			skippedKeys = append(skippedKeys, key)
+			continue
+		}
+		valid = append(valid, line)
+	}
+	return valid, skippedKeys
+}
+
+func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App) (string, []string, error) {
+	var envLines []string
 
 	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
 	if payload.Stage == common.DEV {
-		devEnvironmentVariables := append(systemDefaultVariables, environmentTemplateDefaults...)
-		dotEnvFileContents = strings.Join(devEnvironmentVariables, "\n")
+		envLines = append(systemDefaultVariables, environmentTemplateDefaults...)
 	} else {
 		var missingDefaultEnvs []string
 		for _, templateEnvString := range environmentTemplateDefaults {
@@ -57,7 +89,7 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 		var remotePortEnvs []string
 		portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 
 		for _, portRule := range portRules {
@@ -73,10 +105,11 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 			}
 		}
 
-		dotEnvFileContents = strings.Join(append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...), "\n")
+		envLines = append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
 	}
 
-	return dotEnvFileContents, nil
+	validLines, skippedKeys := filterValidDotEnvLines(envLines)
+	return strings.Join(validLines, "\n"), skippedKeys, nil
 }
 
 const DockerFileName = "docker-compose.json"
@@ -129,9 +162,24 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		}
 	}
 
-	dotEnvFileContents, err := sm.generateDotEnvContents(config, payload, app)
+	dotEnvFileContents, skippedEnvKeys, err := sm.generateDotEnvContents(config, payload, app)
 	if err != nil {
 		return "", err
+	}
+
+	if len(skippedEnvKeys) > 0 {
+		topic := payload.ContainerName.Dev
+		if isProd {
+			topic = payload.ContainerName.Prod
+		}
+		message := fmt.Sprintf(
+			"Warning: ignored environment variable(s) with invalid name(s): %q — names cannot be empty, contain spaces or '=', or start with '#'",
+			skippedEnvKeys,
+		)
+		writeErr := sm.LogManager.Write(topic, message)
+		if writeErr != nil {
+			log.Debug().Msgf("failed to write invalid env name warning: %s", writeErr)
+		}
 	}
 
 	err = os.WriteFile(dotEnvFilePath, []byte(dotEnvFileContents), os.ModePerm)
