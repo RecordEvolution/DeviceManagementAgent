@@ -663,8 +663,8 @@ func (_c *Container_GetContainer_Call) Run(run func(ctx context.Context, contain
 	return _c
 }
 
-func (_c *Container_GetContainer_Call) Return(container1 types.Container, err error) *Container_GetContainer_Call {
-	_c.Call.Return(container1, err)
+func (_c *Container_GetContainer_Call) Return(v types.Container, err error) *Container_GetContainer_Call {
+	_c.Call.Return(v, err)
 	return _c
 }
 
@@ -791,8 +791,8 @@ func (_c *Container_GetContainers_Call) Run(run func(ctx context.Context)) *Cont
 	return _c
 }
 
-func (_c *Container_GetContainers_Call) Return(containers []types.Container, err error) *Container_GetContainers_Call {
-	_c.Call.Return(containers, err)
+func (_c *Container_GetContainers_Call) Return(vs []types.Container, err error) *Container_GetContainers_Call {
+	_c.Call.Return(vs, err)
 	return _c
 }
 
@@ -1533,59 +1533,6 @@ func (_c *Container_PruneAllImages_Call) RunAndReturn(run func() (string, error)
 	return _c
 }
 
-// PruneDanglingImages provides a mock function for the type Container
-func (_mock *Container) PruneDanglingImages() (string, error) {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for PruneDanglingImages")
-	}
-
-	var r0 string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
-		return returnFunc()
-	}
-	if returnFunc, ok := ret.Get(0).(func() string); ok {
-		r0 = returnFunc()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// Container_PruneDanglingImages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PruneDanglingImages'
-type Container_PruneDanglingImages_Call struct {
-	*mock.Call
-}
-
-// PruneDanglingImages is a helper method to define mock.On call
-func (_e *Container_Expecter) PruneDanglingImages() *Container_PruneDanglingImages_Call {
-	return &Container_PruneDanglingImages_Call{Call: _e.mock.On("PruneDanglingImages")}
-}
-
-func (_c *Container_PruneDanglingImages_Call) Run(run func()) *Container_PruneDanglingImages_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Container_PruneDanglingImages_Call) Return(s string, err error) *Container_PruneDanglingImages_Call {
-	_c.Call.Return(s, err)
-	return _c
-}
-
-func (_c *Container_PruneDanglingImages_Call) RunAndReturn(run func() (string, error)) *Container_PruneDanglingImages_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // PruneBuildCache provides a mock function for the type Container
 func (_mock *Container) PruneBuildCache() (string, error) {
 	ret := _mock.Called()
@@ -1635,6 +1582,59 @@ func (_c *Container_PruneBuildCache_Call) Return(s string, err error) *Container
 }
 
 func (_c *Container_PruneBuildCache_Call) RunAndReturn(run func() (string, error)) *Container_PruneBuildCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PruneDanglingImages provides a mock function for the type Container
+func (_mock *Container) PruneDanglingImages() (string, error) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PruneDanglingImages")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func() error); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Container_PruneDanglingImages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PruneDanglingImages'
+type Container_PruneDanglingImages_Call struct {
+	*mock.Call
+}
+
+// PruneDanglingImages is a helper method to define mock.On call
+func (_e *Container_Expecter) PruneDanglingImages() *Container_PruneDanglingImages_Call {
+	return &Container_PruneDanglingImages_Call{Call: _e.mock.On("PruneDanglingImages")}
+}
+
+func (_c *Container_PruneDanglingImages_Call) Run(run func()) *Container_PruneDanglingImages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Container_PruneDanglingImages_Call) Return(s string, err error) *Container_PruneDanglingImages_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *Container_PruneDanglingImages_Call) RunAndReturn(run func() (string, error)) *Container_PruneDanglingImages_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -99,3 +99,40 @@ func TestRepairCmdContent(t *testing.T) {
 		assert.NotContains(t, line, "\n", "no bare LF inside lines")
 	}
 }
+
+func TestCertImportArgs(t *testing.T) {
+	args := certImportArgs("Root", `C:\ProgramData\IronFlock\Reagent\ironflock-root.crt`)
+	assert.Equal(t, []string{"-addstore", "-f", "Root", `C:\ProgramData\IronFlock\Reagent\ironflock-root.crt`}, args)
+
+	pub := certImportArgs("TrustedPublisher", `C:\x\root.crt`)
+	assert.Equal(t, "TrustedPublisher", pub[2])
+}
+
+func TestCertDeleteArgs(t *testing.T) {
+	assert.Equal(t, []string{"-delstore", "Root", "IronFlock Code Signing Root"},
+		certDeleteArgs("Root", "IronFlock Code Signing Root"))
+}
+
+func TestDefenderExclusionCmds(t *testing.T) {
+	frpc := `C:\ProgramData\IronFlock\Reagent\frpc.exe`
+	add := defenderAddExclusionCmd(frpc)
+	assert.Contains(t, add, "Add-MpPreference -ExclusionPath")
+	assert.Contains(t, add, frpc)
+
+	rm := defenderRemoveExclusionCmd(frpc)
+	assert.Contains(t, rm, "Remove-MpPreference -ExclusionPath")
+	assert.Contains(t, rm, frpc)
+}
+
+func TestAgentDirFromImagePath(t *testing.T) {
+	// Unquoted (default ProgramData path, no spaces).
+	img := `C:\ProgramData\IronFlock\Reagent\reagent.exe -config C:\ProgramData\IronFlock\Reagent\device.flock -agentDir C:\ProgramData\IronFlock\Reagent -appsDir C:\ProgramData\IronFlock\Reagent\apps`
+	assert.Equal(t, `C:\ProgramData\IronFlock\Reagent`, agentDirFromImagePath(img))
+
+	// Quoted path with a space.
+	imgQuoted := `"C:\Program Files\IronFlock\reagent.exe" -agentDir "D:\my data\reagent" -logFile "D:\my data\reagent\reagent.log"`
+	assert.Equal(t, `D:\my data\reagent`, agentDirFromImagePath(imgQuoted))
+
+	// Missing -agentDir.
+	assert.Equal(t, "", agentDirFromImagePath(`C:\x\reagent.exe -config c.flock`))
+}

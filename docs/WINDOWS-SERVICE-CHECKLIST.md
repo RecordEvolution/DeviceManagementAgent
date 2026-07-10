@@ -63,3 +63,49 @@ these must be exercised on hardware.
 14. Proxy machine: install with `-proxy http://host:port` → OTA download and
     the wss connection both work under LocalSystem; machine-store corporate
     CA is accepted (Go uses the Windows system store).
+
+## Tunnels (frp) on Windows
+
+15. frpc is downloaded (not embedded) to `<AgentDir>\frpc.exe` from
+    `gs://re-agent/frpc/windows/amd64/<ver>/`; confirm it arrives and
+    `frpc.exe -version` matches the pinned FRP_VERSION.
+16. A full tunnel lifecycle works: publish an app with an HTTP + a TCP port →
+    tunnel comes up → reachable from the cloud; `frpc.log` is under the agent
+    dir (not `C:\var\log`).
+17. Fallback: delete `frpc.exe` at runtime → the agent stays up, apps still
+    start (syncPortState no-ops), the tunnel manager re-acquires it (or, if
+    blocked, settles to unavailable), `get_agent_metadata` reports
+    `tunnelCapable:false`, the app's Remote Access section shows
+    `tunnelFeatureUnavailable`, and the device settings header shows a
+    "Tunnel disabled" warning badge next to the architecture badge (hover =
+    the explanatory tooltip). A healthy device shows no badge.
+18. Defender exclusion: after install, `Get-MpPreference | Select ExclusionPath`
+    lists `<AgentDir>\frpc.exe`. On a Tamper-Protection / Intune-managed device
+    the `Add-MpPreference` warns and is ignored — verify the graceful-degrade
+    path (item 17) then covers it, and use the WDAC alternative below.
+
+## Code signing
+
+19. After a signed release: `Get-AuthenticodeSignature reagent.exe` (and
+    `frpc.exe`) shows a valid signature by the IronFlock leaf; the installer
+    imported the root (`certutil -store Root` / `-store TrustedPublisher` list
+    it); UAC shows "IronFlock" as a verified publisher.
+20. On-device pinning: a self-update signed by our leaf verifies; a binary
+    signed by any other cert (even one the machine trusts) is rejected once
+    enforcement is on (`codesign.Verify` pins to our embedded root).
+21. Uninstall symmetry: `reagent service uninstall` removes the Defender
+    exclusion, deletes the imported certs from both stores, and removes the
+    cert file (`certutil -store Root` no longer lists IronFlock).
+
+## Enterprise alternative to the Defender exclusion (WDAC)
+
+On fleets that block `Add-MpPreference` (Tamper Protection / Intune), allow the
+signed frpc/agent by **publisher** with a WDAC signer rule instead of excluding
+a path — this keeps AV scanning other content while trusting our binaries:
+
+- Build a WDAC policy with a Publisher rule for the IronFlock code-signing
+  certificate (`New-CIPolicy -Level Publisher -ScanPath <AgentDir>` against the
+  signed binaries, or author the rule from the root cert), then deploy it via
+  Intune / Group Policy.
+- This is the recommended posture for managed devices; the per-device path
+  exclusion remains the default for unmanaged installs.

@@ -9,7 +9,6 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -48,8 +47,11 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		return nil
 	}
 
-	if runtime.GOOS == "windows" {
-		log.Warn().Msg("Tunneling feature is not supported on Windows")
+	// Degrade cleanly when tunnels are unavailable (frpc missing/quarantined,
+	// or the device can't reach the tunnel server): report and no-op, never
+	// error, so app starts are not blocked by an absent tunnel feature.
+	if !am.tunnelManager.TunnelCapable() {
+		log.Warn().Msg("Tunneling feature is unavailable on this device; skipping port sync")
 		return nil
 	}
 

@@ -10,6 +10,7 @@ import (
 	"reagent/config"
 	"reagent/messenger"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -119,6 +120,15 @@ func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localP
 func initialize(cfg *config.Config) TunnelConfigBuilder {
 	frpcConfigPath := filepath.Join(cfg.CommandLineArguments.AgentDir, "frpc.yaml")
 
+	// The default /var/log path is POSIX-only; on Windows it resolves to
+	// C:\var\log whose parents don't exist, and frpc fails to open its log.
+	// Keep Linux on the historical path (zero blast radius); put Windows under
+	// the agent dir it already owns.
+	frpcLogPath := "/var/log/frpc.log"
+	if runtime.GOOS == "windows" {
+		frpcLogPath = filepath.Join(cfg.CommandLineArguments.AgentDir, "frpc.log")
+	}
+
 	// Extract server address. Order of precedence:
 	//   1. ReswarmConfig.ApplianceDomain (set on appliance installs from
 	//      APPLIANCE_DOMAIN — the operator's tunnel domain, already correct).
@@ -195,7 +205,7 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 			Port: port,
 		},
 		Log: &LogConfig{
-			To:      "/var/log/frpc.log",
+			To:      frpcLogPath,
 			Level:   "debug",
 			MaxDays: 3,
 		},

@@ -120,14 +120,35 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
 
-      # TODO(signing): Authenticode-sign build/reagent-windows-amd64 here
-      # (Azure Trusted Signing or an EV cert + signtool) BEFORE publish.sh
-      # uploads it — the Windows service executes self-downloaded updates as
-      # SYSTEM, and unsigned binaries risk Defender quarantine. Downloads are
-      # already integrity-checked against the .sha256 manifests publish.sh
-      # uploads.
-      - name: Publish binaries to gs://re-agent
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+
+      # frpc is delivered to Windows devices as a separate, out-of-process
+      # binary (never embedded into reagent.exe, whose bytes would then trip
+      # antivirus). Build it from source at the pinned tag so we control the
+      # supply chain and can sign it. It publishes to the re-agent bucket under
+      # /frpc/, which the appliance /dl/re-agent proxy already covers.
+      - name: Build frpc for Windows from source
+        run: scripts/build-frpc.sh windows amd64 build/frpc-windows-amd64
+
+      # Authenticode-sign the Windows binaries with the leaf cert (osslsigncode
+      # runs on Linux) + a free RFC3161 timestamp, BEFORE publishing. The
+      # service executes self-downloaded updates as SYSTEM, and the agent pins
+      # the signature to our root on-device. No-ops until the signing secret is
+      # configured, so the pipeline works during the pre-signing transition.
+      - name: Authenticode-sign Windows binaries
+        env:
+          WINDOWS_SIGNING_PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_B64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: scripts/sign-windows.sh build/reagent-windows-amd64 build/frpc-windows-amd64
+
+      - name: Publish agent binaries to gs://re-agent
         run: scripts/publish.sh
+
+      - name: Publish frpc to gs://re-agent/frpc
+        run: scripts/publish-frpc.sh windows amd64 build/frpc-windows-amd64
 
       - name: Configure Docker auth for Artifact Registry
         run: gcloud auth configure-docker europe-docker.pkg.dev --quiet

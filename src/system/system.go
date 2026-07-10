@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"reagent/codesign"
 	"reagent/common"
 	"reagent/config"
 	"reagent/embedded"
@@ -70,14 +71,25 @@ func (sys *System) updateBaseURL() string {
 	return sys.config.CommandLineArguments.RemoteUpdateURL
 }
 
+// buildBinaryDownloadURL builds the OTA URL for a published binary:
+//
+//	<base>/<bucket>/<goos>/<arch>/<version>/<fileName>[.exe]
+//
+// It is the single source of truth for the on-device URL layout, so the frpc
+// sub-bucket path (bucket "re-agent/frpc") and the agent path stay in step and
+// are unit-testable without a network.
+func buildBinaryDownloadURL(base, bucketName, goos, arch, versionString, fileName string) string {
+	url := fmt.Sprintf("%s/%s/%s/%s/%s/%s", base, bucketName, goos, arch, versionString, fileName)
+	if goos == "windows" {
+		url += ".exe"
+	}
+	return url
+}
+
 func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, progressCallback func(filesystem.DownloadProgress)) error {
 	isWindows := runtime.GOOS == "windows"
 	agentHomedir := sys.config.CommandLineArguments.AgentDir
-	remoteUpdateURL := sys.updateBaseURL() + "/" + bucketName
-	agentURL := fmt.Sprintf("%s/%s/%s/%s/%s", remoteUpdateURL, runtime.GOOS, release.GetBuildArch(), versionString, fileName)
-	if isWindows {
-		agentURL += ".exe"
-	}
+	agentURL := buildBinaryDownloadURL(sys.updateBaseURL(), bucketName, runtime.GOOS, release.GetBuildArch(), versionString, fileName)
 
 	var actualFileDestination string
 	if includeVersionString {
@@ -108,6 +120,21 @@ func (sys *System) downloadBinary(fileName string, bucketName string, versionStr
 			log.Error().Err(removeErr).Msg("failed to remove download that failed checksum verification")
 		}
 		return err
+	}
+
+	// Authenticode: the .sha256 manifest is same-origin, so it is not an
+	// authenticity anchor — the pinned signature is. Warn-only during the
+	// pre-signing transition; rejected once enforcement is on (codesign.Enforcing).
+	err = codesign.Verify(tmpFilePath)
+	if err != nil {
+		if codesign.Enforcing() {
+			removeErr := os.Remove(tmpFilePath)
+			if removeErr != nil {
+				log.Error().Err(removeErr).Msg("failed to remove download that failed signature verification")
+			}
+			return fmt.Errorf("refusing to install an improperly signed binary from %s: %w", agentURL, err)
+		}
+		log.Warn().Err(err).Msgf("signature verification failed for %s (proceeding: pre-cutover)", agentURL)
 	}
 
 	err = os.Chmod(tmpFilePath, 0755)
@@ -339,55 +366,66 @@ func (system *System) compareVersion(currentVersion string, latestVersion string
 }
 
 func (system *System) DownloadFrpIfNotExists() error {
-	// Check if frpc is embedded in this build (not available on Windows)
-	if !embedded.IsEmbedded() {
-		log.Debug().Msg("frpc not embedded in this build, skipping extraction")
-		return nil
-	}
-
 	frpcPath := filesystem.GetTunnelBinaryPath(system.config, "frpc")
 
-	// Check if frpc already exists
+	// Skip when the on-disk frpc already matches the pinned version.
 	exists, err := filesystem.PathExists(frpcPath)
 	if err != nil {
 		return err
 	}
-
 	if exists {
-		// Check if the existing frpc version matches the embedded version
-		currentVersion, err := system.GetFrpCurrentVersion()
-		if err != nil {
-			log.Warn().Err(err).Msg("Could not determine frpc version, will re-extract")
+		currentVersion, verErr := system.GetFrpCurrentVersion()
+		if verErr != nil {
+			log.Warn().Err(verErr).Msg("Could not determine frpc version, will re-acquire")
 		} else if currentVersion == embedded.FRP_VERSION {
-			log.Debug().Msgf("frpc v%s already exists, skipping extraction", currentVersion)
+			log.Debug().Msgf("frpc v%s already present, skipping", currentVersion)
 			return nil
 		} else {
-			log.Info().Msgf("frpc version mismatch (current: %s, embedded: %s), updating...", currentVersion, embedded.FRP_VERSION)
+			log.Info().Msgf("frpc version mismatch (current: %s, want: %s), updating...", currentVersion, embedded.FRP_VERSION)
 		}
 	}
 
-	// Extract embedded frpc binary (overwrites existing if present)
-	log.Info().Msgf("Extracting embedded frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
-	err = embedded.ExtractFrpc(frpcPath)
+	// Platforms that embed frpc (Linux/macOS) extract the compiled-in blob.
+	if embedded.IsEmbedded() {
+		log.Info().Msgf("Extracting embedded frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
+		err = embedded.ExtractFrpc(frpcPath)
+		if err != nil {
+			return fmt.Errorf("failed to extract embedded frpc: %w", err)
+		}
+		return nil
+	}
+
+	// Windows: frpc is not embedded (its bytes would trip antivirus on the
+	// agent binary), so it is downloaded as a separate, signed, out-of-process
+	// binary. It rides the existing re-agent bucket + appliance /dl proxy via
+	// the "re-agent/frpc" sub-path. The download lands at frpcPath exactly.
+	log.Info().Msgf("Downloading frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
+	err = system.downloadBinary("frpc", "re-agent/frpc", embedded.FRP_VERSION, false, nil)
 	if err != nil {
-		return fmt.Errorf("failed to extract embedded frpc: %w", err)
+		return fmt.Errorf("failed to download frpc: %w", err)
 	}
 
 	return nil
 }
 
 func (system *System) updateFrpIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
-	// frpc is now embedded, no updates needed
-	// Just ensure it's extracted if not already present
+	// frpc is pinned to embedded.FRP_VERSION; ensure the on-disk binary is
+	// present and current (extracted from the embed on Linux/macOS, downloaded
+	// on Windows).
 	err := system.DownloadFrpIfNotExists()
 	if err != nil {
 		return UpdateResult{}, err
 	}
 
+	message := "frpc is embedded in binary"
+	if !embedded.IsEmbedded() {
+		message = "frpc is downloaded on this platform"
+	}
+
 	return UpdateResult{
 		CurrentVersion: embedded.FRP_VERSION,
 		LatestVersion:  embedded.FRP_VERSION,
-		Message:        "frpc is embedded in binary",
+		Message:        message,
 		DidUpdate:      false,
 	}, nil
 }
@@ -461,24 +499,24 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	didAgentUpdate := false
 	var agentUpdateResult UpdateResult
 
-	if runtime.GOOS != "windows" {
-		wg.Add(1)
-		safe.Go(func() {
+	// frpc is delivered on all supported platforms now: embedded on Linux/
+	// macOS, downloaded on Windows (updateFrpIfRequired dispatches on that).
+	wg.Add(1)
+	safe.Go(func() {
 
-			defer wg.Done()
+		defer wg.Done()
 
-			updateResult, err := system.updateFrpIfRequired(progressFunction)
-			if err != nil {
-				log.Error().Stack().Err(err).Msgf("Failed to update frpc.. continuing...")
-			}
+		updateResult, err := system.updateFrpIfRequired(progressFunction)
+		if err != nil {
+			log.Error().Stack().Err(err).Msgf("Failed to update frpc.. continuing...")
+		}
 
-			if !updateResult.DidUpdate {
-				log.Debug().Msgf("Not downloading frpc because: %s", updateResult.Message)
-			}
+		if !updateResult.DidUpdate {
+			log.Debug().Msgf("Not downloading frpc because: %s", updateResult.Message)
+		}
 
-			didTunnelUpdate = updateResult.DidUpdate
-		})
-	}
+		didTunnelUpdate = updateResult.DidUpdate
+	})
 
 	if updateAgent {
 		wg.Add(1)

@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reagent/codesign"
 	"strings"
 	"time"
 
@@ -84,6 +85,12 @@ type Manager struct {
 	now         func() time.Time
 	currentExe  func() (string, error)
 	execVersion func(exePath string) (string, error)
+	// verifySignature authenticates the downloaded binary before it becomes
+	// the service exe. Injected for tests; defaults to codesign.Verify.
+	verifySignature func(exePath string) error
+	// enforceSignature rejects an update whose signature fails. False during
+	// the pre-cutover transition (warn-and-proceed); flipped true afterwards.
+	enforceSignature bool
 }
 
 func New(agentDir string) *Manager {
@@ -102,6 +109,10 @@ func New(agentDir string) *Manager {
 			}
 			return strings.TrimSpace(string(output)), nil
 		},
+		verifySignature: codesign.Verify,
+		// Follows the shared cutover switch: warn-and-proceed pre-cutover (so
+		// devices can update TO the first signed release), reject afterwards.
+		enforceSignature: codesign.Enforcing(),
 	}
 }
 
@@ -227,6 +238,18 @@ func (m *Manager) Activate(newVersion string, currentVersion string) error {
 	}
 	if reportedVersion != newVersion {
 		return fmt.Errorf("downloaded update reports version %q, expected %q", reportedVersion, newVersion)
+	}
+
+	// Authenticate the binary that is about to become the service exe.
+	// Pre-cutover this only warns; post-cutover a bad/absent signature aborts
+	// the swap so a compromised distribution server can't push a replacement.
+	if m.verifySignature != nil {
+		if sigErr := m.verifySignature(newExe); sigErr != nil {
+			if m.enforceSignature {
+				return fmt.Errorf("refusing to activate an improperly signed update: %w", sigErr)
+			}
+			log.Warn().Err(sigErr).Msgf("update v%s failed signature verification (proceeding: pre-cutover)", newVersion)
+		}
 	}
 
 	// Drop the stale rollback target; the current binary becomes the new one.

@@ -264,3 +264,29 @@ func TestBuildDeviceConfigFromPayload(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// buildBinaryDownloadURL is the single source of truth for the OTA path
+// layout. The frpc sub-bucket ("re-agent/frpc") must resolve under the same
+// re-agent route the appliance registry-proxy already forwards.
+func TestBuildBinaryDownloadURL(t *testing.T) {
+	base := "https://storage.googleapis.com"
+
+	// agent binary, linux
+	got := buildBinaryDownloadURL(base, "re-agent", "linux", "amd64", "0.18.20", "reagent")
+	if want := base + "/re-agent/linux/amd64/0.18.20/reagent"; got != want {
+		t.Fatalf("agent linux URL = %q, want %q", got, want)
+	}
+
+	// agent binary, windows (.exe appended)
+	got = buildBinaryDownloadURL(base, "re-agent", "windows", "amd64", "0.18.20", "reagent")
+	if want := base + "/re-agent/windows/amd64/0.18.20/reagent.exe"; got != want {
+		t.Fatalf("agent windows URL = %q, want %q", got, want)
+	}
+
+	// frpc rides the re-agent bucket via the /frpc sub-path so the appliance
+	// /dl/re-agent/* proxy covers it with no route change.
+	got = buildBinaryDownloadURL(base, "re-agent/frpc", "windows", "amd64", "0.69.1", "frpc")
+	if want := base + "/re-agent/frpc/windows/amd64/0.69.1/frpc.exe"; got != want {
+		t.Fatalf("frpc windows URL = %q, want %q", got, want)
+	}
+}

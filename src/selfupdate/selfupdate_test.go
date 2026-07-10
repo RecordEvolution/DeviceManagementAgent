@@ -310,3 +310,37 @@ func TestCorruptMarkerIsDiscarded(t *testing.T) {
 	result := m.OnServiceStart("1.0.0")
 	assert.False(t, result.RollbackPerformed)
 }
+
+func TestActivateWarnsButProceedsWhenSignatureFailsPreCutover(t *testing.T) {
+	m := newTestManager(t)
+	writeDownload(t, m, "1.1.0")
+	m.enforceSignature = false
+	m.verifySignature = func(string) error { return errors.New("not signed by pinned key") }
+
+	require.NoError(t, m.Activate("1.1.0", "1.0.0"), "pre-cutover must proceed despite a bad signature")
+	assert.Equal(t, "1.1.0", fileContent(t, m.activePath()))
+}
+
+func TestActivateRejectsBadSignatureWhenEnforced(t *testing.T) {
+	m := newTestManager(t)
+	writeDownload(t, m, "1.1.0")
+	m.enforceSignature = true
+	m.verifySignature = func(string) error { return errors.New("not signed by pinned key") }
+
+	err := m.Activate("1.1.0", "1.0.0")
+	require.ErrorContains(t, err, "improperly signed")
+	assert.Equal(t, "old-binary", fileContent(t, m.activePath()), "enforced bad signature must not swap")
+	assert.Nil(t, readMarkerFile(t, m), "no marker left behind on rejected update")
+}
+
+func TestActivateAcceptsGoodSignatureWhenEnforced(t *testing.T) {
+	m := newTestManager(t)
+	writeDownload(t, m, "1.1.0")
+	m.enforceSignature = true
+	verified := ""
+	m.verifySignature = func(p string) error { verified = p; return nil }
+
+	require.NoError(t, m.Activate("1.1.0", "1.0.0"))
+	assert.Equal(t, m.versionedPath("1.1.0"), verified, "the downloaded binary is the one verified")
+	assert.Equal(t, "1.1.0", fileContent(t, m.activePath()))
+}

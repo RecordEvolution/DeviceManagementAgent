@@ -104,20 +104,19 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		terminal.ReregisterControlTopics(agent.Messenger)
 	}
 
-	// Due to an issue with frp, the client is falsely flagged as a virus in Windows
-	// To work around this for now, we do not support tunnels in Windows
-	if runtime.GOOS != "windows" && !reconnect {
+	// frpc is delivered on every supported platform: embedded on Linux/macOS,
+	// downloaded (separate signed binary) on Windows. If it can't be acquired
+	// or won't connect, SuperviseStart settles the device into an
+	// unavailable-but-alive state — the agent and app starts are unaffected.
+	if !reconnect {
 		err = agent.System.DownloadFrpIfNotExists()
 		if err != nil {
-			log.Error().Stack().Err(err).Msg("failed to download frp tunnel client")
+			log.Error().Stack().Err(err).Msg("failed to acquire frp tunnel client")
 		}
 
 		log.Info().Msg("Starting TunnelManager ...")
 		safe.Go(func() {
-			err := agent.TunnelManager.Start()
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to start tunnel manager")
-			}
+			agent.TunnelManager.SuperviseStart()
 		})
 	}
 
@@ -414,6 +413,12 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
 	tunnelManager.SetMessenger(mainSession)
+	// Let the tunnel manager re-fetch frpc if it is found missing at runtime
+	// (e.g. antivirus quarantined it) instead of crash-looping on a gone file.
+	tunnelManager.SetReacquireFrpc(systemAPI.DownloadFrpIfNotExists)
+	// Report per-device tunnel capability on the heartbeat, so the UI reflects
+	// it live without a dedicated get_agent_metadata call.
+	mainSession.SetTunnelCapableFunc(tunnelManager.TunnelCapable)
 	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{

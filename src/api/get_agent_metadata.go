@@ -35,6 +35,13 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 		"OSVersion":    sysInfo.DetailedOS,
 	}
 
+	// Per-device tunnel capability: whether frpc is present and connected. The
+	// UI gates tunnel controls on this rather than on the OS string (which
+	// never matched "windows" — it carries the detailed OS name).
+	if ex.TunnelManager != nil {
+		dict["tunnelCapable"] = ex.TunnelManager.TunnelCapable()
+	}
+
 	// frpc is now embedded in the binary
 	frpVersion := embedded.FRP_VERSION
 	frpIsLatest := true

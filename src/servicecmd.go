@@ -21,6 +21,73 @@ const (
 	serviceConfigName  = "device.flock"
 )
 
+// certImportArgs builds `certutil -addstore -f <store> <certPath>` args to
+// import our root into a device trust store. Root store makes the self-signed
+// chain validate; TrustedPublisher makes UAC show a verified publisher and
+// enables WDAC/AppLocker publisher rules.
+func certImportArgs(store, certPath string) []string {
+	return []string{"-addstore", "-f", store, certPath}
+}
+
+// certDeleteArgs builds `certutil -delstore <store> <name>` args to remove our
+// imported root at uninstall (leaving a self-signed root behind is a lasting
+// liability).
+func certDeleteArgs(store, name string) []string {
+	return []string{"-delstore", store, name}
+}
+
+// defenderAddExclusionCmd is the PowerShell that excludes exactly the frpc
+// binary from Defender. frp is flagged as a dual-use tool (PUA); the narrow
+// exclusion is the deterministic fix on devices we administer. Best-effort:
+// Tamper Protection / Intune-managed devices ignore it.
+func defenderAddExclusionCmd(frpcPath string) string {
+	return "Add-MpPreference -ExclusionPath '" + frpcPath + "'"
+}
+
+// defenderRemoveExclusionCmd reverses the exclusion at uninstall.
+func defenderRemoveExclusionCmd(frpcPath string) string {
+	return "Remove-MpPreference -ExclusionPath '" + frpcPath + "'"
+}
+
+// agentDirFromImagePath extracts the -agentDir value the installer baked into
+// the service's ImagePath, so uninstall can reverse the dir-scoped side
+// effects (Defender exclusion, cert file). Returns "" when not found.
+func agentDirFromImagePath(imagePath string) string {
+	fields := splitCommandLine(imagePath)
+	for i, f := range fields {
+		if f == "-agentDir" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+// splitCommandLine splits a Windows ImagePath into fields, honoring
+// double-quoted segments (paths under %ProgramData% have no spaces by default,
+// but a custom -agentDir might).
+func splitCommandLine(s string) []string {
+	var fields []string
+	var cur strings.Builder
+	inQuote := false
+	for _, r := range s {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case r == ' ' && !inQuote:
+			if cur.Len() > 0 {
+				fields = append(fields, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		fields = append(fields, cur.String())
+	}
+	return fields
+}
+
 type serviceInstallOptions struct {
 	ConfigPath  string
 	AgentDir    string

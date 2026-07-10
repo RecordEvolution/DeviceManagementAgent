@@ -69,5 +69,5 @@ jobs:
           cache-dependency-path: src/go.sum
       - name: native build (all packages, windows tags active)
         run: cd src && touch embedded/frpc_binary && go build ./...
-      - name: unit tests (service, self-update, lifecycle, config, system)
-        run: cd src && go test -count=1 ./selfupdate/... ./lifecycle/... ./config/... ./system/... .
+      - name: unit tests (service, self-update, codesign, tunnel, lifecycle, config, system)
+        run: cd src && go test -count=1 ./selfupdate/... ./codesign/... ./tunnel/... ./lifecycle/... ./config/... ./system/... .

@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -37,6 +38,37 @@ const (
 	HTTPS Protocol = "https"
 )
 
+// TunnelCapability tracks whether this device can currently run tunnels. It is
+// the per-device signal the UI uses to show/hide tunnel controls, and it lets
+// syncPortState no-op cleanly (instead of erroring) when frpc is absent — e.g.
+// on Windows where antivirus may quarantine frpc, or on an offline device that
+// could never download it.
+type TunnelCapability int32
+
+const (
+	// CapabilityUnknown: no start attempt has completed yet.
+	CapabilityUnknown TunnelCapability = iota
+	// CapabilityStarting: a start attempt is in progress.
+	CapabilityStarting
+	// CapabilityAvailable: frpc is present and logged in to the server.
+	CapabilityAvailable
+	// CapabilityUnavailable: frpc is missing/quarantined or repeatedly fails.
+	CapabilityUnavailable
+)
+
+func (c TunnelCapability) String() string {
+	switch c {
+	case CapabilityStarting:
+		return "starting"
+	case CapabilityAvailable:
+		return "available"
+	case CapabilityUnavailable:
+		return "unavailable"
+	default:
+		return "unknown"
+	}
+}
+
 type FrpTunnelManager struct {
 	TunnelManager
 	tunnelsLock         *sync.RWMutex
@@ -49,6 +81,14 @@ type FrpTunnelManager struct {
 	loginChan           chan bool // Signals when frpc logs in to server
 	isLoggedIn          bool
 	loginMutex          sync.RWMutex
+
+	capability   atomic.Int32
+	capabilityMu sync.Mutex
+	lastErr      string
+	// reacquireFrpc re-fetches the frpc binary when it is found missing at
+	// runtime (e.g. antivirus deleted it). Injected by the agent so the tunnel
+	// package need not import system; nil in tests means "do not re-acquire".
+	reacquireFrpc func() error
 }
 
 type UpdateType string
@@ -144,7 +184,16 @@ type TunnelManager interface {
 	Status(tunnelID string) (TunnelStatus, error)
 	Reload() error
 	Start() error
+	// SuperviseStart brings the client up with bounded ret/backoff; on
+	// exhaustion the device settles into an unavailable-but-alive state.
+	SuperviseStart()
 	SaveRemotePorts(payload common.TransitionPayload) error
+	// TunnelCapable reports whether tunnels can run on this device (true unless
+	// definitively unavailable). syncPortState and the UI gate on this.
+	TunnelCapable() bool
+	// MarkUnavailable records that tunnels cannot run (e.g. an unsupported
+	// platform), so the device degrades cleanly instead of retrying.
+	MarkUnavailable(reason string)
 }
 
 type TunnelStatus struct {
@@ -227,6 +276,86 @@ var tunnelIdRegexp = regexp.MustCompile(`\[(([^\]]+)-(http|https|tcp|udp))]`)
 var errMessageRegexp = regexp.MustCompile(`error: (.*)`)
 var proxyNameRegex = regexp.MustCompile(`\[(\d+)-(.*)-(\d+)-(.*)\]`)
 
+// SetReacquireFrpc wires the callback that re-fetches frpc when it is found
+// missing at runtime. Called once by the agent after construction.
+func (frpTm *FrpTunnelManager) SetReacquireFrpc(fn func() error) {
+	frpTm.reacquireFrpc = fn
+}
+
+// TunnelCapable reports whether tunnels can run on this device. It is true
+// while a device is bringing frpc up or has it running (Unknown/Starting/
+// Available) and only false once tunnels are definitively unavailable
+// (frpc missing/quarantined, or repeated start failures). Gating on "not
+// unavailable" — rather than "logged in" — preserves the Linux boot path,
+// where an app can reconcile before frpc finishes logging in and AddTunnel/
+// Reload bring the client up.
+func (frpTm *FrpTunnelManager) TunnelCapable() bool {
+	return TunnelCapability(frpTm.capability.Load()) != CapabilityUnavailable
+}
+
+// MarkUnavailable records that tunnels cannot run on this device (e.g. a
+// platform where frpc is not yet delivered). Used instead of attempting a
+// start that is known to fail.
+func (frpTm *FrpTunnelManager) MarkUnavailable(reason string) {
+	frpTm.setCapability(CapabilityUnavailable, errors.New(reason))
+}
+
+// Capability returns the current capability and the last error string, for
+// diagnostics surfaced through get_agent_metadata.
+func (frpTm *FrpTunnelManager) Capability() (TunnelCapability, string) {
+	frpTm.capabilityMu.Lock()
+	defer frpTm.capabilityMu.Unlock()
+	return TunnelCapability(frpTm.capability.Load()), frpTm.lastErr
+}
+
+// setCapability records the capability and publishes the change so the UI
+// reflects a mid-run flip (e.g. antivirus quarantining frpc) without waiting
+// for a re-fetch of get_agent_metadata.
+func (frpTm *FrpTunnelManager) setCapability(c TunnelCapability, err error) {
+	frpTm.capabilityMu.Lock()
+	prev := TunnelCapability(frpTm.capability.Load())
+	frpTm.capability.Store(int32(c))
+	if err != nil {
+		frpTm.lastErr = err.Error()
+	} else if c == CapabilityAvailable {
+		frpTm.lastErr = ""
+	}
+	frpTm.capabilityMu.Unlock()
+
+	if prev != c && (c == CapabilityAvailable || c == CapabilityUnavailable) {
+		safe.Go(func() {
+			pubErr := frpTm.PublishTunnelState()
+			if pubErr != nil {
+				log.Debug().Err(pubErr).Msg("failed to publish tunnel state on capability change")
+			}
+		})
+	}
+}
+
+// ensureFrpcBinary re-acquires frpc if it is missing on disk (antivirus can
+// delete it after install). Returns nil when the binary is present.
+func (frpTm *FrpTunnelManager) ensureFrpcBinary() error {
+	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
+	_, err := os.Stat(frpcPath)
+	if err == nil {
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+
+	if frpTm.reacquireFrpc == nil {
+		return fmt.Errorf("frpc binary missing at %s and no re-acquire available", frpcPath)
+	}
+
+	log.Warn().Msgf("frpc binary missing at %s, attempting to re-acquire", frpcPath)
+	reErr := frpTm.reacquireFrpc()
+	if reErr != nil {
+		return fmt.Errorf("frpc binary missing and re-acquire failed: %w", reErr)
+	}
+	return nil
+}
+
 func (frpTm *FrpTunnelManager) Restart() error {
 	log.Debug().Msg("Restarting tunnel client...")
 	if frpTm.clientProcess == nil || frpTm.clientProcess.Process == nil {
@@ -256,6 +385,17 @@ func (frpTm *FrpTunnelManager) Restart() error {
 func (frpTm *FrpTunnelManager) Start() error {
 	log.Debug().Msg("Starting tunnel client")
 
+	// The binary may be absent (never downloaded, or quarantined at runtime);
+	// re-acquire it before spawning rather than looping on a missing file.
+	err := frpTm.ensureFrpcBinary()
+	if err != nil {
+		frpTm.setCapability(CapabilityUnavailable, err)
+		log.Error().Err(err).Msg("cannot start tunnel client")
+		return err
+	}
+
+	frpTm.setCapability(CapabilityStarting, nil)
+
 	frpcPath := filesystem.GetTunnelBinaryPath(frpTm.config, "frpc")
 
 	ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -267,19 +407,31 @@ func (frpTm *FrpTunnelManager) Start() error {
 
 	stdout, err := frpCommand.StdoutPipe()
 	if err != nil {
+		cancelNotifyContext()
+		frpTm.setCapability(CapabilityUnavailable, err)
 		log.Error().Stack().Err(err).Msg("Failed to get stdout pipe for frp command")
 		return err
 	}
 
 	err = frpCommand.Start()
 	if err != nil {
+		cancelNotifyContext()
+		frpTm.setCapability(CapabilityUnavailable, err)
 		log.Error().Stack().Err(err).Msg("Failed to start frp command")
 		return err
 	}
 
-	ackChan := make(chan bool)
+	// Buffered + guarded so exactly one result is delivered: login success, or
+	// the scanner ending (process exited) before login. Without the latter,
+	// Start() blocked forever whenever frpc crashed before logging in.
+	ackChan := make(chan error, 1)
+	var ackOnce sync.Once
+	ack := func(e error) { ackOnce.Do(func() { ackChan <- e }) }
+
 	go func() {
 		defer cancelNotifyContext()
+		// If the loop exits without a prior ack, frpc died before login.
+		defer ack(errors.New("frpc exited before logging in to the server"))
 
 		scanner := bufio.NewScanner(stdout)
 
@@ -299,7 +451,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 				}
 
 				// Send initial ack for startup
-				ackChan <- true
+				ack(nil)
 			}
 
 			// Error was found
@@ -331,11 +483,14 @@ func (frpTm *FrpTunnelManager) Start() error {
 				runAdminServerError := strings.Contains(line, "run admin server error")
 
 				if runAdminServerError {
-					log.Debug().Msgf("Tunnel process failed to setup admin server: %s, attempting to restart..", line)
+					log.Debug().Msgf("Tunnel process failed to setup admin server: %s", line)
 
-					// Reset the webserver port in case the port is in use
+					// Reset the webserver port in case the port is in use, then
+					// hand control back to the supervisor via a failed ack
+					// rather than recursively restarting from inside the
+					// scanner goroutine (which left the outer Start() hanging).
 					frpTm.configBuilder.SetAdminPort()
-					frpTm.Restart()
+					ack(errors.New("frpc failed to start its admin server"))
 
 					return
 				}
@@ -395,9 +550,44 @@ func (frpTm *FrpTunnelManager) Start() error {
 		}
 	}()
 
-	<-ackChan
+	startErr := <-ackChan
+	if startErr != nil {
+		frpTm.setCapability(CapabilityUnavailable, startErr)
+		return startErr
+	}
 
+	frpTm.setCapability(CapabilityAvailable, nil)
 	return nil
+}
+
+// SuperviseStart brings the tunnel client up with bounded exponential backoff.
+// It replaces "call Start() once and hope": a permanently-failing frpc (missing
+// binary that can't be re-acquired, repeated login failures) settles into
+// CapabilityUnavailable instead of hanging or spinning forever, so the device
+// degrades cleanly. Runs to completion (success or exhaustion) — call it from a
+// goroutine.
+func (frpTm *FrpTunnelManager) SuperviseStart() {
+	const maxAttempts = 6
+	backoff := 2 * time.Second
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := frpTm.Start()
+		if err == nil {
+			log.Info().Msg("tunnel client started")
+			return
+		}
+
+		log.Warn().Err(err).Msgf("tunnel client start attempt %d/%d failed", attempt, maxAttempts)
+		if attempt < maxAttempts {
+			time.Sleep(backoff)
+			if backoff < 32*time.Second {
+				backoff *= 2
+			}
+		}
+	}
+
+	frpTm.setCapability(CapabilityUnavailable, errors.New("tunnel client failed to start after repeated attempts"))
+	log.Error().Msg("giving up starting the tunnel client; tunnels are unavailable on this device")
 }
 
 func (frpTm *FrpTunnelManager) Stop() error {
@@ -517,10 +707,9 @@ func (frpTm *FrpTunnelManager) Reload() error {
 		if strings.Contains(string(output), "connect: connection refused") || strings.Contains(string(output), "api status code") {
 			log.Warn().Msg("frpc appears to not be running, attempting to start it")
 			safe.Go(func() {
-				startErr := frpTm.Start()
-				if startErr != nil {
-					log.Error().Err(startErr).Msg("Failed to start frpc")
-				}
+				// Re-supervise so a binary that was quarantined/removed at
+				// runtime is re-acquired and the capability flips correctly.
+				frpTm.SuperviseStart()
 			})
 			return err
 		}

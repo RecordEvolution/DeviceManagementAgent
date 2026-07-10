@@ -62,10 +62,20 @@ type WampSession struct {
 	clientProvider ClientProvider // nil means use default client.ConnectNet
 	onConnect      func(reconnect bool)
 	heartbeatDone  chan struct{} // closed by the heartbeat when it detects a dead connection; re-created per connect()
+	// tunnelCapableFn reports per-device tunnel capability; injected by the
+	// agent so the heartbeat can carry it to the UI without a dedicated RPC.
+	// Nil until wired (the field is then omitted from the payload).
+	tunnelCapableFn func() bool
 
 	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// SetTunnelCapableFunc wires the per-device tunnel-capability getter into the
+// heartbeat payload. Called once by the agent after construction.
+func (s *WampSession) SetTunnelCapableFunc(fn func() bool) {
+	s.tunnelCapableFn = fn
 }
 
 type DeviceStatus string
@@ -752,6 +762,13 @@ func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 			"docker_apps_free":    stats.DockerAppsFree,
 			"docker_apps_mounted": stats.DockerAppsMounted,
 		},
+	}
+
+	// Carry per-device tunnel capability on the heartbeat so the UI reflects it
+	// live (~30s) without a dedicated get_agent_metadata call. The backend
+	// forwards it to the devices store verbatim.
+	if s.tunnelCapableFn != nil {
+		payload["tunnel_capable"] = s.tunnelCapableFn()
 	}
 
 	res, err := s.Call(ctx, topics.UpdateDeviceStatus, []any{payload}, nil, nil, nil)

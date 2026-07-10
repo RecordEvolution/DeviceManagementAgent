@@ -321,6 +321,46 @@ func (_c *TunnelManager_GetTunnelConfig_Call) RunAndReturn(run func() ([]tunnel.
 	return _c
 }
 
+// MarkUnavailable provides a mock function for the type TunnelManager
+func (_mock *TunnelManager) MarkUnavailable(reason string) {
+	_mock.Called(reason)
+	return
+}
+
+// TunnelManager_MarkUnavailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkUnavailable'
+type TunnelManager_MarkUnavailable_Call struct {
+	*mock.Call
+}
+
+// MarkUnavailable is a helper method to define mock.On call
+//   - reason string
+func (_e *TunnelManager_Expecter) MarkUnavailable(reason any) *TunnelManager_MarkUnavailable_Call {
+	return &TunnelManager_MarkUnavailable_Call{Call: _e.mock.On("MarkUnavailable", reason)}
+}
+
+func (_c *TunnelManager_MarkUnavailable_Call) Run(run func(reason string)) *TunnelManager_MarkUnavailable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *TunnelManager_MarkUnavailable_Call) Return() *TunnelManager_MarkUnavailable_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *TunnelManager_MarkUnavailable_Call) RunAndReturn(run func(reason string)) *TunnelManager_MarkUnavailable_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Reload provides a mock function for the type TunnelManager
 func (_mock *TunnelManager) Reload() error {
 	ret := _mock.Called()
@@ -567,6 +607,83 @@ func (_c *TunnelManager_Status_Call) Return(tunnelStatus tunnel.TunnelStatus, er
 }
 
 func (_c *TunnelManager_Status_Call) RunAndReturn(run func(tunnelID string) (tunnel.TunnelStatus, error)) *TunnelManager_Status_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SuperviseStart provides a mock function for the type TunnelManager
+func (_mock *TunnelManager) SuperviseStart() {
+	_mock.Called()
+	return
+}
+
+// TunnelManager_SuperviseStart_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SuperviseStart'
+type TunnelManager_SuperviseStart_Call struct {
+	*mock.Call
+}
+
+// SuperviseStart is a helper method to define mock.On call
+func (_e *TunnelManager_Expecter) SuperviseStart() *TunnelManager_SuperviseStart_Call {
+	return &TunnelManager_SuperviseStart_Call{Call: _e.mock.On("SuperviseStart")}
+}
+
+func (_c *TunnelManager_SuperviseStart_Call) Run(run func()) *TunnelManager_SuperviseStart_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TunnelManager_SuperviseStart_Call) Return() *TunnelManager_SuperviseStart_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *TunnelManager_SuperviseStart_Call) RunAndReturn(run func()) *TunnelManager_SuperviseStart_Call {
+	_c.Run(run)
+	return _c
+}
+
+// TunnelCapable provides a mock function for the type TunnelManager
+func (_mock *TunnelManager) TunnelCapable() bool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TunnelCapable")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func() bool); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// TunnelManager_TunnelCapable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TunnelCapable'
+type TunnelManager_TunnelCapable_Call struct {
+	*mock.Call
+}
+
+// TunnelCapable is a helper method to define mock.On call
+func (_e *TunnelManager_Expecter) TunnelCapable() *TunnelManager_TunnelCapable_Call {
+	return &TunnelManager_TunnelCapable_Call{Call: _e.mock.On("TunnelCapable")}
+}
+
+func (_c *TunnelManager_TunnelCapable_Call) Run(run func()) *TunnelManager_TunnelCapable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TunnelManager_TunnelCapable_Call) Return(b bool) *TunnelManager_TunnelCapable_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *TunnelManager_TunnelCapable_Call) RunAndReturn(run func() bool) *TunnelManager_TunnelCapable_Call {
 	_c.Call.Return(run)
 	return _c
 }

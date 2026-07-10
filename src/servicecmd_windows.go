@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reagent/codesign"
 	"reagent/filesystem"
 	"strings"
 	"time"
@@ -18,6 +19,42 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 )
+
+// installTrustAnchors writes every embedded code-signing root cert to the
+// agent dir and imports each into the machine trust stores: Trusted Root (so
+// the self-signed signature chain validates) and TrustedPublisher (so UAC
+// shows a verified publisher and WDAC/AppLocker publisher rules can allow it).
+// More than one root during a rotation's overlap window. No-ops when no real
+// root is embedded yet (pre-signing transition). All failures are warnings —
+// the service runs regardless.
+func installTrustAnchors(agentDir string) {
+	for _, root := range codesign.EmbeddedRoots() {
+		certPath := filepath.Join(agentDir, root.FileName)
+		if err := os.WriteFile(certPath, root.PEM, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write code-signing root %q: %v\n", root.FileName, err)
+			continue
+		}
+		for _, store := range []string{"Root", "TrustedPublisher"} {
+			if err := runCommand("certutil", certImportArgs(store, certPath)...); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not import %q into %s: %v\n", root.FileName, store, err)
+			}
+		}
+	}
+}
+
+// removeTrustAnchors reverses installTrustAnchors at uninstall — leaving a
+// self-signed root in Trusted Root is a lasting liability. Removes every
+// embedded root by its common name.
+func removeTrustAnchors(agentDir string) {
+	for _, root := range codesign.EmbeddedRoots() {
+		for _, store := range []string{"Root", "TrustedPublisher"} {
+			if err := runCommand("certutil", certDeleteArgs(store, root.CommonName)...); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove %q from %s: %v\n", root.CommonName, store, err)
+			}
+		}
+		_ = os.Remove(filepath.Join(agentDir, root.FileName))
+	}
+}
 
 // Language-neutral SIDs (localized group names like "Administratoren" would
 // break icacls on non-English Windows).
@@ -198,6 +235,20 @@ func serviceInstall(args []string) error {
 		}
 	}
 
+	// Import our code-signing root so the agent's signed self-updates are
+	// trusted (UAC verified publisher; on-device pinning). No-ops until a real
+	// root is embedded. Non-fatal — an un-imported cert only weakens the
+	// verified-publisher UX, it doesn't stop the service.
+	installTrustAnchors(opts.AgentDir)
+
+	// Exclude frpc.exe from Defender (frp is flagged PUA). Best-effort;
+	// Tamper Protection / managed policy may ignore it.
+	frpcPath := filepath.Join(opts.AgentDir, "frpc.exe")
+	err = runCommand("powershell", "-NonInteractive", "-Command", defenderAddExclusionCmd(frpcPath))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not add the Defender exclusion for frpc (tunnels may be quarantined on managed devices): %v\n", err)
+	}
+
 	fmt.Printf("Installed service %q (agent dir: %s)\n", serviceName, opts.AgentDir)
 
 	if opts.StartNow {
@@ -231,6 +282,13 @@ func serviceUninstall() error {
 	}
 	defer service.Close()
 
+	// Recover the agent dir from the baked ImagePath before deleting, so the
+	// dir-scoped side effects (Defender exclusion, cert file) can be reversed.
+	agentDir := ""
+	if cfg, cfgErr := service.Config(); cfgErr == nil {
+		agentDir = agentDirFromImagePath(cfg.BinaryPathName)
+	}
+
 	status, err := service.Control(svc.Stop)
 	if err == nil {
 		// wait for the stop to complete before deleting
@@ -256,6 +314,15 @@ func serviceUninstall() error {
 	err = runCommand("schtasks", "/Delete", "/F", "/TN", repairTaskName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not remove the repair scheduled task: %v\n", err)
+	}
+
+	// Reverse the install-time trust + AV side effects (symmetric uninstall).
+	if agentDir != "" {
+		frpcPath := filepath.Join(agentDir, "frpc.exe")
+		if rmErr := runCommand("powershell", "-NonInteractive", "-Command", defenderRemoveExclusionCmd(frpcPath)); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove the Defender exclusion: %v\n", rmErr)
+		}
+		removeTrustAnchors(agentDir)
 	}
 
 	fmt.Printf("Uninstalled service %q. The agent directory and app data were kept.\n", serviceName)
