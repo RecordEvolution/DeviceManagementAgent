@@ -97,6 +97,52 @@ Read more on `.flock` files and how they work here: https://ironflock.com/en/doc
 ./reagent -config path/to/config.flock -prettyLogging
 ```
 
+### Running as a Windows service
+
+On Windows the agent should be installed as a service instead of being started
+manually — the service starts at boot (no logged-in user required), restarts
+on failure via SCM recovery actions, and **activates self-updates** (a console
+agent only downloads them). From an elevated (Administrator) prompt:
+
+```
+reagent.exe service install -config path\to\config.flock -start
+reagent.exe service status|start|stop|uninstall
+```
+
+What `service install` sets up:
+
+- Copies the exe and the `.flock` (as `device.flock`) into the agent dir
+  (default `%ProgramData%\IronFlock\Reagent`, override with `-agentDir`) and
+  bakes `-config/-agentDir/-appsDir/-dbFileName/-logFile` into the service
+  ImagePath, so no path ever falls back to `os.UserHomeDir` (meaningless under
+  LocalSystem).
+- Restricts the agent dir ACLs to SYSTEM + Administrators (the `.flock` and
+  generated `.env-compose` files contain the device secret; the self-update
+  executes binaries from this dir as SYSTEM), with a Users modify-grant on the
+  apps dir for Docker Desktop bind mounts.
+- Recovery actions: restart after 5s/30s/120s, repeating forever (reset period
+  1 day). Deliberate restarts (update activation, `system_restart_agent`) exit
+  without reporting SERVICE_STOPPED so they always trigger recovery.
+- A boot-time repair Scheduled Task ("IronFlock Agent Repair") that restores
+  `reagent.exe` from `reagent-prev.exe` if an interrupted update swap left the
+  ImagePath vacant — SCM recovery cannot fix a service that fails to _start_.
+- Optional `-proxy http://host:port` writes HTTP(S)_PROXY into the service
+  environment (a LocalSystem service only sees machine-wide env).
+
+Update flow (mirrors the Linux `reagent-manager.sh` semantics in-process, see
+`src/selfupdate`): download `reagent-v<ver>.exe` (SHA-256-verified against the
+published manifest) → validate it executes → rename the running exe to
+`reagent-prev.exe`, rename the update into place → exit for a supervised
+restart → probation: if the new version fails 3 consecutive starts within its
+first 2 minutes, it is rolled back and blacklisted until a newer release
+supersedes it.
+
+Docker note: with Docker Desktop the engine only starts at user sign-in. The
+service tolerates that (it waits patiently and reports the device as
+CONFIGURING), but for unattended devices enable Docker Desktop autostart plus
+Windows auto sign-in. Tunnels and the device terminal remain unsupported on
+Windows.
+
 
 ## Development
 

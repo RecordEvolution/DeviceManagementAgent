@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 
 	"reagent/common"
@@ -189,6 +190,12 @@ func ReregisterControlTopics(session messenger.Messenger) {
 }
 
 func NewPseudoTerminal(id string) (*PseudoTerminal, error) {
+	// creack/pty has no Windows ConPTY support and the shell is bash; fail
+	// with a clear message instead of an opaque pty.Start error.
+	if runtime.GOOS == "windows" {
+		return nil, errors.New("the device terminal is not yet supported on Windows")
+	}
+
 	outputChan := make(chan string)
 	inputChan := make(chan string)
 	errChan := make(chan error)

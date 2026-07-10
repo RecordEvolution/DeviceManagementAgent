@@ -2,6 +2,7 @@ package container
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,6 @@ import (
 	"os/exec"
 	"reagent/common"
 	"reagent/config"
-	"reagent/filesystem"
 	"reagent/safe"
 	"strings"
 	"sync"
@@ -273,6 +273,14 @@ func IsComposeSupported() bool {
 	return true
 }
 
+// RefreshSupport re-evaluates compose support. Supported is latched at
+// construction, which can predate a late-starting daemon (Docker Desktop only
+// starts at user login on Windows), so the daemon-wait path re-checks once
+// Docker becomes available.
+func (c *Compose) RefreshSupport() {
+	c.Supported = IsComposeSupported()
+}
+
 func (c *Compose) Stop(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "stop")
 }
@@ -380,25 +388,66 @@ func (c *Compose) LogStream(dockerComposePath string) (chan string, error) {
 	return logChan, nil
 }
 
+// parseComposePSOutput normalizes the output of `docker compose ps --format
+// json` across compose versions: <= 2.20 prints one JSON array, newer versions
+// print NDJSON (one object per line). Blank output yields an empty slice.
+func parseComposePSOutput(output []byte) ([]ComposeStatus, error) {
+	composeStatuses := []ComposeStatus{}
+
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for decoder.More() {
+		var raw json.RawMessage
+		err := decoder.Decode(&raw)
+		if err != nil {
+			return nil, err
+		}
+
+		value := bytes.TrimSpace(raw)
+		if len(value) == 0 {
+			continue
+		}
+
+		if value[0] == '[' {
+			var batch []ComposeStatus
+			err = json.Unmarshal(value, &batch)
+			if err != nil {
+				return nil, err
+			}
+			composeStatuses = append(composeStatuses, batch...)
+		} else {
+			var status ComposeStatus
+			err = json.Unmarshal(value, &status)
+			if err != nil {
+				return nil, err
+			}
+			composeStatuses = append(composeStatuses, status)
+		}
+	}
+
+	return composeStatuses, nil
+}
+
 func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 	if !c.Supported {
 		log.Error().Err(errors.New("compose is not supported for this device")).Msg("Error while calling status")
 		return []ComposeStatus{}, nil
 	}
 
-	statusCommand := fmt.Sprintf("docker compose -f %s ps -a --format json | jq -sc '.[] | if type==\"array\" then .[] else . end' | jq . -sc", dockerComposePath)
-	output, err := filesystem.ExecuteAsScript(statusCommand)
+	cmd := exec.Command("docker", "compose", "-f", dockerComposePath, "ps", "-a", "--format", "json")
+	output, err := cmd.Output()
 	if err != nil {
+		// A failing compose command (e.g. the project does not exist yet) must
+		// yield an empty list rather than an error: WaitForRunning polls Status
+		// and treats an empty result as "not up yet, keep waiting".
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			log.Debug().Msgf("compose ps for %s exited non-zero: %s", dockerComposePath, strings.TrimSpace(string(exitErr.Stderr)))
+			return []ComposeStatus{}, nil
+		}
 		return []ComposeStatus{}, err
 	}
 
-	var composeStatuses []ComposeStatus
-	err = json.Unmarshal(output, &composeStatuses)
-	if err != nil {
-		return nil, err
-	}
-
-	return composeStatuses, nil
+	return parseComposePSOutput(output)
 }
 
 type ComposeListEntry struct {

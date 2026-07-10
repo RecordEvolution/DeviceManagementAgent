@@ -120,6 +120,12 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
 
+      # TODO(signing): Authenticode-sign build/reagent-windows-amd64 here
+      # (Azure Trusted Signing or an EV cert + signtool) BEFORE publish.sh
+      # uploads it — the Windows service executes self-downloaded updates as
+      # SYSTEM, and unsigned binaries risk Defender quarantine. Downloads are
+      # already integrity-checked against the .sha256 manifests publish.sh
+      # uploads.
       - name: Publish binaries to gs://re-agent
         run: scripts/publish.sh
 

@@ -3,7 +3,6 @@ package apps
 import (
 	"context"
 	"fmt"
-	"os"
 	"reagent/common"
 	"reagent/errdefs"
 	"reagent/messenger/topics"
@@ -15,14 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-func init() {
-	// Set zerolog to use a pretty console writer for human-friendly logs
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"})
-}
 
 type AppManager struct {
 	AppStore      *store.AppStore

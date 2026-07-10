@@ -2,9 +2,13 @@ package system
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"reagent/common"
@@ -51,22 +55,8 @@ func New(config *config.Config, messenger messenger.Messenger) System {
 }
 
 // ------------------------------------------------------------------------- //
-
-func (sys *System) Reboot() error {
-	_, err := exec.Command("reboot").Output()
-	return err
-}
-
-func (sys *System) Poweroff() error {
-	_, err := exec.Command("poweroff").Output()
-	return err
-}
-
-func (sys *System) RestartAgent() error {
-	_, err := exec.Command("systemctl", "restart", "reagent").Output()
-	return err
-}
-
+// Reboot / Poweroff / RestartAgent live in system_unix.go and
+// system_windows.go.
 // ------------------------------------------------------------------------- //
 
 // updateBaseURL returns the base URL for OTA downloads. A per-device
@@ -108,6 +98,18 @@ func (sys *System) downloadBinary(fileName string, bucketName string, versionStr
 		return err
 	}
 
+	// Never install a corrupted or tampered binary: verify against the
+	// .sha256 manifest published next to it. Absent manifests (releases that
+	// predate them) only log a warning.
+	err = verifyRemoteChecksum(tmpFilePath, agentURL)
+	if err != nil {
+		removeErr := os.Remove(tmpFilePath)
+		if removeErr != nil {
+			log.Error().Err(removeErr).Msg("failed to remove download that failed checksum verification")
+		}
+		return err
+	}
+
 	err = os.Chmod(tmpFilePath, 0755)
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to set permissions for %s binary", fileName)
@@ -120,6 +122,64 @@ func (sys *System) downloadBinary(fileName string, bucketName string, versionStr
 		return err
 	}
 
+	return nil
+}
+
+// verifyRemoteChecksum compares filePath's SHA-256 against the manifest
+// published at <binaryURL>.sha256 (first whitespace-separated token, hex).
+// A missing manifest or a failure to FETCH it is tolerated with a warning —
+// TLS to the update server remains the trust anchor and releases published
+// before the manifests existed must stay installable. A manifest that exists
+// and does not match is a hard error.
+func verifyRemoteChecksum(filePath string, binaryURL string) error {
+	manifestURL := binaryURL + ".sha256"
+
+	body, statusCode, err := filesystem.GetRemoteFileWithStatus(manifestURL)
+	if err != nil {
+		log.Warn().Err(err).Msgf("could not fetch checksum manifest %s, skipping verification", manifestURL)
+		return nil
+	}
+	defer body.Close()
+
+	if statusCode == http.StatusNotFound {
+		log.Warn().Msgf("no checksum manifest published at %s, skipping verification", manifestURL)
+		return nil
+	}
+	if statusCode != http.StatusOK {
+		log.Warn().Msgf("checksum manifest %s returned status %d, skipping verification", manifestURL, statusCode)
+		return nil
+	}
+
+	manifest, err := io.ReadAll(io.LimitReader(body, 1024))
+	if err != nil {
+		log.Warn().Err(err).Msgf("could not read checksum manifest %s, skipping verification", manifestURL)
+		return nil
+	}
+
+	expected := strings.ToLower(strings.Fields(string(manifest))[0])
+	if len(expected) != sha256.Size*2 {
+		log.Warn().Msgf("checksum manifest %s is malformed, skipping verification", manifestURL)
+		return nil
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	_, err = io.Copy(hasher, file)
+	if err != nil {
+		return err
+	}
+
+	actual := hex.EncodeToString(hasher.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch for %s: got %s, manifest says %s", binaryURL, actual, expected)
+	}
+
+	log.Debug().Msgf("checksum verified for %s", binaryURL)
 	return nil
 }
 
@@ -399,6 +459,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 
 	didTunnelUpdate := false
 	didAgentUpdate := false
+	var agentUpdateResult UpdateResult
 
 	if runtime.GOOS != "windows" {
 		wg.Add(1)
@@ -435,6 +496,7 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 			}
 
 			didAgentUpdate = updateResult.DidUpdate
+			agentUpdateResult = updateResult
 		})
 	}
 
@@ -490,6 +552,19 @@ func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProg
 	updateTime := time.Since(startUpdate)
 
 	log.Debug().Msgf("Time it took to update system: %s", updateTime)
+
+	// The progress loop above can break on the last downloaded byte, before
+	// the goroutines finish verifying/renaming; wait so agentUpdateResult is
+	// final before acting on it.
+	wg.Wait()
+
+	if didAgentUpdate {
+		// On Windows service installs this swaps the new binary into place
+		// and schedules a restart; everywhere else it is a no-op (Linux
+		// activation is reagent-manager.sh's job, console mode stays
+		// download-only).
+		system.maybeActivateAgentUpdate(agentUpdateResult)
+	}
 
 	return UpdateResult{
 		DidAgentUpdate:  didAgentUpdate,

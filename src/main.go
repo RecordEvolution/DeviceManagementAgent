@@ -32,6 +32,13 @@ func main() {
 		}
 	}()
 
+	// `reagent service install|uninstall|start|stop|status` manages the
+	// Windows service. It must be dispatched before GetCliArguments: the
+	// global flag package stops parsing at the first positional argument.
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		os.Exit(runServiceCommand(os.Args[2:]))
+	}
+
 	cliArgs, err := config.GetCliArguments()
 	if err != nil {
 		log.Fatal().Stack().Err(err).Msg("Failed to get CLI args")
@@ -57,6 +64,36 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Windows: refuse a second agent (service + console double-run deletes
+	// each other's containers) and reap child processes on any exit.
+	err = acquireSingleInstanceLock()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to acquire single-instance lock")
+	}
+	setupProcessJobObject()
+
+	if runningAsService() {
+		runService(cliArgs)
+		return
+	}
+
+	agent, err := runAgent(cliArgs)
+	if err != nil {
+		log.Fatal().Stack().Err(err).Msg("failed to start agent")
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+
+	<-sigChan
+
+	agent.Shutdown(time.Second * 10)
+}
+
+// runAgent brings up the full agent (directories, config, docker, WAMP,
+// OnConnect) and returns once the agent is operational. Shared by console mode
+// and the Windows service.
+func runAgent(cliArgs *config.CommandLineArguments) (*Agent, error) {
 	if cliArgs.Profiling {
 		port := cliArgs.ProfilingPort
 		if cliArgs.ProfilingPort == 0 {
@@ -92,14 +129,14 @@ func main() {
 
 	startupLogChannel <- fmt.Sprintf("Starting... Reagent initialization sequence (OOS: %s, ARCH: %s)", runtime.GOOS, runtime.GOARCH)
 
-	err = filesystem.InitDirectories(cliArgs)
+	err := filesystem.InitDirectories(cliArgs)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init reagent directories")
+		return nil, fmt.Errorf("failed to init reagent directories: %w", err)
 	}
 
 	reswarmConfig, err := config.LoadReswarmConfig(cliArgs.ConfigFileLocation)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to load .flock config file")
+		return nil, fmt.Errorf("failed to load .flock config file: %w", err)
 	}
 
 	generalConfig := config.New(cliArgs, reswarmConfig)
@@ -110,7 +147,7 @@ func main() {
 	safe.Go((func() {
 		startupLogChannel <- "Checking for agent update in background..."
 
-		_, err = agent.System.UpdateSystem(nil, agent.Config.CommandLineArguments.ShouldUpdateAgent)
+		_, err := agent.System.UpdateSystem(nil, agent.Config.CommandLineArguments.ShouldUpdateAgent)
 		if err != nil {
 			log.Error().Err(err).Msgf("Failed to update system")
 		}
@@ -120,7 +157,7 @@ func main() {
 
 	err = agent.OnConnect(false)
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init")
+		return nil, fmt.Errorf("failed to run the onConnect handler: %w", err)
 	}
 
 	benchmark.TimeTillOnConnectAfterConnection = time.Since(benchmark.OnConnectInitAfterConnection)
@@ -128,8 +165,5 @@ func main() {
 
 	benchmark.LogBenchmarkResultsWhenFinished(&generalConfig)
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-
-	<-sigChan
+	return agent, nil
 }

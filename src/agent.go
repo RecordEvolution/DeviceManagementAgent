@@ -45,6 +45,38 @@ type Agent struct {
 	AppManager      *apps.AppManager
 	StateObserver   *apps.StateObserver
 	StateMachine    *apps.StateMachine
+
+	// daemonReady is closed once the Docker daemon has been reachable and the
+	// local app state was reconciled against it. On hosts where Docker starts
+	// late (Docker Desktop starts at user login), the agent keeps running and
+	// container features come up when the daemon does.
+	daemonReady chan struct{}
+}
+
+// Shutdown releases the agent's external resources (WAMP session, database)
+// with a bounded wait. App containers keep running — their state is
+// reconciled on the next agent start.
+func (agent *Agent) Shutdown(timeout time.Duration) {
+	done := make(chan struct{})
+	safe.Go(func() {
+		if agent.Messenger != nil {
+			agent.Messenger.Close()
+		}
+		if agent.Database != nil {
+			err := agent.Database.Close()
+			if err != nil {
+				log.Error().Err(err).Msg("failed to close app state database")
+			}
+		}
+		close(done)
+	})
+
+	select {
+	case <-done:
+		log.Info().Msg("agent shutdown complete")
+	case <-time.After(timeout):
+		log.Warn().Msg("agent shutdown timed out")
+	}
 }
 
 func (agent *Agent) OnConnect(reconnect bool) error {
@@ -116,12 +148,11 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		}
 	})
 
-	// Wait for Docker daemon before container operations
+	// Wait for Docker daemon before container operations. daemonReady also
+	// guarantees the local app state was reconciled (NewAgent), so the remote
+	// sync below starts from a consistent local view.
 	log.Info().Msg("Waiting for Docker Daemon to be available...")
-	err = agent.Container.WaitForDaemon()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("error occurred while waiting for docker daemon")
-	}
+	<-agent.daemonReady
 	log.Info().Msg("Docker Daemon is available")
 
 	// Step 1: Fetch requested app states from backend
@@ -284,26 +315,70 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		safe.Go(func() { guard.Run(context.Background()) })
 	}
 
-	err = stateObserver.CorrectAppStates(false)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to correct local states")
+	// Reconcile local app state against the Docker daemon. fatal=true keeps
+	// the historical behavior (die and let the supervisor restart us); the
+	// late-daemon path must not kill an otherwise healthy agent, so it logs
+	// errors instead.
+	initLocalAppStates := func(fatal bool) {
+		fail := func(err error, msg string) {
+			if fatal {
+				log.Fatal().Stack().Err(err).Msg(msg)
+			} else {
+				log.Error().Stack().Err(err).Msg(msg)
+			}
+		}
+
+		err := stateObserver.CorrectAppStates(false)
+		if err != nil {
+			fail(err, "failed to correct local states")
+		}
+
+		err = stateObserver.ObserveAppStates()
+		if err != nil {
+			fail(err, "failed to init app state observers")
+		}
+
+		// Clean up orphaned containers not in database (offline check)
+		err = appManager.CleanupOrphanedContainers()
+		if err != nil {
+			log.Error().Stack().Err(err).Msg("failed to cleanup orphaned containers")
+		}
+
+		// setup the containers on start
+		err = appManager.EnsureLocalRequestedStates()
+		if err != nil {
+			fail(err, "failed to ensure local app states")
+		}
 	}
 
-	err = stateObserver.ObserveAppStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to init app state observers")
-	}
+	daemonReady := make(chan struct{})
+	err = container.WaitForDaemon(time.Second * 5)
+	if err == nil {
+		// The fast path (always taken on Linux, where Docker is up before the
+		// agent): behavior identical to before this gate existed.
+		initLocalAppStates(true)
+		close(daemonReady)
+	} else {
+		// Docker Desktop starts at user login, possibly long after this
+		// service started at boot. Keep the agent alive so WAMP endpoints
+		// register for remote debugging; container features come up when the
+		// daemon does.
+		generalConfig.StartupLogChannel <- "Docker daemon is not reachable yet, continuing startup; container features become available once Docker is up"
+		safe.Go(func() {
+			for {
+				err := container.WaitForDaemon(time.Second * 30)
+				if err == nil {
+					break
+				}
+				log.Info().Msg("still waiting for the Docker daemon...")
+			}
 
-	// Clean up orphaned containers not in database (offline check)
-	err = appManager.CleanupOrphanedContainers()
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to cleanup orphaned containers")
-	}
-
-	// setup the containers on start
-	err = appManager.EnsureLocalRequestedStates()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to ensure local app states")
+			// compose support was probed (and latched negative) while the
+			// daemon was down
+			container.Compose().RefreshSupport()
+			initLocalAppStates(false)
+			close(daemonReady)
+		})
 	}
 
 	// try to establish the main session
@@ -373,6 +448,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		Messenger:       mainSession,
 		LogMessenger:    mainSession,
 		Database:        database,
+		daemonReady:     daemonReady,
 	}
 
 	// Set up the onConnect callback - messenger will call this after each reconnection

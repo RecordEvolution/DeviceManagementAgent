@@ -183,6 +183,57 @@ func TestComposeUnsupportedShortCircuits(t *testing.T) {
 	})
 }
 
+// parseComposePSOutput must accept every output shape `docker compose ps -a
+// --format json` has produced across compose versions: a single JSON array
+// (<= 2.20), NDJSON objects (>= 2.21), and blank output for absent projects.
+// These fixtures characterize the jq pipeline the previous implementation
+// shelled out to.
+func TestParseComposePSOutput(t *testing.T) {
+	obj := func(name, state string) string {
+		return `{"ID":"id-` + name + `","Name":"` + name + `","Service":"` + name + `","State":"` + state + `"}`
+	}
+
+	t.Run("NDJSON objects (compose >= 2.21)", func(t *testing.T) {
+		statuses, err := parseComposePSOutput([]byte(obj("web", "running") + "\n" + obj("db", "exited") + "\n"))
+		require.NoError(t, err)
+		require.Len(t, statuses, 2)
+		assert.Equal(t, "web", statuses[0].Name)
+		assert.Equal(t, "running", statuses[0].State)
+		assert.Equal(t, "db", statuses[1].Name)
+		assert.Equal(t, "exited", statuses[1].State)
+	})
+
+	t.Run("single JSON array (compose <= 2.20)", func(t *testing.T) {
+		statuses, err := parseComposePSOutput([]byte("[" + obj("web", "running") + "," + obj("db", "running") + "]\n"))
+		require.NoError(t, err)
+		require.Len(t, statuses, 2)
+		assert.Equal(t, "web", statuses[0].Name)
+		assert.Equal(t, "db", statuses[1].Name)
+	})
+
+	t.Run("mixed stream of arrays and objects", func(t *testing.T) {
+		statuses, err := parseComposePSOutput([]byte("[" + obj("a", "running") + "]\n" + obj("b", "dead") + "\n"))
+		require.NoError(t, err)
+		require.Len(t, statuses, 2)
+		assert.Equal(t, "a", statuses[0].Name)
+		assert.Equal(t, "b", statuses[1].Name)
+	})
+
+	t.Run("blank output yields empty slice", func(t *testing.T) {
+		for _, input := range []string{"", "\n", "  \n\n"} {
+			statuses, err := parseComposePSOutput([]byte(input))
+			require.NoError(t, err)
+			assert.Empty(t, statuses)
+			assert.NotNil(t, statuses)
+		}
+	})
+
+	t.Run("invalid JSON errors", func(t *testing.T) {
+		_, err := parseComposePSOutput([]byte("not-json"))
+		require.Error(t, err)
+	})
+}
+
 // ComposeStatus is the JSON contract for `docker compose ps`. Verify the struct
 // tags by round-tripping a representative payload through json.Unmarshal — this
 // is exactly what Status() does with the daemon output.
