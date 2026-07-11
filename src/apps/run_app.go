@@ -556,7 +556,7 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 	return mounts, nil
 }
 
-func buildDefaultEnvironmentVariables(config *config.Config, environment common.Stage, app *common.App) []string {
+func buildDefaultEnvironmentVariables(config *config.Config, payload common.TransitionPayload, environment common.Stage, app *common.App) []string {
 	environmentVariables := []string{
 		fmt.Sprintf("DEVICE_SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
 		fmt.Sprintf("ENV=%s", environment),
@@ -569,6 +569,16 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 		// Rewritten for the container's vantage point: a loopback endpoint
 		// (local dev) is unreachable from a bridge network.
 		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", appEndpointURL(config.ReswarmConfig.DeviceEndpointURL)),
+		// The domain direct device tunnels are published under. Lets SDKs
+		// (getRemoteAccessUrlForPort) compose a port's public URL without
+		// replicating server-side logic.
+		fmt.Sprintf("TUNNEL_DOMAIN=%s", tunnelDomainForApps(config)),
+	}
+
+	if payload.InstanceKey > 0 {
+		// Instance devices: apps compose the cloud-forwarded route
+		// https://i<INSTANCE_KEY>-<deviceKey>-<appName>-<port>.<cloud edge>.
+		environmentVariables = append(environmentVariables, fmt.Sprintf("INSTANCE_KEY=%d", payload.InstanceKey))
 	}
 
 	if config.ReswarmConfig.ReswarmBaseURL != "" {
@@ -582,7 +592,7 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
 	config := sm.Container.GetConfig()
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
@@ -662,6 +672,14 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 				if tunnel != nil {
 					portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
 					remotePortEnvs = append(remotePortEnvs, portEnv)
+				}
+
+				// Instance devices: the internet-facing cloud port of a
+				// tcp/udp tunnel, patched into the sync payload by the
+				// instance backend. Payload-borne — no local tunnel object
+				// needed.
+				if portRule.CloudRemotePort > 0 {
+					remotePortEnvs = append(remotePortEnvs, fmt.Sprintf("%s_CLOUD=%d", portRule.RemotePortEnvironment, portRule.CloudRemotePort))
 				}
 			}
 		}

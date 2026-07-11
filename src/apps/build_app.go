@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
@@ -62,7 +63,7 @@ func filterValidDotEnvLines(envLines []string) (valid []string, skippedKeys []st
 func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App) (string, []string, error) {
 	var envLines []string
 
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, app.Stage, app)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 
@@ -101,6 +102,14 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 				if tunnel != nil {
 					portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
 					remotePortEnvs = append(remotePortEnvs, portEnv)
+				}
+
+				// Instance devices: the internet-facing cloud port of a
+				// tcp/udp tunnel, patched into the sync payload by the
+				// instance backend. Payload-borne — no local tunnel object
+				// needed.
+				if portRule.CloudRemotePort > 0 {
+					remotePortEnvs = append(remotePortEnvs, fmt.Sprintf("%s_CLOUD=%d", portRule.RemotePortEnvironment, portRule.CloudRemotePort))
 				}
 			}
 		}
@@ -165,6 +174,8 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		return "", errors.New("failed to infer services")
 	}
 
+	envFilesHostDir := appEnvFilesHostDir(config, payload.Stage, app.AppName)
+
 	for _, serviceInterface := range services {
 		service, ok := (serviceInterface).(map[string]interface{})
 		if !ok {
@@ -173,6 +184,7 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 
 		service["env_file"] = DotEnvFileName
 		addComposeExtraHost(service)
+		addComposeEnvFilesMount(service, envFilesHostDir)
 	}
 
 	err = sm.rewriteComposeHostPorts(payload, dockerCompose)
@@ -216,6 +228,14 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 	err = os.WriteFile(dotEnvFilePath, []byte(dotEnvFileContents), os.ModePerm)
 	if err != nil {
 		return "", err
+	}
+
+	// Mirror the env vars as files in the /data/env mount injected above, like
+	// single-container apps get: the start-time snapshot the live refresh
+	// (refreshRemotePortEnvFiles) later updates in place.
+	err = writeEnvironmentVariablesToFiles(filepath.Dir(envFilesHostDir), strings.Split(dotEnvFileContents, "\n"))
+	if err != nil {
+		return "", fmt.Errorf("failed to write environment variables to files: %w", err)
 	}
 
 	err = os.WriteFile(dockerComposeFilePath, dockerComposeJSONString, os.ModePerm)

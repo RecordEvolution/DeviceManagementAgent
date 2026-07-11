@@ -166,6 +166,10 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	payload.Ports = np
 	am.tunnelManager.SaveRemotePorts(payload)
 
+	// Live-update the bind-mounted env files ({NAME}.txt / {NAME}_CLOUD.txt)
+	// so running containers see fresh tunnel ports without a restart.
+	refreshRemotePortEnvFiles(globalConfig, payload.Stage, payload.AppName, newPorts)
+
 	// err = am.AppStore.UpdateLocalRequestedState(payload)
 	// if err != nil {
 	// 	return err

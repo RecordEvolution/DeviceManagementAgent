@@ -3,6 +3,9 @@ package apps
 import (
 	"net"
 	"net/url"
+	"reagent/common"
+	"reagent/config"
+	"reagent/tunnel"
 	"strings"
 )
 
@@ -44,6 +47,55 @@ func appEndpointURL(endpointURL string) string {
 	}
 
 	return parsed.String()
+}
+
+// tunnelDomainForApps is the domain direct device tunnels are published
+// under: the appliance/operator tunnel domain when configured, the
+// environment's cloud tunnel edge otherwise. Mirrors the server-address
+// resolution in tunnel.initialize().
+func tunnelDomainForApps(cfg *config.Config) string {
+	if cfg.ReswarmConfig.ApplianceDomain != "" {
+		return cfg.ReswarmConfig.ApplianceDomain
+	}
+
+	switch cfg.ReswarmConfig.Environment {
+	case string(common.TEST):
+		return tunnel.TEST_SERVER_ADDR
+	case string(common.LOCAL):
+		return "localhost"
+	default:
+		return tunnel.PROD_SERVER_ADDR
+	}
+}
+
+// addComposeEnvFilesMount mounts the agent's env-files directory read-only at
+// /data/env in a compose service, mirroring the single-container /data bind:
+// it is how live env updates (e.g. a late-allocated tunnel cloud port) reach
+// running compose containers. Authored volumes are preserved; a service that
+// already mounts something at /data/env keeps its own mount.
+func addComposeEnvFilesMount(service map[string]interface{}, hostEnvDir string) {
+	mountEntry := hostEnvDir + ":/data/env:ro"
+
+	switch volumes := service["volumes"].(type) {
+	case nil:
+		service["volumes"] = []interface{}{mountEntry}
+	case []interface{}:
+		for _, volume := range volumes {
+			switch entry := volume.(type) {
+			case string:
+				if strings.Contains(entry, ":/data/env") {
+					return
+				}
+			case map[string]interface{}: // long syntax
+				if target, ok := entry["target"].(string); ok && strings.HasPrefix(target, "/data/env") {
+					return
+				}
+			}
+		}
+		service["volumes"] = append(volumes, mountEntry)
+	default:
+		// Unexpected shape — leave as authored.
+	}
 }
 
 // addComposeExtraHost injects the host-gateway mapping into a compose

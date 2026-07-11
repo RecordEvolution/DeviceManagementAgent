@@ -65,6 +65,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	dockerComposeKw := kwargs["docker_compose"]
 	newDockerComposeKw := kwargs["new_docker_compose"]
 	dockerCredentialsKw := kwargs["docker_credentials"]
+	instanceKeyKw := kwargs["instance_key"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -72,6 +73,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var requestorAccountKey uint64
 	var requestorAccountKey2 uint64
 	var deviceOwnerAccountKey uint64
+	var instanceKey uint64
 	var appName string
 	var stage string
 	var requestedState string
@@ -200,6 +202,21 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 				return common.TransitionPayload{}, err
 			}
 			deviceOwnerAccountKey = uint64(value)
+		}
+	}
+
+	// instance_key is optional: only instance (appliance) backends send it, and
+	// a value the agent cannot parse must not block app syncs — apps then just
+	// miss the INSTANCE_KEY env until the next valid sync.
+	if instanceKeyKw != nil {
+		instanceKey, ok = instanceKeyKw.(uint64)
+		if !ok {
+			if instanceKeyString, isString := instanceKeyKw.(string); isString {
+				parsedInstanceKey, err := strconv.ParseUint(instanceKeyString, 10, 64)
+				if err == nil {
+					instanceKey = parsedInstanceKey
+				}
+			}
 		}
 	}
 
@@ -360,6 +377,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	)
 
 	payload.DeviceOwnerAccountKey = deviceOwnerAccountKey
+	payload.InstanceKey = instanceKey
 	payload.RequestUpdate = requestUpdate
 
 	// Version used to publish a release

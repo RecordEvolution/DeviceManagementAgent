@@ -1,6 +1,8 @@
 package apps
 
 import (
+	"reagent/common"
+	"reagent/config"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,4 +56,41 @@ func TestAddComposeExtraHost(t *testing.T) {
 		addComposeExtraHost(service)
 		assert.Equal(t, map[string]interface{}{"db.local": "10.0.0.5", "host.docker.internal": "host-gateway"}, service["extra_hosts"])
 	})
+}
+
+func TestTunnelDomainForApps(t *testing.T) {
+	cases := []struct {
+		name     string
+		reswarm  config.ReswarmConfig
+		expected string
+	}{
+		{name: "appliance domain wins", reswarm: config.ReswarmConfig{ApplianceDomain: "tunnel.factory.example", Environment: "production"}, expected: "tunnel.factory.example"},
+		{name: "production cloud edge", reswarm: config.ReswarmConfig{Environment: "production"}, expected: "app.ironflock.com"},
+		{name: "test cloud edge", reswarm: config.ReswarmConfig{Environment: "test"}, expected: "app.ironflock.dev"},
+		{name: "local", reswarm: config.ReswarmConfig{Environment: "local"}, expected: "localhost"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reswarm := tc.reswarm
+			cfg := &config.Config{ReswarmConfig: &reswarm}
+			assert.Equal(t, tc.expected, tunnelDomainForApps(cfg))
+		})
+	}
+}
+
+// The env the agent hands every app: TUNNEL_DOMAIN always, INSTANCE_KEY only
+// on instance devices — what SDK getRemoteAccessUrlForPort composes URLs from.
+func TestBuildDefaultEnvironmentVariablesTunnelRouting(t *testing.T) {
+	cfg := &config.Config{ReswarmConfig: &config.ReswarmConfig{Environment: "production", DeviceKey: 42}}
+	app := &common.App{AppKey: 7, AppName: "myapp"}
+
+	cloudEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{}, common.PROD, app)
+	assert.Contains(t, cloudEnv, "TUNNEL_DOMAIN=app.ironflock.com")
+	for _, env := range cloudEnv {
+		assert.NotContains(t, env, "INSTANCE_KEY=", "cloud devices must not get an instance key")
+	}
+
+	instanceEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{InstanceKey: 5}, common.PROD, app)
+	assert.Contains(t, instanceEnv, "INSTANCE_KEY=5")
 }

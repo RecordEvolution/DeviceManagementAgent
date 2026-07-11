@@ -168,3 +168,31 @@ func TestSyncPortStateReplacesStaleTunnel(t *testing.T) {
 
 	require.NoError(t, am.syncPortState(payload, app))
 }
+
+// TestGenerateDotEnvContentsCloudRemotePort: an instance-patched cloud port
+// reaches the compose dotenv as {RemotePortEnvironment}_CLOUD even when no
+// local tunnel object exists (the value is payload-borne).
+func TestGenerateDotEnvContentsCloudRemotePort(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().Get(mock.Anything).Return(nil).Maybe()
+
+	app := amSeed(t, appStore, 11, "vpnapp", common.PRESENT, common.PROD)
+	payload := amPayload(11, "vpnapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{
+		RuleName:              "vpn",
+		Port:                  51820,
+		Protocol:              "udp",
+		Active:                true,
+		RemotePortEnvironment: "WG_PORT",
+		CloudRemotePort:       31099,
+	})
+
+	contents, skipped, err := am.StateMachine.generateDotEnvContents(cfg, payload, app)
+	require.NoError(t, err)
+	assert.Empty(t, skipped)
+	assert.Contains(t, contents, "WG_PORT_CLOUD=31099")
+	// No local tunnel object -> the base WG_PORT env is absent; the cloud
+	// port must not depend on it.
+	assert.NotContains(t, contents, "\nWG_PORT=")
+}

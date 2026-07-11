@@ -282,6 +282,9 @@ bump-major:
 
 # Requires a clean working tree; promote afterwards with `just promote`.
 # Tag the current commit as v<version.txt> and push (triggers build/publish CI).
+# Runs the lint gate locally FIRST: release.yml requires gate.yml to pass before
+# publishing, but the tag is already pushed by then — a lint failure would leave a
+# broken v<version> tag on origin to clean up. Catch it here, before the push.
 release:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -295,6 +298,9 @@ release:
         echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$version'" >&2
         exit 1
     fi
+    echo "==> running lint gate locally before pushing the release tag..."
+    {{just_executable()}} lint
+    scripts/check-frp-version.sh
     git tag -a "v${version}" -m "release v${version}"
     git push origin "$(git rev-parse --abbrev-ref HEAD)"
     git push origin "v${version}"

@@ -93,6 +93,13 @@ type PortForwardRule struct {
 	// shown in the UI; it comes back on sync so a restarted agent can reuse
 	// the same port even after the container was removed.
 	HostPort uint64 `json:"host_port,omitempty"`
+	// CloudRemotePort is the internet-facing port of a tcp/udp tunnel of an
+	// instance device: the cloud-side port the instance's tunnel forwarder
+	// allocated (distinct from RemotePort, which is instance-local there).
+	// Patched fresh into every sync by the instance backend — a value that
+	// round-trips through t_device_to_app.ports is just a stale cached hint.
+	// Injected into app containers as {RemotePortEnvironment}_CLOUD.
+	CloudRemotePort uint64 `json:"cloud_remote_port,omitempty"`
 }
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.
@@ -104,28 +111,32 @@ type TransitionPayload struct {
 	DeviceOwnerAccountKey uint64
 	DeviceToAppKey        uint64
 	AppKey                uint64
-	CallerAuthID          int
-	AppName               string
-	ImageName             StageBasedResult
-	PresentImageName      string
-	RegistryImageName     StageBasedResult
-	ContainerName         StageBasedResult
-	DockerCredentials     map[string]DockerCredential
-	EnvironmentVariables  map[string]any
-	EnvironmentTemplate   map[string]any
-	DockerCompose         map[string]any
-	NewDockerCompose      map[string]any
-	Ports                 []any
-	PublishContainerName  string
-	RegisteryToken        string
-	NewestVersion         string
-	PresentVersion        string
-	ReleaseKey            uint64
-	NewReleaseKey         uint64
-	Version               string
-	RequestUpdate         bool
-	Retrying              bool
-	CancelTransition      bool
+	// InstanceKey is the cloud-assigned key of the instance this device
+	// belongs to (sent by instance backends only; 0 on cloud devices). Apps
+	// receive it as INSTANCE_KEY to compose cloud-forwarded tunnel URLs.
+	InstanceKey          uint64
+	CallerAuthID         int
+	AppName              string
+	ImageName            StageBasedResult
+	PresentImageName     string
+	RegistryImageName    StageBasedResult
+	ContainerName        StageBasedResult
+	DockerCredentials    map[string]DockerCredential
+	EnvironmentVariables map[string]any
+	EnvironmentTemplate  map[string]any
+	DockerCompose        map[string]any
+	NewDockerCompose     map[string]any
+	Ports                []any
+	PublishContainerName string
+	RegisteryToken       string
+	NewestVersion        string
+	PresentVersion       string
+	ReleaseKey           uint64
+	NewReleaseKey        uint64
+	Version              string
+	RequestUpdate        bool
+	Retrying             bool
+	CancelTransition     bool
 }
 
 func BuildTransitionPayload(appKey uint64, appName string, requestorAccountKey uint64,
