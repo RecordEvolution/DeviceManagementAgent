@@ -8,6 +8,7 @@ require (
 	github.com/Masterminds/semver v1.5.0
 	github.com/creack/pty v1.1.24
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/docker/go-connections v0.7.0
 	github.com/gammazero/nexus/v3 v3.3.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/google/uuid v1.6.0
@@ -30,7 +31,6 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
