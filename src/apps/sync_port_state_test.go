@@ -1,0 +1,170 @@
+package apps
+
+import (
+	"errors"
+	"testing"
+
+	"reagent/common"
+	"reagent/errdefs"
+	"reagent/tunnel"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+)
+
+// spsPorts builds the payload.Ports value for a single active rule.
+func spsPorts(t *testing.T, rule common.PortForwardRule) []interface{} {
+	t.Helper()
+	ports, err := tunnel.PortForwardRuleToInterface([]common.PortForwardRule{rule})
+	require.NoError(t, err)
+	return ports
+}
+
+func spsRules(t *testing.T, ports []interface{}) []common.PortForwardRule {
+	t.Helper()
+	rules, err := tunnel.InterfaceToPortForwardRule(ports)
+	require.NoError(t, err)
+	return rules
+}
+
+// TestSyncPortStateUsesManagedHostPort: the tunnel dials the agent-managed
+// host port while the subdomain keeps the declared port, and the assignment
+// is persisted as host_port on the saved rules.
+func TestSyncPortStateUsesManagedHostPort(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 7, "portapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(7, "portapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "web", Port: 8080, Protocol: "http", Active: true})
+
+	// The launch path allocated a managed host port for the declared port.
+	hostPort, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 7, Protocol: "tcp", Port: 8080}, 41234)
+	require.NoError(t, err)
+	require.Equal(t, uint64(41234), hostPort)
+
+	expectedSubdomain := tunnel.CreateSubdomain(tunnel.Protocol("http"), uint64(cfg.ReswarmConfig.DeviceKey), "portapp", 8080)
+	tunnelID := tunnel.CreateTunnelID(expectedSubdomain, "http")
+
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		assert.Equal(t, expectedSubdomain, conf.Subdomain, "subdomain must keep the declared port")
+		assert.Equal(t, uint64(41234), conf.LocalPort, "frpc must dial the managed host port")
+		assert.Equal(t, "", conf.LocalIP)
+		conf.RemotePort = 30123
+		return conf, nil
+	}).Once()
+
+	var savedPorts []interface{}
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
+		savedPorts = p.Ports
+		return nil
+	}).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	savedRules := spsRules(t, savedPorts)
+	require.Len(t, savedRules, 1)
+	assert.Equal(t, uint64(8080), savedRules[0].Port, "declared port stays the identity")
+	assert.Equal(t, uint64(41234), savedRules[0].HostPort, "host port is persisted upstream")
+	assert.Equal(t, uint64(30123), savedRules[0].RemotePort)
+}
+
+// TestSyncPortStateDefersFreshApp: nothing allocated, no container, nothing
+// persisted — tunnel creation waits for the post-transition sync.
+func TestSyncPortStateDefersFreshApp(t *testing.T) {
+	am, mockContainer, mockTunnel, appStore, _, _ := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 8, "freshapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(8, "freshapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "web", Port: 8080, Protocol: "http", Active: true})
+
+	mockContainer.EXPECT().GetContainerPortBindings(mock.Anything, payload.ContainerName.Prod).
+		Return(nil, errdefs.ContainerNotFound(errors.New("not found"))).Once()
+
+	var savedPorts []interface{}
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
+		savedPorts = p.Ports
+		return nil
+	}).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	savedRules := spsRules(t, savedPorts)
+	require.Len(t, savedRules, 1)
+	assert.Zero(t, savedRules[0].HostPort, "no host port must be invented before launch")
+}
+
+// TestSyncPortStateLegacyHostNetworking: a pre-migration container running
+// with host networking keeps its declared-port tunnel.
+func TestSyncPortStateLegacyHostNetworking(t *testing.T) {
+	am, mockContainer, mockTunnel, appStore, _, _ := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 9, "legacyapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(9, "legacyapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "web", Port: 8080, Protocol: "http", Active: true})
+
+	mockContainer.EXPECT().GetContainerPortBindings(mock.Anything, payload.ContainerName.Prod).
+		Return(map[string]uint64{}, nil).Once()
+	mockContainer.EXPECT().GetContainerNetworkMode(mock.Anything, payload.ContainerName.Prod).
+		Return("host", nil).Once()
+
+	mockTunnel.EXPECT().Get(mock.Anything).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		assert.Equal(t, uint64(8080), conf.LocalPort, "legacy host networking dials the declared port")
+		return conf, nil
+	}).Once()
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).Return(nil).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	// The legacy port is not a managed assignment.
+	_, assigned := am.hostPorts.GetByPort(common.PROD, 9, "tcp", 8080)
+	assert.False(t, assigned)
+}
+
+// TestSyncPortStateReplacesStaleTunnel: an in-memory tunnel dialing an
+// outdated host port is removed and re-added with the current one.
+func TestSyncPortStateReplacesStaleTunnel(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 10, "staleapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(10, "staleapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "web", Port: 8080, Protocol: "http", Active: true})
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 10, Protocol: "tcp", Port: 8080}, 41300)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("http"), uint64(cfg.ReswarmConfig.DeviceKey), "staleapp", 8080)
+	staleConfig := tunnel.TunnelConfig{Subdomain: subdomain, Protocol: tunnel.Protocol("http"), LocalPort: 40000}
+
+	mockTunnel.EXPECT().Get(mock.Anything).Return(&tunnel.Tunnel{Config: staleConfig}).Once()
+	mockTunnel.EXPECT().RemoveTunnel(staleConfig).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		assert.Equal(t, uint64(41300), conf.LocalPort)
+		return conf, nil
+	}).Once()
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).Return(nil).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+}

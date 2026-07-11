@@ -20,6 +20,12 @@ func (sm *StateMachine) uninstallApp(payload common.TransitionPayload, app *comm
 		return err
 	}
 
+	// Free the app's host ports only now that its containers are gone.
+	// Stop/restart keeps reservations so the app gets the same ports back.
+	if am := sm.StateObserver.AppManager; am != nil {
+		am.hostPorts.ReleaseApp(payload.Stage, payload.AppKey)
+	}
+
 	config := sm.Container.GetConfig()
 
 	appsDir := config.CommandLineArguments.AppsDirectory

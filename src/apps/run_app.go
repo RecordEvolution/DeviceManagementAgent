@@ -566,7 +566,9 @@ func buildDefaultEnvironmentVariables(config *config.Config, environment common.
 		fmt.Sprintf("APP_NAME=%s", app.AppName),
 		fmt.Sprintf("DEVICE_SECRET=%s", config.ReswarmConfig.Secret),
 		fmt.Sprintf("DEVICE_NAME=%s", config.ReswarmConfig.Name),
-		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", config.ReswarmConfig.DeviceEndpointURL),
+		// Rewritten for the container's vantage point: a loopback endpoint
+		// (local dev) is unreachable from a bridge network.
+		fmt.Sprintf("DEVICE_ENDPOINT_URL=%s", appEndpointURL(config.ReswarmConfig.DeviceEndpointURL)),
 	}
 
 	if config.ReswarmConfig.ReswarmBaseURL != "" {
@@ -586,6 +588,11 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 	// Get app-specific directory for writing env vars
 	appSpecificDirectory := config.CommandLineArguments.AppsDirectory + "/" + strings.ToLower(string(app.Stage)) + "/" + strings.ToLower(app.AppName)
+
+	portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var containerConfig container.Config
 
@@ -646,11 +653,6 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		}
 
 		var remotePortEnvs []string
-		portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
-		if err != nil {
-			return nil, nil, err
-		}
-
 		for _, portRule := range portRules {
 			if portRule.RemotePortEnvironment != "" {
 				subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(config.ReswarmConfig.DeviceKey), app.AppName, portRule.Port)
@@ -687,6 +689,22 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		return nil, nil, err
 	}
 
+	containerName := payload.ContainerName.Prod
+	if app.Stage == common.DEV {
+		containerName = payload.ContainerName.Dev
+	}
+
+	// Apps run on the default bridge network with their declared ports
+	// published on agent-managed host ports. Publishing (instead of the
+	// former NetworkMode "host") is what keeps concurrent apps from fighting
+	// over the same host port: every container may listen on its declared
+	// port privately, and the agent picks a collision-free host port.
+	exposedPorts, portBindings, err := sm.computePortBindings(payload, portRules, containerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	containerConfig.ExposedPorts = exposedPorts
+
 	hostConfig := container.HostConfig{
 		// CapDrop: []string{"NET_ADMIN"},
 		RestartPolicy: container.RestartPolicy{
@@ -701,9 +719,11 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 				},
 			},
 		},
-		Privileged:  true,
-		NetworkMode: "host",
-		CapAdd:      []string{"ALL"},
+		Privileged:   true,
+		NetworkMode:  "bridge",
+		PortBindings: portBindings,
+		ExtraHosts:   []string{hostGatewayEntry},
+		CapAdd:       []string{"ALL"},
 	}
 
 	if system.HasNvidiaGPU() {
@@ -738,6 +758,28 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 	cont, err := sm.Container.GetContainer(getContainerContext, containerName)
+	if err == nil && sm.containerNetworkConfigOutdated(cont, hConfig, containerName) {
+		// Network mode and port bindings are immutable on an existing
+		// container: recreate to apply them (migrates pre-managed-port
+		// containers off host networking, and picks up reassigned ports).
+		log.Info().Str("container", containerName).Msg("Recreating container to apply updated network/port configuration")
+
+		removeContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		err = sm.Container.RemoveContainerByID(removeContainerContext, cont.ID, map[string]interface{}{"force": true})
+		if err != nil && !errdefs.IsContainerNotFound(err) {
+			return "", err
+		}
+
+		waitForRemovalContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		_, err = sm.Container.WaitForContainerByID(waitForRemovalContext, cont.ID, container.WaitConditionRemoved)
+		if err != nil && !errdefs.IsContainerNotFound(err) {
+			return "", err
+		}
+
+		err = errdefs.ContainerNotFound(errors.New("container was recreated"))
+	}
 	if err != nil {
 		if !errdefs.IsContainerNotFound(err) {
 			return "", err
@@ -780,6 +822,27 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 }
 
 func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *common.App) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		containerID, err := sm.startContainerOnce(payload, app)
+		if err == nil {
+			return containerID, nil
+		}
+		lastErr = err
+
+		// The registry probes ports before handing them out, but a process
+		// outside the agent can still grab one between probe and bind. Pick
+		// fresh ports and recreate; createContainer notices the binding
+		// mismatch and recreates the container.
+		if !isPortAllocationError(err) || !sm.StateObserver.AppManager.reassignPortsAfterBindConflict(payload, err) {
+			return "", err
+		}
+		log.Warn().Str("app", payload.AppName).Msg("Retrying container start with freshly assigned host ports")
+	}
+	return "", lastErr
+}
+
+func (sm *StateMachine) startContainerOnce(payload common.TransitionPayload, app *common.App) (string, error) {
 	containerConfig, hostConfig, err := sm.computeContainerConfigs(payload, app)
 	if err != nil {
 		return "", err
@@ -818,6 +881,10 @@ func (sm *StateMachine) startContainer(payload common.TransitionPayload, app *co
 				return "", err
 			}
 
+		} else if isPortAllocationError(err) {
+			// Surface host port conflicts so startContainer can reassign
+			// ports and retry.
+			return "", err
 		}
 	}
 

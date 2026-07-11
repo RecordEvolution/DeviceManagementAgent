@@ -21,6 +21,7 @@ type AppManager struct {
 	StateMachine  *StateMachine
 	StateObserver *StateObserver
 	tunnelManager tunnel.TunnelManager
+	hostPorts     *HostPortRegistry
 	crashLoops    map[*CrashLoop]struct{}
 	crashLoopLock sync.Mutex
 }
@@ -31,6 +32,7 @@ func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm t
 		StateObserver: so,
 		AppStore:      as,
 		tunnelManager: tm,
+		hostPorts:     NewHostPortRegistry(),
 		crashLoops:    make(map[*CrashLoop]struct{}),
 	}
 
@@ -72,25 +74,51 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(globalConfig.ReswarmConfig.DeviceKey), payload.AppName, portRule.Port)
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 		newConfig := tunnel.TunnelConfig{}
+
+		// The port frpc dials: the agent-managed host port the declared port
+		// is published on. Rules with an explicit LocalIP point away from the
+		// app container and keep their declared port.
+		dialPort, dialPortKnown := portRule.Port, true
+		if portRule.LocalIP == "" {
+			dialPort, dialPortKnown = am.resolveTunnelHostPort(payload, portRule)
+		}
+
 		if portRule.Active {
 			if requestedState == common.RUNNING || curAppState == common.RUNNING {
-				tnl := am.tunnelManager.Get(tunnelID)
-				if tnl != nil {
-					log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists, skipping add")
+				if !dialPortKnown {
+					// Fresh app that has not been started under managed ports
+					// yet. The post-transition syncPortState creates the
+					// tunnel once the launch path has allocated the port.
+					log.Debug().Str("tunnelID", tunnelID).Msg("No host port allocated yet, deferring tunnel creation")
 				} else {
-
 					tunnelConfig := tunnel.TunnelConfig{
 						Subdomain:  subdomain,
 						AppName:    payload.AppName,
 						Protocol:   tunnel.Protocol(portRule.Protocol),
-						LocalPort:  portRule.Port,
+						LocalPort:  dialPort,
 						LocalIP:    portRule.LocalIP,
 						RemotePort: portRule.RemotePort,
 					}
 
-					newConfig, err = am.tunnelManager.AddTunnel(tunnelConfig)
-					if err != nil {
-						log.Error().Stack().Err(err).Msg("Failed to add tunnel")
+					tnl := am.tunnelManager.Get(tunnelID)
+					if tnl != nil && tnl.Config.LocalPort == dialPort {
+						log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists, skipping add")
+					} else {
+						if tnl != nil {
+							// The app was republished on a different host
+							// port (e.g. reinstall); frpc must not keep
+							// dialing the stale one.
+							log.Info().Str("tunnelID", tunnelID).Uint64("oldPort", tnl.Config.LocalPort).Uint64("newPort", dialPort).Msg("Host port changed, replacing tunnel")
+							err := am.tunnelManager.RemoveTunnel(tnl.Config)
+							if err != nil {
+								log.Error().Stack().Err(err).Msg("Failed to remove outdated tunnel")
+							}
+						}
+
+						newConfig, err = am.tunnelManager.AddTunnel(tunnelConfig)
+						if err != nil {
+							log.Error().Stack().Err(err).Msg("Failed to add tunnel")
+						}
 					}
 				}
 				// continue
@@ -118,6 +146,12 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		if newConfig.RemotePort != 0 {
 			newPort.RemotePort = newConfig.RemotePort
 			log.Info().Str("app", payload.AppName).Int("localPort", int(portRule.Port)).Int("remotePort", int(newPort.RemotePort)).Msg("Assigned new remote port for tunnel")
+		}
+		if dialPortKnown && portRule.LocalIP == "" && newPort.HostPort != dialPort {
+			// Persist the host port to t_device_to_app.ports: shown in the
+			// UI and returned on the next sync for recovery.
+			newPort.HostPort = dialPort
+			log.Info().Str("app", payload.AppName).Int("port", int(portRule.Port)).Int("hostPort", int(dialPort)).Msg("Assigned host port for app port")
 		}
 		newPorts = append(newPorts, newPort)
 

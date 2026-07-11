@@ -115,6 +115,23 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 const DockerFileName = "docker-compose.json"
 const DotEnvFileName = ".env-compose"
 
+// deepCopyCompose clones a compose definition through a JSON round trip (the
+// maps only ever hold JSON-decoded values).
+func deepCopyCompose(dockerCompose map[string]interface{}) (map[string]interface{}, error) {
+	encoded, err := json.Marshal(dockerCompose)
+	if err != nil {
+		return nil, err
+	}
+
+	var copied map[string]interface{}
+	err = json.Unmarshal(encoded, &copied)
+	if err != nil {
+		return nil, err
+	}
+
+	return copied, nil
+}
+
 func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app *common.App, updatingApp bool) (string, error) {
 	config := sm.Container.GetConfig()
 
@@ -128,9 +145,17 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 	dockerComposeFilePath := targetAppDir + "/" + DockerFileName
 	dotEnvFilePath := targetAppDir + "/" + DotEnvFileName
 
-	dockerCompose := payload.DockerCompose
+	sourceCompose := payload.DockerCompose
 	if payload.NewDockerCompose != nil && updatingApp {
-		dockerCompose = payload.NewDockerCompose
+		sourceCompose = payload.NewDockerCompose
+	}
+
+	// Work on a copy: the payload map holds the authored definition, and the
+	// host-port rewrite below must not leak into it — rewriting an already
+	// rewritten definition would remap the managed ports again.
+	dockerCompose, err := deepCopyCompose(sourceCompose)
+	if err != nil {
+		return "", err
 	}
 
 	dockerCompose["name"] = common.BuildComposeContainerName(payload.Stage, app.AppKey, app.AppName)
@@ -147,6 +172,12 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		}
 
 		service["env_file"] = DotEnvFileName
+		addComposeExtraHost(service)
+	}
+
+	err = sm.rewriteComposeHostPorts(payload, dockerCompose)
+	if err != nil {
+		return "", err
 	}
 
 	dockerComposeJSONString, err := json.Marshal(dockerCompose)

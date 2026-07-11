@@ -328,6 +328,13 @@ func TestServerAddressResolution(t *testing.T) {
 			reswarm:  &config.ReswarmConfig{DeviceEndpointURL: "http://localhost:3000", Environment: string(common.LOCAL)},
 			expected: "localhost",
 		},
+		{
+			// Containerized dev agent (compose `agent` service): the name must
+			// not be subdomain-rewritten into the nonexistent app.docker.internal.
+			name:     "device_endpoint_url host.docker.internal kept as-is",
+			reswarm:  &config.ReswarmConfig{DeviceEndpointURL: "ws://host.docker.internal:8080/ws-re-dev", Environment: string(common.LOCAL)},
+			expected: "host.docker.internal",
+		},
 	}
 
 	for _, tt := range tests {
@@ -336,6 +343,16 @@ func TestServerAddressResolution(t *testing.T) {
 			assert.Equal(t, tt.expected, builder.BaseTunnelURL)
 		})
 	}
+}
+
+// Local dev servers (native agent via localhost, containerized agent via
+// host.docker.internal) expose frps on 7400; everything else uses 7000.
+func TestServerPortResolution(t *testing.T) {
+	local := NewTunnelConfigBuilder(builderConfig(t, &config.ReswarmConfig{DeviceEndpointURL: "ws://host.docker.internal:8080/ws-re-dev", Environment: string(common.LOCAL)}))
+	assert.Equal(t, 7400, local.yamlConfig.ServerPort)
+
+	prod := NewTunnelConfigBuilder(builderConfig(t, &config.ReswarmConfig{DeviceEndpointURL: "https://api.ironflock.com", Environment: string(common.PRODUCTION)}))
+	assert.Equal(t, 7000, prod.yamlConfig.ServerPort)
 }
 
 func TestConfigBuilderAddAndGetTunnelConfig(t *testing.T) {
@@ -476,4 +493,67 @@ func mustConfigs(t *testing.T, builder *TunnelConfigBuilder) []TunnelConfig {
 	configs, err := builder.GetTunnelConfig()
 	require.NoError(t, err)
 	return configs
+}
+
+// The subdomain encodes the app's DECLARED port; LocalPort is the (possibly
+// different) agent-managed host port frpc dials. GetTunnelConfig must recover
+// the declared port so TunnelState.Port keeps matching the UI's port entries.
+func TestGetTunnelConfigParsesDeclaredPort(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	builder.AddTunnelConfig(TunnelConfig{
+		Subdomain: CreateSubdomain(HTTP, 9, "web", 8080),
+		Protocol:  HTTP,
+		LocalPort: 41234, // managed host port, not the declared port
+	})
+	builder.AddTunnelConfig(TunnelConfig{
+		Subdomain:  CreateSubdomain(TCP, 9, "ssh", 22),
+		Protocol:   TCP,
+		LocalPort:  41235,
+		RemotePort: 30022,
+	})
+
+	configs, err := builder.GetTunnelConfig()
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+
+	byProto := map[Protocol]TunnelConfig{}
+	for _, c := range configs {
+		byProto[c.Protocol] = c
+	}
+
+	assert.Equal(t, uint64(8080), byProto[HTTP].DeclaredPort)
+	assert.Equal(t, uint64(41234), byProto[HTTP].LocalPort)
+	assert.Equal(t, uint64(22), byProto[TCP].DeclaredPort)
+	assert.Equal(t, uint64(41235), byProto[TCP].LocalPort)
+}
+
+// A proxy left in frpc.yaml by a previous agent run may dial a stale host
+// port; AddTunnelConfig must update it in place (and keep the granted remote
+// port) instead of skipping.
+func TestConfigBuilderAddTunnelConfigUpdatesStaleLocalPort(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	subdomain := CreateSubdomain(TCP, 9, "ssh", 22)
+	builder.AddTunnelConfig(TunnelConfig{
+		Subdomain:  subdomain,
+		Protocol:   TCP,
+		LocalPort:  41235,
+		RemotePort: 30022,
+	})
+
+	// Same tunnel, new host port, no remote port supplied by the caller.
+	builder.AddTunnelConfig(TunnelConfig{
+		Subdomain: subdomain,
+		Protocol:  TCP,
+		LocalPort: 41999,
+	})
+
+	configs, err := builder.GetTunnelConfig()
+	require.NoError(t, err)
+	require.Len(t, configs, 1, "update must not append a duplicate proxy")
+	assert.Equal(t, uint64(41999), configs[0].LocalPort)
+	assert.Equal(t, uint64(30022), configs[0].RemotePort, "granted remote port survives the update")
 }

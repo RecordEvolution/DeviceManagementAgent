@@ -764,8 +764,11 @@ func (frpTm *FrpTunnelManager) GetState() ([]TunnelState, error) {
 			}
 
 			tunnelState := TunnelState{
-				Status:       &tunnelStatus,
-				Port:         tunnelConfig.LocalPort,
+				Status: &tunnelStatus,
+				// The declared port, NOT the host port frpc dials: the UI
+				// matches tunnel states to port-template entries by this
+				// number.
+				Port:         tunnelConfig.DeclaredPort,
 				AppName:      tunnelConfig.AppName,
 				Error:        tunnelStatus.Error != "",
 				ErrorMessage: tunnelStatus.Error,

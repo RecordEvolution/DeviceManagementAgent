@@ -248,6 +248,38 @@ bump-patch:
     printf '%s' "$next" > src/release/version.txt
     echo "Bumped $current -> $next. Now commit everything and run: just release"
 
+# Follow with `just release` to tag + trigger the build/publish CI.
+# Bump the minor version in src/release/version.txt (resets patch) and commit it.
+bump-minor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    current=$(tr -d '[:space:]' < src/release/version.txt)
+    if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$current'" >&2
+        exit 1
+    fi
+    IFS=. read -r major minor patch <<< "$current"
+    next="${major}.$((minor + 1)).0"
+    printf '%s' "$next" > src/release/version.txt
+    echo "Bumped $current -> $next. Now commit everything and run: just release"
+
+# Follow with `just release` to tag + trigger the build/publish CI.
+# Bump the major version in src/release/version.txt (resets minor and patch) and commit it.
+bump-major:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    current=$(tr -d '[:space:]' < src/release/version.txt)
+    if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$current'" >&2
+        exit 1
+    fi
+    IFS=. read -r major minor patch <<< "$current"
+    next="$((major + 1)).0.0"
+    printf '%s' "$next" > src/release/version.txt
+    echo "Bumped $current -> $next. Now commit everything and run: just release"
+
 # Requires a clean working tree; promote afterwards with `just promote`.
 # Tag the current commit as v<version.txt> and push (triggers build/publish CI).
 release:

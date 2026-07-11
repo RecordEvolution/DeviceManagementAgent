@@ -17,6 +17,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/safe"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -765,6 +766,62 @@ func (docker *Docker) GetContainerState(ctx context.Context, containerName strin
 		StartedAt:  state.StartedAt,
 		FinishedAt: state.FinishedAt,
 	}, nil
+}
+
+// GetContainerPortBindings returns the container's configured host port
+// bindings keyed by "<containerPort>/<proto>" (e.g. "80/tcp"). It reads
+// HostConfig.PortBindings — the creation-time config — which, unlike
+// NetworkSettings.Ports, is also populated for stopped containers. A binding
+// on all interfaces is preferred when a port is bound to several host IPs.
+// Host-networked containers have no bindings and yield an empty map.
+func (docker *Docker) GetContainerPortBindings(ctx context.Context, containerName string) (map[string]uint64, error) {
+	res, err := docker.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return nil, errdefs.ContainerNotFound(err)
+		}
+		return nil, err
+	}
+
+	bindings := make(map[string]uint64)
+	if res.HostConfig == nil {
+		return bindings, nil
+	}
+
+	for containerPort, hostBindings := range res.HostConfig.PortBindings {
+		for _, hostBinding := range hostBindings {
+			hostPort, err := strconv.ParseUint(hostBinding.HostPort, 10, 64)
+			if err != nil || hostPort == 0 {
+				continue
+			}
+
+			_, seen := bindings[string(containerPort)]
+			allInterfaces := hostBinding.HostIP == "" || hostBinding.HostIP == "0.0.0.0"
+			if !seen || allInterfaces {
+				bindings[string(containerPort)] = hostPort
+			}
+		}
+	}
+
+	return bindings, nil
+}
+
+// GetContainerNetworkMode returns the container's HostConfig.NetworkMode
+// (e.g. "host", "bridge", "default").
+func (docker *Docker) GetContainerNetworkMode(ctx context.Context, containerName string) (string, error) {
+	res, err := docker.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return "", errdefs.ContainerNotFound(err)
+		}
+		return "", err
+	}
+
+	if res.HostConfig == nil {
+		return "", nil
+	}
+
+	return string(res.HostConfig.NetworkMode), nil
 }
 
 func (docker *Docker) PollContainerState(ctx context.Context, containerID string, pollingRate time.Duration) (<-chan ContainerState, <-chan error) {

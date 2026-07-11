@@ -450,6 +450,37 @@ func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 	return parseComposePSOutput(output)
 }
 
+// GetPublishedPorts returns the host ports the compose project currently
+// publishes, keyed by "<service>|<targetPort>/<protocol>" (e.g. "web|80/tcp").
+// An empty map when the project is not up.
+func (c *Compose) GetPublishedPorts(dockerComposePath string) (map[string]uint64, error) {
+	statuses, err := c.Status(dockerComposePath)
+	if err != nil {
+		return nil, err
+	}
+
+	published := make(map[string]uint64)
+	for _, status := range statuses {
+		for _, publisher := range status.Publishers {
+			if publisher.PublishedPort == 0 {
+				continue
+			}
+			key := PublishedPortKey(status.Service, uint64(publisher.TargetPort), publisher.Protocol)
+			published[key] = uint64(publisher.PublishedPort)
+		}
+	}
+
+	return published, nil
+}
+
+// PublishedPortKey builds the lookup key used by GetPublishedPorts.
+func PublishedPortKey(service string, targetPort uint64, protocol string) string {
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	return fmt.Sprintf("%s|%d/%s", service, targetPort, protocol)
+}
+
 type ComposeListEntry struct {
 	Name        string `json:"Name"`
 	Status      string `json:"Status"`

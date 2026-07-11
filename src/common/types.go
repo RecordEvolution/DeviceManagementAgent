@@ -88,6 +88,11 @@ type PortForwardRule struct {
 	LocalIP               string `json:"local_ip"`
 	RemotePortEnvironment string `json:"remote_port_environment"`
 	RemotePort            uint64 `json:"remote_port"`
+	// HostPort is the host port the agent published the declared Port on.
+	// Assigned by the agent, persisted upstream in t_device_to_app.ports and
+	// shown in the UI; it comes back on sync so a restarted agent can reuse
+	// the same port even after the container was removed.
+	HostPort uint64 `json:"host_port,omitempty"`
 }
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.

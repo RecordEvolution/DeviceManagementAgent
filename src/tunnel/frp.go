@@ -11,6 +11,7 @@ import (
 	"reagent/messenger"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -29,6 +30,10 @@ type TunnelConfig struct {
 	LocalPort  uint64
 	LocalIP    string
 	RemotePort uint64
+	// DeclaredPort is the app's declared port encoded in the subdomain. It is
+	// the stable identity the UI matches tunnel state against; LocalPort is
+	// merely the host port the agent published it on.
+	DeclaredPort uint64
 }
 
 // YAML config structures matching frp v0.65.0 format
@@ -99,7 +104,11 @@ const REMOTE_PORT FrpcVariable = "remote_port"
 const PROD_SERVER_ADDR = "app.ironflock.com"
 const TEST_SERVER_ADDR = "app.ironflock.dev"
 
-var subdomainRegex = regexp.MustCompile(`\d+-(.*)-\d+`)
+// Matches "{deviceKey}-{appName}-{declaredPort}" (with an optional "secure-"
+// prefix and, in TCP/UDP proxy names, a "-{protocol}" suffix — both ignored
+// by the unanchored match). Group 1 is the app name, group 2 the declared
+// port.
+var subdomainRegex = regexp.MustCompile(`\d+-(.*)-(\d+)`)
 
 func NewTunnelConfigBuilder(cfg *config.Config) TunnelConfigBuilder {
 	return initialize(cfg)
@@ -153,6 +162,12 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 				switch {
 				case hostname == "localhost" || hostname == "127.0.0.1":
 					serverAddr = hostname
+				case hostname == "host.docker.internal":
+					// The agent itself runs inside a container on a dev
+					// machine; the name means "the machine hosting the dev
+					// stack" (frps included) and must not be subdomain-
+					// rewritten (app.docker.internal does not exist).
+					serverAddr = hostname
 				case net.ParseIP(hostname) != nil:
 					// IP literal — no subdomain to replace; use as-is.
 					serverAddr = hostname
@@ -183,9 +198,13 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 		log.Debug().Msgf("Using tunnel server address from environment: %s", serverAddr)
 	}
 
-	// Get admin port
+	// Get admin port. OS-assigned (port 0) rather than a scan from a fixed
+	// base: scanning from 30000 landed exactly on the tunnel data-plane range
+	// (TUNNEL_PORT_RANGE_START=30000) — with SO_REUSEADDR the loopback bind
+	// succeeds alongside Docker's wildcard publish and silently shadows the
+	// tunnel's host port for loopback traffic (or blocks the publish).
 	port := 7400
-	randomPort, err := common.GetFreePortFromStart(30000)
+	randomPort, err := common.GetRandomFreePort()
 	if err == nil {
 		port = randomPort
 	}
@@ -213,8 +232,10 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 		Proxies:       []ProxyConfig{},
 	}
 
-	// For local development, use port 7400 to avoid conflicts with macOS services
-	if serverAddr == "localhost" || serverAddr == "127.0.0.1" {
+	// For local development, use port 7400 to avoid conflicts with macOS
+	// services. host.docker.internal is the same dev stack seen from inside a
+	// containerized agent — the host publishes frps on 7400 there too.
+	if serverAddr == "localhost" || serverAddr == "127.0.0.1" || serverAddr == "host.docker.internal" {
 		frpcConfig.ServerPort = 7400
 	}
 
@@ -235,33 +256,32 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 
 	for _, proxy := range builder.yamlConfig.Proxies {
 		tunnelConfig := TunnelConfig{
-			Protocol:   Protocol(proxy.Type),
-			LocalPort:  uint64(proxy.LocalPort),
-			RemotePort: uint64(proxy.RemotePort),
-			LocalIP:    proxy.LocalIP,
-			Subdomain:  proxy.SubDomain,
+			Protocol:     Protocol(proxy.Type),
+			LocalPort:    uint64(proxy.LocalPort),
+			RemotePort:   uint64(proxy.RemotePort),
+			LocalIP:      proxy.LocalIP,
+			Subdomain:    proxy.SubDomain,
+			DeclaredPort: uint64(proxy.LocalPort),
 		}
 
-		var appName string
-		// For HTTP/HTTPS, parse from subdomain field
-		if proxy.SubDomain != "" {
-			result := subdomainRegex.FindStringSubmatch(proxy.SubDomain)
-			if len(result) > 1 {
-				appName = result[1]
-			} else {
-				log.Error().Str("subdomain", proxy.SubDomain).Msg("Failed to parse app name from subdomain")
+		// For HTTP/HTTPS, parse from the subdomain field; for TCP/UDP from
+		// the name field (format: {deviceKey}-{appName}-{port}-{protocol}).
+		source, label := proxy.SubDomain, "subdomain"
+		if source == "" {
+			source, label = proxy.Name, "name"
+		}
+
+		result := subdomainRegex.FindStringSubmatch(source)
+		if len(result) > 2 {
+			tunnelConfig.AppName = result[1]
+			declaredPort, err := strconv.ParseUint(result[2], 10, 64)
+			if err == nil {
+				tunnelConfig.DeclaredPort = declaredPort
 			}
 		} else {
-			// For TCP/UDP, parse from name field (format: {deviceKey}-{appName}-{port}-{protocol})
-			result := subdomainRegex.FindStringSubmatch(proxy.Name)
-			if len(result) > 1 {
-				appName = result[1]
-			} else {
-				log.Error().Str("name", proxy.Name).Msg("Failed to parse app name from tunnel name")
-			}
+			log.Error().Str(label, source).Msg("Failed to parse app name from tunnel " + label)
 		}
 
-		tunnelConfig.AppName = appName
 		tunnelConfigs = append(tunnelConfigs, tunnelConfig)
 	}
 
@@ -270,14 +290,6 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 
 func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 	tunnelID := CreateTunnelID(conf.Subdomain, string(conf.Protocol))
-
-	// Check if this tunnel already exists in the config
-	for _, proxy := range builder.yamlConfig.Proxies {
-		if proxy.Name == tunnelID {
-			log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists in config, skipping add")
-			return
-		}
-	}
 
 	proxyConfig := ProxyConfig{
 		Name:      tunnelID,
@@ -295,6 +307,30 @@ func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 	} else {
 		// For TCP/UDP, use remotePort instead
 		proxyConfig.RemotePort = int(conf.RemotePort)
+	}
+
+	// Upsert: a proxy left over from a previous agent run may point at a
+	// stale local port (the app was republished on a different host port).
+	// Skipping it would leave frpc dialing a dead port forever.
+	for i, proxy := range builder.yamlConfig.Proxies {
+		if proxy.Name != tunnelID {
+			continue
+		}
+
+		if proxy.LocalPort == proxyConfig.LocalPort && proxy.LocalIP == proxyConfig.LocalIP {
+			log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists in config, skipping add")
+			return
+		}
+
+		log.Info().Str("tunnelID", tunnelID).Int("oldLocalPort", proxy.LocalPort).Int("newLocalPort", proxyConfig.LocalPort).Msg("Updating existing tunnel config")
+		// Keep the remote port frps already granted this proxy unless the
+		// caller supplies one; TCP/UDP proxies must not lose it on update.
+		if proxyConfig.RemotePort == 0 {
+			proxyConfig.RemotePort = proxy.RemotePort
+		}
+		builder.yamlConfig.Proxies[i] = proxyConfig
+		builder.SaveConfig()
+		return
 	}
 
 	builder.yamlConfig.Proxies = append(builder.yamlConfig.Proxies, proxyConfig)
@@ -342,8 +378,10 @@ func (builder *TunnelConfigBuilder) Reset() {
 }
 
 func (builder *TunnelConfigBuilder) SetAdminPort() {
+	// OS-assigned, for the same reason as in initialize(): a scan from 30000
+	// collides with the tunnel data-plane port range.
 	port := 7400
-	randomPort, err := common.GetFreePortFromStart(30000)
+	randomPort, err := common.GetRandomFreePort()
 	if err == nil {
 		port = randomPort
 	}
