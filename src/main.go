@@ -64,8 +64,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Windows: refuse a second agent (service + console double-run deletes
-	// each other's containers) and reap child processes on any exit.
+	// Refuse a second agent on the machine (a service + console double-run
+	// makes the two agents delete each other's containers) and, on Windows,
+	// reap child processes on any exit.
 	err = acquireSingleInstanceLock()
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to acquire single-instance lock")
