@@ -422,12 +422,24 @@ func (c *Docker) Login(ctx context.Context, dockerRegistryURL string, username s
 	return c.dockerCommand(ctx, "login", dockerRegistryURL, "-u", username, "-p", password)
 }
 
+// A login that exceeds this deadline is SIGKILLed by CommandContext. A healthy
+// login (local or via a working proxy) finishes in well under a second; hitting
+// this deadline means the connection is being black-holed (e.g. a corporate
+// proxy swallowing traffic to the registry because NO_PROXY is missing/stale).
+const registryLoginTimeout = time.Second * 10
+
 func (c *Docker) HandleRegistryLogins(credentials map[string]common.DockerCredential) error {
 	for registryURL, credential := range credentials {
-		ctx, cancelLogin := context.WithTimeout(context.Background(), time.Second*10)
+		ctx, cancelLogin := context.WithTimeout(context.Background(), registryLoginTimeout)
 		output, err := c.Login(ctx, registryURL, credential.Username, credential.Password)
 		if err != nil {
 			cancelLogin()
+
+			// A killed-by-deadline login surfaces as the bare "signal: killed",
+			// which is useless in the device logs; name the actual failure.
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("registry login to %s timed out after %s: the registry is not responding (check that the registry is reachable and, on proxied hosts, that NO_PROXY covers it)", registryURL, registryLoginTimeout)
+			}
 
 			scanner := bufio.NewScanner(strings.NewReader(string(output)))
 			for scanner.Scan() {

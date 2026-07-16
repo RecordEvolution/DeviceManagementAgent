@@ -804,6 +804,15 @@ func (frpTm *FrpTunnelManager) GetTunnelConfig() ([]TunnelConfig, error) {
 }
 
 func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
+	// Only poll the admin API while frpc is supposed to be up. When the client
+	// is Unavailable (frps unreachable, binary quarantined) or still Starting,
+	// the connection-refused below would kick off yet another restart — on
+	// devices without a reachable frps that turned into an endless
+	// kill/sleep/start loop, retriggered by every state publish.
+	if capability, _ := frpTm.Capability(); capability != CapabilityAvailable {
+		return []TunnelStatus{}, nil
+	}
+
 	adminPort, err := frpTm.configBuilder.GetAdminPort()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get admin port from config")
