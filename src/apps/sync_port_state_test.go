@@ -169,6 +169,51 @@ func TestSyncPortStateReplacesStaleTunnel(t *testing.T) {
 	require.NoError(t, am.syncPortState(payload, app))
 }
 
+// TestSyncPortStateKeepsReservedRemotePort: when the tunnel already dials the
+// right host port the add is skipped, but the remote port frps reserved must
+// still reach the persisted rule. The cloud does not know it (it sends 0), so
+// dropping it here publishes remote_port 0 upstream and makes the next agent
+// start reserve a different port.
+func TestSyncPortStateKeepsReservedRemotePort(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 12, "mqttapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(12, "mqttapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true})
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 12, Protocol: "tcp", Port: 1883}, 40001)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "mqttapp", 1883)
+	existing := tunnel.TunnelConfig{
+		Subdomain:  subdomain,
+		Protocol:   tunnel.Protocol("tcp"),
+		LocalPort:  40001,
+		RemotePort: 30001, // granted by frps when the tunnel was first added
+	}
+
+	// Already dialing the current host port -> AddTunnel must not be called.
+	mockTunnel.EXPECT().Get(tunnel.CreateTunnelID(subdomain, "tcp")).Return(&tunnel.Tunnel{Config: existing}).Once()
+
+	var savedPorts []interface{}
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
+		savedPorts = p.Ports
+		return nil
+	}).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	savedRules := spsRules(t, savedPorts)
+	require.Len(t, savedRules, 1)
+	assert.Equal(t, uint64(30001), savedRules[0].RemotePort, "the reserved remote port must survive a re-sync")
+	assert.Equal(t, uint64(40001), savedRules[0].HostPort)
+}
+
 // TestGenerateDotEnvContentsCloudRemotePort: an instance-patched cloud port
 // reaches the compose dotenv as {RemotePortEnvironment}_CLOUD even when no
 // local tunnel object exists (the value is payload-borne).

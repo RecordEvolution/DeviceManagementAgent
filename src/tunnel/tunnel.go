@@ -757,8 +757,15 @@ func (frpTm *FrpTunnelManager) GetState() ([]TunnelState, error) {
 
 	tunnelStates := make([]TunnelState, 0)
 	for _, tunnelConfig := range tunnelConfigs {
+		// Match on the name frpc reports status under. Rebuilding the id from
+		// Subdomain silently drops any proxy whose subdomain did not round-trip
+		// through the config file.
+		tunnelID := tunnelConfig.Name
+		if tunnelID == "" {
+			tunnelID = CreateTunnelID(tunnelConfig.Subdomain, string(tunnelConfig.Protocol))
+		}
+
 		for _, tunnelStatus := range tunnelStatuses {
-			tunnelID := CreateTunnelID(tunnelConfig.Subdomain, string(tunnelConfig.Protocol))
 			if tunnelID != tunnelStatus.Name {
 				continue
 			}

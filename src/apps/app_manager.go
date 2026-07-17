@@ -103,6 +103,13 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					tnl := am.tunnelManager.Get(tunnelID)
 					if tnl != nil && tnl.Config.LocalPort == dialPort {
 						log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists, skipping add")
+						// AddTunnel is skipped here, so take the live tunnel's
+						// config as the result: it holds the remote port frps
+						// reserved for this tcp/udp tunnel. Leaving it zeroed
+						// persists remote_port 0 over the reserved one, which
+						// both hides the address upstream and makes the next
+						// agent start reserve a different port.
+						newConfig = tnl.Config
 					} else {
 						if tnl != nil {
 							// The app was republished on a different host
@@ -115,9 +122,13 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 							}
 						}
 
-						newConfig, err = am.tunnelManager.AddTunnel(tunnelConfig)
-						if err != nil {
-							log.Error().Stack().Err(err).Msg("Failed to add tunnel")
+						added, addErr := am.tunnelManager.AddTunnel(tunnelConfig)
+						if addErr != nil {
+							// Keep the incoming rule as-is rather than
+							// persisting the zero config a failed add returns.
+							log.Error().Stack().Err(addErr).Msg("Failed to add tunnel")
+						} else {
+							newConfig = added
 						}
 					}
 				}
@@ -143,7 +154,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 
 		newPort := portRule
-		if newConfig.RemotePort != 0 {
+		if newConfig.RemotePort != 0 && newPort.RemotePort != newConfig.RemotePort {
 			newPort.RemotePort = newConfig.RemotePort
 			log.Info().Str("app", payload.AppName).Int("localPort", int(portRule.Port)).Int("remotePort", int(newPort.RemotePort)).Msg("Assigned new remote port for tunnel")
 		}

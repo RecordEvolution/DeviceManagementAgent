@@ -34,6 +34,11 @@ type TunnelConfig struct {
 	// the stable identity the UI matches tunnel state against; LocalPort is
 	// merely the host port the agent published it on.
 	DeclaredPort uint64
+	// Name is the frpc proxy name, and the identity frpc reports status under.
+	// Set by GetTunnelConfig when reading the config back; AddTunnel derives it
+	// from Subdomain instead, so callers building a config to add need not set
+	// it.
+	Name string
 }
 
 // YAML config structures matching frp v0.65.0 format
@@ -42,8 +47,12 @@ type FrpcYamlConfig struct {
 	ServerPort    int           `yaml:"serverPort"`
 	Transport     *Transport    `yaml:"transport,omitempty"`
 	WebServer     *WebServer    `yaml:"webServer,omitempty"`
-	Log           *LogConfig    `yaml:"log,omitempty"`
-	LoginFailExit bool          `yaml:"loginFailExit,omitempty"`
+	Log *LogConfig `yaml:"log,omitempty"`
+	// Deliberately not omitempty: the value we want is false, which omitempty
+	// drops — and frp defaults loginFailExit to true, so frpc would exit after
+	// the first failed login instead of retrying. A frps that is briefly
+	// unreachable would then take tunnels down until the agent restarts.
+	LoginFailExit bool          `yaml:"loginFailExit"`
 	Proxies       []ProxyConfig `yaml:"proxies,omitempty"`
 }
 
@@ -255,23 +264,28 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 	tunnelConfigs := make([]TunnelConfig, 0)
 
 	for _, proxy := range builder.yamlConfig.Proxies {
+		// Only HTTP/HTTPS proxies persist a subdomain (AddTunnelConfig writes
+		// remotePort instead for TCP/UDP), so recover it from the proxy name —
+		// which is CreateTunnelID(subdomain, protocol) — whenever it is absent.
+		// Callers rebuild the tunnel id from Subdomain to match a config to its
+		// frpc status: leaving it empty drops the tunnel from the reported
+		// state entirely, and makes buildURL emit a host with an empty label.
+		subdomain := proxy.SubDomain
+		if subdomain == "" {
+			subdomain = strings.TrimSuffix(proxy.Name, "-"+proxy.Type)
+		}
+
 		tunnelConfig := TunnelConfig{
+			Name:         proxy.Name,
 			Protocol:     Protocol(proxy.Type),
 			LocalPort:    uint64(proxy.LocalPort),
 			RemotePort:   uint64(proxy.RemotePort),
 			LocalIP:      proxy.LocalIP,
-			Subdomain:    proxy.SubDomain,
+			Subdomain:    subdomain,
 			DeclaredPort: uint64(proxy.LocalPort),
 		}
 
-		// For HTTP/HTTPS, parse from the subdomain field; for TCP/UDP from
-		// the name field (format: {deviceKey}-{appName}-{port}-{protocol}).
-		source, label := proxy.SubDomain, "subdomain"
-		if source == "" {
-			source, label = proxy.Name, "name"
-		}
-
-		result := subdomainRegex.FindStringSubmatch(source)
+		result := subdomainRegex.FindStringSubmatch(subdomain)
 		if len(result) > 2 {
 			tunnelConfig.AppName = result[1]
 			declaredPort, err := strconv.ParseUint(result[2], 10, 64)
@@ -279,7 +293,7 @@ func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {
 				tunnelConfig.DeclaredPort = declaredPort
 			}
 		} else {
-			log.Error().Str(label, source).Msg("Failed to parse app name from tunnel " + label)
+			log.Error().Str("subdomain", subdomain).Str("name", proxy.Name).Msg("Failed to parse app name from tunnel subdomain")
 		}
 
 		tunnelConfigs = append(tunnelConfigs, tunnelConfig)

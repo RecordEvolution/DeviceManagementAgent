@@ -5,6 +5,7 @@
 package tunnel
 
 import (
+	"os"
 	"reagent/common"
 	"reagent/config"
 	"testing"
@@ -12,6 +13,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// frp defaults loginFailExit to true, so the intended false has to actually be
+// written: frpc must retry a frps that is temporarily unreachable rather than
+// exiting on the first failed login and taking tunnels down with it.
+func TestConfigBuilderPersistsLoginFailExit(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	raw, err := os.ReadFile(builder.ConfigPath)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(raw), "loginFailExit: false")
+}
 
 // builderConfig returns a config whose AgentDir points at a writable temp dir
 // so that initialize()/SaveConfig() can persist frpc.yaml without touching a
@@ -392,12 +406,15 @@ func TestConfigBuilderAddAndGetTunnelConfig(t *testing.T) {
 	assert.Equal(t, "web", gotHTTP.AppName)
 	assert.Equal(t, uint64(0), gotHTTP.RemotePort)
 
-	// TCP proxy carries remote port, has no subdomain field.
+	// TCP proxy carries a remote port. It stores no subdomain key, so the
+	// subdomain is recovered from the proxy name — callers rebuild the tunnel
+	// id from it to match the config against its frpc status.
 	gotTCP := byProto[TCP]
 	assert.Equal(t, uint64(22), gotTCP.LocalPort)
 	assert.Equal(t, uint64(30022), gotTCP.RemotePort)
 	assert.Equal(t, "ssh", gotTCP.AppName)
-	assert.Empty(t, gotTCP.Subdomain)
+	assert.Equal(t, tcpConf.Subdomain, gotTCP.Subdomain)
+	assert.Empty(t, builder.yamlConfig.Proxies[1].SubDomain, "no subdomain key is stored for tcp")
 }
 
 func TestConfigBuilderAddTunnelConfigDeduplicates(t *testing.T) {
@@ -485,6 +502,69 @@ func TestGetAdminPortInitialised(t *testing.T) {
 	port, err := builder.GetAdminPort()
 	require.NoError(t, err)
 	assert.Greater(t, port, 0)
+}
+
+// GetState matches a stored config to its frpc status by tunnel id. Only
+// HTTP/HTTPS proxies persist a subdomain, so every protocol must still round-
+// trip an id equal to the proxy name frpc reports — otherwise the tunnel is
+// silently missing from the reported state and the UI shows it as never
+// coming up.
+func TestGetTunnelConfigRoundTripsTunnelIdentity(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	for _, tc := range []struct {
+		protocol Protocol
+		port     uint64
+	}{
+		{HTTP, 55000},
+		{HTTPS, 55001},
+		{TCP, 1883},
+		{UDP, 51820},
+	} {
+		builder.AddTunnelConfig(TunnelConfig{
+			Subdomain:  CreateSubdomain(tc.protocol, 4749, "trumpfqds", tc.port),
+			Protocol:   tc.protocol,
+			LocalPort:  40000 + tc.port,
+			RemotePort: 30000,
+		})
+	}
+
+	configs := mustConfigs(t, &builder)
+	require.Len(t, configs, 4)
+
+	for _, got := range configs {
+		expectedName := CreateTunnelID(CreateSubdomain(got.Protocol, 4749, "trumpfqds", got.DeclaredPort), string(got.Protocol))
+
+		// The name frpc reports status under, carried through verbatim.
+		assert.Equal(t, expectedName, got.Name, "%s: proxy name must survive the round-trip", got.Protocol)
+		// ...and still reconstructible from the subdomain, which TCP/UDP do
+		// not persist and must recover from the name.
+		assert.Equal(t, expectedName, CreateTunnelID(got.Subdomain, string(got.Protocol)),
+			"%s: subdomain must rebuild the frpc proxy name", got.Protocol)
+		assert.Equal(t, "trumpfqds", got.AppName, "%s: app name", got.Protocol)
+	}
+}
+
+// A tunnel whose subdomain did not round-trip (e.g. a config written before
+// the subdomain was persisted for its protocol) must still be identifiable
+// from the proxy name alone.
+func TestGetTunnelConfigRecoversSubdomainFromName(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	subdomain := CreateSubdomain(HTTP, 4749, "trumpfqds", 55000)
+	builder.AddTunnelConfig(TunnelConfig{Subdomain: subdomain, Protocol: HTTP, LocalPort: 40003})
+
+	// Simulate the subdomain key being absent from the stored proxy.
+	builder.yamlConfig.Proxies[0].SubDomain = ""
+
+	configs := mustConfigs(t, &builder)
+	require.Len(t, configs, 1)
+
+	assert.Equal(t, subdomain, configs[0].Subdomain, "subdomain must be recovered from the proxy name")
+	assert.Equal(t, uint64(55000), configs[0].DeclaredPort)
+	assert.Equal(t, "trumpfqds", configs[0].AppName)
 }
 
 // mustConfigs is a small assertion helper local to this file.
