@@ -43,11 +43,11 @@ type TunnelConfig struct {
 
 // YAML config structures matching frp v0.65.0 format
 type FrpcYamlConfig struct {
-	ServerAddr    string        `yaml:"serverAddr"`
-	ServerPort    int           `yaml:"serverPort"`
-	Transport     *Transport    `yaml:"transport,omitempty"`
-	WebServer     *WebServer    `yaml:"webServer,omitempty"`
-	Log *LogConfig `yaml:"log,omitempty"`
+	ServerAddr string     `yaml:"serverAddr"`
+	ServerPort int        `yaml:"serverPort"`
+	Transport  *Transport `yaml:"transport,omitempty"`
+	WebServer  *WebServer `yaml:"webServer,omitempty"`
+	Log        *LogConfig `yaml:"log,omitempty"`
 	// Deliberately not omitempty: the value we want is false, which omitempty
 	// drops — and frp defaults loginFailExit to true, so frpc would exit after
 	// the first failed login instead of retrying. A frps that is briefly
