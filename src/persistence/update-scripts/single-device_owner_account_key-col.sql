@@ -1,0 +1,1 @@
+ALTER TABLE RequestedAppStates ADD COLUMN device_owner_account_key INTEGER NOT NULL DEFAULT 0

@@ -186,6 +186,14 @@ func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error)
 	return c.composeCommand(dockerComposePath, "pull")
 }
 
+// PullIgnoreBuildable is for dev builds only, where images with a build section
+// were just built locally and must not be pulled. Deployed apps must keep using
+// Pull: their platform-rewritten compose files still contain build sections, but
+// the images have to come from the registry. Requires compose >= v2.17.
+func (c *Compose) PullIgnoreBuildable(dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommand(dockerComposePath, "pull", "--ignore-buildable")
+}
+
 func (c *Compose) Up(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d")
 }

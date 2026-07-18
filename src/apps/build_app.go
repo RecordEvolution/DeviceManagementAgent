@@ -338,7 +338,7 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 	}
 
 	if !releaseBuild {
-		pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
+		pullOutput, pullCmd, err := compose.PullIgnoreBuildable(dockerComposePath)
 		if err != nil {
 			return err
 		}

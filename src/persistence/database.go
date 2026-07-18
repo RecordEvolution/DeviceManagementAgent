@@ -362,6 +362,7 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var appKey uint64
 		// var deviceToAppKey uint64
 		var requestorAccountKey uint64
+		var deviceOwnerAccountKey uint64
 		var releaseKey uint64
 		var requestUpdate bool
 		var newReleaseKey uint64
@@ -377,12 +378,13 @@ func (ast *AppStateDatabase) GetRequestedStates() ([]common.TransitionPayload, e
 		var currentState common.AppState
 		var requestedState common.AppState
 
-		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString, &newDockerComposeString)
+		err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &deviceOwnerAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString, &newDockerComposeString)
 		if err != nil {
 			return nil, err
 		}
 
 		payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, releaseKey, newReleaseKey, ast.config)
+		payload.DeviceOwnerAccountKey = deviceOwnerAccountKey
 		payload.Version = version
 		payload.NewestVersion = newestVersion
 		payload.PresentVersion = presentVersion
@@ -468,6 +470,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var appName string
 	var appKey uint64
 	var requestorAccountKey uint64
+	var deviceOwnerAccountKey uint64
 	var requestUpdate bool
 	var stage common.Stage
 	var version string
@@ -483,7 +486,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	var newDockerComposeString *string
 	var portsString *string
 
-	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString, &newDockerComposeString)
+	err = rows.Scan(&appName, &appKey, &stage, &version, &presentVersion, &newestVersion, &currentState, &requestedState, &requestorAccountKey, &deviceOwnerAccountKey, &releaseKey, &newReleaseKey, &requestUpdate, &environmentVariablesString, &environmentTemplateString, &portsString, &dockerComposeString, &newDockerComposeString)
 	if err != nil {
 		return common.TransitionPayload{}, err
 	}
@@ -494,6 +497,7 @@ func (ast *AppStateDatabase) GetRequestedState(aKey uint64, aStage common.Stage)
 	}
 
 	payload := common.BuildTransitionPayload(appKey, appName, requestorAccountKey, stage, currentState, requestedState, releaseKey, newReleaseKey, ast.config)
+	payload.DeviceOwnerAccountKey = deviceOwnerAccountKey
 	payload.Version = version
 	payload.NewestVersion = newestVersion
 	payload.PresentVersion = presentVersion
@@ -610,7 +614,7 @@ func (ast *AppStateDatabase) BulkUpsertRequestedStateChanges(payloads []common.T
 		newDockerComposeJSONString := string(newDockerComposeJSONBytes)
 
 		_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString, newDockerComposeJSONString,
+			payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceOwnerAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString, newDockerComposeJSONString,
 			time.Now().Format(time.RFC3339),
 		)
 
@@ -678,7 +682,7 @@ func (ast *AppStateDatabase) UpsertRequestedStateChange(payload common.Transitio
 	newDockerComposeJSONString := string(newDockerComposeJSONBytes)
 
 	_, err = upsertStatement.Exec(payload.AppName, payload.AppKey, payload.Stage, payload.Version, payload.PresentVersion, payload.NewestVersion,
-		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString, newDockerComposeJSONString,
+		payload.CurrentState, payload.RequestedState, payload.RequestorAccountKey, payload.DeviceOwnerAccountKey, payload.ReleaseKey, payload.NewReleaseKey, payload.RequestUpdate, environmentsJSONString, environmentTemplateJSONString, portsJSONString, dockerComposeJSONString, newDockerComposeJSONString,
 		time.Now().Format(time.RFC3339),
 	)
 

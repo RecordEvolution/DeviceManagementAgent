@@ -190,6 +190,35 @@ func TestUpsertAndGetRequestedState(t *testing.T) {
 	assert.Equal(t, "3", got.DockerCompose["version"])
 }
 
+func TestUpsertRequestedStateDeviceOwnerAccountKey(t *testing.T) {
+	db := newTestDB(t)
+
+	payload := newRequestedPayload(t, "owner-app", 520, common.PROD)
+	payload.DeviceOwnerAccountKey = 711
+	require.NoError(t, db.UpsertRequestedStateChange(payload))
+
+	got, err := db.GetRequestedState(520, common.PROD)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(711), got.DeviceOwnerAccountKey)
+
+	// A payload without the owner key (locally built, e.g. mid-transition state
+	// writes) must not clobber the stored value with 0.
+	payload.DeviceOwnerAccountKey = 0
+	require.NoError(t, db.UpsertRequestedStateChange(payload))
+
+	got, err = db.GetRequestedState(520, common.PROD)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(711), got.DeviceOwnerAccountKey)
+
+	// A cloud payload carrying a new owner (device/project transferred) wins.
+	payload.DeviceOwnerAccountKey = 999
+	require.NoError(t, db.UpsertRequestedStateChange(payload))
+
+	got, err = db.GetRequestedState(520, common.PROD)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(999), got.DeviceOwnerAccountKey)
+}
+
 func TestUpsertRequestedStateChangeOverwrites(t *testing.T) {
 	db := newTestDB(t)
 
