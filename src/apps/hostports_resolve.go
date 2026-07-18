@@ -8,6 +8,7 @@ import (
 	"reagent/container"
 	"reagent/errdefs"
 	"reagent/tunnel"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -199,6 +200,89 @@ func (sm *StateMachine) computePortBindings(payload common.TransitionPayload, po
 	}
 
 	return exposedPorts, portBindings, nil
+}
+
+// mappedPortEnvLines renders one MAPPED_PORT_FOR_<declared port>=<host port>
+// line per entry, sorted by declared port.
+func mappedPortEnvLines(hostPortByDeclared map[uint64]uint64) []string {
+	declaredPorts := make([]uint64, 0, len(hostPortByDeclared))
+	for declared := range hostPortByDeclared {
+		declaredPorts = append(declaredPorts, declared)
+	}
+	sort.Slice(declaredPorts, func(i, j int) bool { return declaredPorts[i] < declaredPorts[j] })
+
+	lines := make([]string, 0, len(declaredPorts))
+	for _, declared := range declaredPorts {
+		lines = append(lines, fmt.Sprintf("MAPPED_PORT_FOR_%d=%d", declared, hostPortByDeclared[declared]))
+	}
+	return lines
+}
+
+// mappedPortEnvsFromBindings builds the MAPPED_PORT_FOR_<port> environment
+// variables announcing which host port each published port landed on.
+// Single-container apps publish declared ports verbatim, so the container
+// port doubles as the declared port. When tcp and udp share a declared port
+// the tcp binding wins (deterministic via the sorted "port/proto" keys).
+func mappedPortEnvsFromBindings(portBindings nat.PortMap) []string {
+	containerPorts := make([]nat.Port, 0, len(portBindings))
+	for containerPort := range portBindings {
+		containerPorts = append(containerPorts, containerPort)
+	}
+	sort.Slice(containerPorts, func(i, j int) bool { return containerPorts[i] < containerPorts[j] })
+
+	hostPortByDeclared := make(map[uint64]uint64, len(containerPorts))
+	for _, containerPort := range containerPorts {
+		declared := uint64(containerPort.Int())
+		if _, ok := hostPortByDeclared[declared]; ok {
+			continue
+		}
+		for _, hostBinding := range portBindings[containerPort] {
+			hostPort, err := strconv.ParseUint(hostBinding.HostPort, 10, 64)
+			if err == nil && hostPort != 0 {
+				hostPortByDeclared[declared] = hostPort
+				break
+			}
+		}
+	}
+
+	return mappedPortEnvLines(hostPortByDeclared)
+}
+
+// mappedPortEnvsForCompose builds the MAPPED_PORT_FOR_<port> environment
+// variables for a compose app by reading the registry assignments
+// rewriteComposeHostPorts recorded for it. dockerCompose must be the authored
+// definition — the rewrite replaces the authored host ports, which are the
+// entries' declared identity. Unmanaged entries (ranges, variables) and
+// container-only ports no rule publishes carry no assignment and are skipped.
+// When two services share a declared port the first (sorted by service) wins.
+func (am *AppManager) mappedPortEnvsForCompose(payload common.TransitionPayload, dockerCompose map[string]interface{}) []string {
+	entries := parseComposePorts(dockerCompose)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].DeclaredPort() != entries[j].DeclaredPort() {
+			return entries[i].DeclaredPort() < entries[j].DeclaredPort()
+		}
+		if entries[i].Service != entries[j].Service {
+			return entries[i].Service < entries[j].Service
+		}
+		return entries[i].Protocol < entries[j].Protocol
+	})
+
+	hostPortByDeclared := make(map[uint64]uint64)
+	for _, entry := range entries {
+		if !entry.Rewritable {
+			continue
+		}
+		if _, ok := hostPortByDeclared[entry.DeclaredPort()]; ok {
+			continue
+		}
+
+		key := hostPortKey{Stage: payload.Stage, AppKey: payload.AppKey, Protocol: entry.Protocol, Port: entry.DeclaredPort(), Service: entry.Service}
+		if hostPort, ok := am.hostPorts.Get(key); ok {
+			hostPortByDeclared[entry.DeclaredPort()] = hostPort
+		}
+	}
+
+	return mappedPortEnvLines(hostPortByDeclared)
 }
 
 // rewriteComposeHostPorts replaces the host side of every published compose

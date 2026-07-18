@@ -75,12 +75,23 @@ type FrpTunnelManager struct {
 	tunnelUpdateChan    chan TunnelUpdate
 	activeTunnelConfigs map[string]*Tunnel
 	clientProcess       *exec.Cmd
-	configBuilder       TunnelConfigBuilder
-	config              *config.Config
-	messenger           messenger.Messenger
-	loginChan           chan bool // Signals when frpc logs in to server
-	isLoggedIn          bool
-	loginMutex          sync.RWMutex
+	// clientDone is closed once the current client process has exited and been
+	// reaped, i.e. its listeners (the admin port) are actually released.
+	clientDone chan struct{}
+	// startMu serializes every spawn/kill of the frpc client. Unserialized,
+	// the boot supervisor and a Reload/AllStatus-triggered restart could each
+	// spawn an frpc — the loser exits with "bind: address already in use" on
+	// the shared admin port and its failure clobbers the winner's tracking.
+	startMu sync.Mutex
+	// supervising makes SuperviseStart single-flight; a second caller returns
+	// instead of running a competing retry loop.
+	supervising   atomic.Bool
+	configBuilder TunnelConfigBuilder
+	config        *config.Config
+	messenger     messenger.Messenger
+	loginChan     chan bool // Signals when frpc logs in to server
+	isLoggedIn    bool
+	loginMutex    sync.RWMutex
 
 	capability   atomic.Int32
 	capabilityMu sync.Mutex
@@ -356,34 +367,57 @@ func (frpTm *FrpTunnelManager) ensureFrpcBinary() error {
 	return nil
 }
 
-func (frpTm *FrpTunnelManager) Restart() error {
-	log.Debug().Msg("Restarting tunnel client...")
+// stopClientLocked kills the tracked frpc client (if any) and waits until its
+// reader goroutine has reaped it, so the admin port is actually released
+// before a new client binds it. Callers must hold startMu.
+func (frpTm *FrpTunnelManager) stopClientLocked() {
 	if frpTm.clientProcess == nil || frpTm.clientProcess.Process == nil {
-		log.Error().Msg("frp client is not running")
-		return errors.New("frp client is not running")
+		frpTm.clientProcess = nil
+		frpTm.clientDone = nil
+		return
 	}
 
-	err := frpTm.clientProcess.Process.Kill()
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("Failed to kill frp client process")
-		return err
+	// Kill errors just mean the process is already gone; reaping below is what
+	// guarantees the port is free either way.
+	_ = frpTm.clientProcess.Process.Kill()
+
+	if frpTm.clientDone != nil {
+		select {
+		case <-frpTm.clientDone:
+		case <-time.After(10 * time.Second):
+			log.Warn().Msg("timed out waiting for previous frpc process to be reaped")
+		}
 	}
 
-	processState, err := frpTm.clientProcess.Process.Wait()
-	if err != nil {
-		log.Error().Stack().Err(err).Msg("Failed to wait for frp client process")
-		return err
-	}
-
-	log.Debug().Msgf("Tunnel client process exited with state: %+v\n", processState)
-
-	time.Sleep(time.Second * 5)
-
-	return frpTm.Start()
+	frpTm.clientProcess = nil
+	frpTm.clientDone = nil
 }
 
 func (frpTm *FrpTunnelManager) Start() error {
+	frpTm.startMu.Lock()
+	defer frpTm.startMu.Unlock()
+
 	log.Debug().Msg("Starting tunnel client")
+
+	// A previous client may still be alive (e.g. its admin server broke but
+	// the process survived, or an earlier start raced). It holds the admin
+	// port; spawning next to it guarantees "bind: address already in use".
+	frpTm.stopClientLocked()
+
+	// The new process has not logged in yet: reset the flag and drain stale
+	// login signals so waitForLogin cannot pass on a token from the previous
+	// client's session.
+	frpTm.loginMutex.Lock()
+	frpTm.isLoggedIn = false
+	frpTm.loginMutex.Unlock()
+	for {
+		select {
+		case <-frpTm.loginChan:
+			continue
+		default:
+		}
+		break
+	}
 
 	// The binary may be absent (never downloaded, or quarantined at runtime);
 	// re-acquire it before spawning rather than looping on a missing file.
@@ -403,8 +437,6 @@ func (frpTm *FrpTunnelManager) Start() error {
 	frpCommand.Dir = filepath.Dir(frpcPath)
 	setPdeathsig(frpCommand)
 
-	frpTm.clientProcess = frpCommand
-
 	stdout, err := frpCommand.StdoutPipe()
 	if err != nil {
 		cancelNotifyContext()
@@ -421,6 +453,10 @@ func (frpTm *FrpTunnelManager) Start() error {
 		return err
 	}
 
+	clientDone := make(chan struct{})
+	frpTm.clientProcess = frpCommand
+	frpTm.clientDone = clientDone
+
 	// Buffered + guarded so exactly one result is delivered: login success, or
 	// the scanner ending (process exited) before login. Without the latter,
 	// Start() blocked forever whenever frpc crashed before logging in.
@@ -429,6 +465,12 @@ func (frpTm *FrpTunnelManager) Start() error {
 	ack := func(e error) { ackOnce.Do(func() { ackChan <- e }) }
 
 	go func() {
+		// Deferred order (LIFO): ack a pre-login death, cancel the context
+		// (which kills frpc if it is somehow still alive after stdout EOF),
+		// reap the process so it neither lingers as a zombie nor keeps the
+		// admin port, and only then signal done to stopClientLocked waiters.
+		defer close(clientDone)
+		defer func() { _ = frpCommand.Wait() }()
 		defer cancelNotifyContext()
 		// If the loop exits without a prior ack, frpc died before login.
 		defer ack(errors.New("frpc exited before logging in to the server"))
@@ -485,10 +527,12 @@ func (frpTm *FrpTunnelManager) Start() error {
 				if runAdminServerError {
 					log.Debug().Msgf("Tunnel process failed to setup admin server: %s", line)
 
-					// Reset the webserver port in case the port is in use, then
-					// hand control back to the supervisor via a failed ack
-					// rather than recursively restarting from inside the
-					// scanner goroutine (which left the outer Start() hanging).
+					// Re-pick (and persist) the webserver port, then hand
+					// control back to the supervisor via a failed ack rather
+					// than recursively restarting from inside the scanner
+					// goroutine. The early return triggers the deferred
+					// context cancel, which kills this frpc — it must not
+					// keep running admin-less next to its replacement.
 					frpTm.configBuilder.SetAdminPort()
 					ack(errors.New("frpc failed to start its admin server"))
 
@@ -528,7 +572,15 @@ func (frpTm *FrpTunnelManager) Start() error {
 								Protocol:   Protocol(protocol),
 							}
 
-							frpTm.tunnelUpdateChan <- tunnelUpdate
+							// Non-blocking: the channel currently has no
+							// consumer (AddTunnel's wait loop is retired), and
+							// an unbuffered send would park this goroutine
+							// forever — one leak per proxy event, growing on
+							// every frpc restart.
+							select {
+							case frpTm.tunnelUpdateChan <- tunnelUpdate:
+							default:
+							}
 						}
 
 					})
@@ -538,9 +590,9 @@ func (frpTm *FrpTunnelManager) Start() error {
 						// This prevents publishing "offline" state before connection is established
 						frpTm.waitForLogin()
 
-						err = frpTm.PublishTunnelState()
-						if err != nil {
-							log.Error().Err(err).Msg("Failed to publish tunnel state")
+						pubErr := frpTm.PublishTunnelState()
+						if pubErr != nil {
+							log.Error().Err(pubErr).Msg("Failed to publish tunnel state")
 						}
 					})
 				}
@@ -567,6 +619,17 @@ func (frpTm *FrpTunnelManager) Start() error {
 // degrades cleanly. Runs to completion (success or exhaustion) — call it from a
 // goroutine.
 func (frpTm *FrpTunnelManager) SuperviseStart() {
+	// Single-flight: the boot path, a failed Reload and a dead admin API can
+	// all request supervision around the same moment. Competing loops used to
+	// spawn frpc against frpc — the loser died on the shared admin port with
+	// "bind: address already in use" and its failure marked tunnels
+	// unavailable even while a healthy client was running.
+	if !frpTm.supervising.CompareAndSwap(false, true) {
+		log.Debug().Msg("tunnel client supervisor already running, skipping")
+		return
+	}
+	defer frpTm.supervising.Store(false)
+
 	const maxAttempts = 6
 	backoff := 2 * time.Second
 
@@ -579,6 +642,12 @@ func (frpTm *FrpTunnelManager) SuperviseStart() {
 
 		log.Warn().Err(err).Msgf("tunnel client start attempt %d/%d failed", attempt, maxAttempts)
 		if attempt < maxAttempts {
+			// A pre-login exit is regularly the admin port having been taken
+			// while frpc was down (any outbound localhost connection can hold
+			// it). Retrying on the same port then fails identically all the
+			// way to exhaustion — re-pick a free one for the next attempt.
+			frpTm.configBuilder.SetAdminPort()
+
 			time.Sleep(backoff)
 			if backoff < 32*time.Second {
 				backoff *= 2
@@ -591,7 +660,11 @@ func (frpTm *FrpTunnelManager) SuperviseStart() {
 }
 
 func (frpTm *FrpTunnelManager) Stop() error {
-	return frpTm.clientProcess.Process.Kill()
+	frpTm.startMu.Lock()
+	defer frpTm.startMu.Unlock()
+
+	frpTm.stopClientLocked()
+	return nil
 }
 
 func (frpTm *FrpTunnelManager) Reset() error {
@@ -840,8 +913,12 @@ func (frpTm *FrpTunnelManager) AllStatus() ([]TunnelStatus, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
+			// frpc was Available but its admin API is gone: the process died.
+			// Re-supervise (single-flight, serialized, port re-picking) instead
+			// of a bare kill+start — the latter permanently gave up whenever
+			// the old admin port had been taken in the meantime.
 			safe.Go(func() {
-				frpTm.Restart()
+				frpTm.SuperviseStart()
 			})
 			return []TunnelStatus{}, nil
 		}

@@ -2,15 +2,20 @@ package tunnel
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func newCapabilityTestManager(t *testing.T) *FrpTunnelManager {
@@ -115,4 +120,78 @@ func TestEnsureFrpcBinaryFailsWithoutReacquire(t *testing.T) {
 
 	err := m.ensureFrpcBinary()
 	require.ErrorContains(t, err, "no re-acquire available")
+}
+
+// Only one supervisor loop may run at a time: competing loops spawned frpc
+// against frpc, and the loser's "bind: address already in use" exit marked
+// tunnels unavailable even while a healthy client was up.
+func TestSuperviseStartSingleFlight(t *testing.T) {
+	m := newCapabilityTestManager(t)
+	require.True(t, m.supervising.CompareAndSwap(false, true), "latching the supervisor flag must succeed on a fresh manager")
+	defer m.supervising.Store(false)
+
+	done := make(chan struct{})
+	go func() {
+		m.SuperviseStart()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SuperviseStart must return immediately while another supervisor is running")
+	}
+
+	cap, _ := m.Capability()
+	assert.Equal(t, CapabilityUnknown, cap, "a skipped supervisor must not touch capability")
+}
+
+// Stop before any client was ever spawned must be a no-op, not a nil deref.
+func TestStopWithoutClientIsSafe(t *testing.T) {
+	m := newCapabilityTestManager(t)
+	assert.NoError(t, m.Stop())
+}
+
+// End-to-end reproduction of the production failure with a real spawned
+// process: the admin port is taken by another socket (in the field: any
+// outbound localhost connection, a stale frpc, a Docker publish), and frpc —
+// like frp 0.69 when its webServer cannot bind — prints a bare
+// "bind: address already in use" and exits before logging in. The supervisor
+// must then persist a *different* admin port before the next attempt;
+// retrying the dead port forever was what kept appliance tunnels down until a
+// manual agent restart.
+func TestSuperviseStartRepicksAdminPortAfterPreLoginExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake frpc is a shell script")
+	}
+
+	m := newCapabilityTestManager(t)
+
+	fake := "#!/bin/sh\necho 'listen tcp 127.0.0.1:42567: bind: address already in use'\nexit 1\n"
+	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
+	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
+
+	initialPort, err := m.configBuilder.GetAdminPort()
+	require.NoError(t, err)
+
+	// Occupy the picked admin port, exactly like the socket that breaks frpc
+	// in the field — the re-pick must not hand it out again.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", initialPort))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	go m.SuperviseStart()
+
+	require.Eventually(t, func() bool {
+		raw, readErr := os.ReadFile(m.configBuilder.ConfigPath)
+		if readErr != nil {
+			return false
+		}
+		var onDisk FrpcYamlConfig
+		if yaml.Unmarshal(raw, &onDisk) != nil || onDisk.WebServer == nil {
+			return false
+		}
+		return onDisk.WebServer.Port != initialPort && onDisk.WebServer.Port >= adminPortScanStart
+	}, 10*time.Second, 100*time.Millisecond,
+		"supervisor must persist a re-picked admin port after a pre-login exit")
 }

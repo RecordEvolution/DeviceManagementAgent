@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -180,4 +181,47 @@ func TestConcurrentReservationsAreDistinct(t *testing.T) {
 		assert.False(t, dup, fmt.Sprintf("port %d handed out twice", port))
 		seen[port] = struct{}{}
 	}
+}
+
+func TestMappedPortEnvsFromBindings(t *testing.T) {
+	bindings := nat.PortMap{
+		"1883/udp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "40002"}},
+		"8080/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "40001"}},
+		// tcp sorts before udp, so the tcp binding wins the shared name.
+		"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "40003"}},
+		"5000/udp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "40004"}},
+	}
+
+	assert.Equal(t, []string{
+		"MAPPED_PORT_FOR_1883=40002",
+		"MAPPED_PORT_FOR_5000=40003",
+		"MAPPED_PORT_FOR_8080=40001",
+	}, mappedPortEnvsFromBindings(bindings))
+}
+
+func TestMappedPortEnvsForCompose(t *testing.T) {
+	am := &AppManager{hostPorts: newTestRegistry()}
+	payload := common.TransitionPayload{Stage: common.PROD, AppKey: 5}
+
+	// The assignments rewriteComposeHostPorts would have recorded.
+	am.hostPorts.record(hostPortKey{Stage: common.PROD, AppKey: 5, Protocol: "tcp", Port: 8080, Service: "web"}, 40010)
+	am.hostPorts.record(hostPortKey{Stage: common.PROD, AppKey: 5, Protocol: "udp", Port: 1883, Service: "broker"}, 40011)
+
+	dockerCompose := map[string]interface{}{
+		"services": map[string]interface{}{
+			"web": map[string]interface{}{
+				"ports": []interface{}{"8080:80"},
+			},
+			"broker": map[string]interface{}{
+				// A container-only udp port published via a port rule, plus an
+				// unmanaged variable entry and an unpublished container port.
+				"ports": []interface{}{"1883/udp", "${WEB_PORT}:90", float64(9000)},
+			},
+		},
+	}
+
+	assert.Equal(t, []string{
+		"MAPPED_PORT_FOR_1883=40011",
+		"MAPPED_PORT_FOR_8080=40010",
+	}, am.mappedPortEnvsForCompose(payload, dockerCompose))
 }

@@ -233,7 +233,7 @@ func TestGenerateDotEnvContentsCloudRemotePort(t *testing.T) {
 		CloudRemotePort:       31099,
 	})
 
-	contents, skipped, err := am.StateMachine.generateDotEnvContents(cfg, payload, app)
+	contents, skipped, err := am.StateMachine.generateDotEnvContents(cfg, payload, app, payload.DockerCompose)
 	require.NoError(t, err)
 	assert.Empty(t, skipped)
 	assert.Contains(t, contents, "WG_PORT_CLOUD=31099")

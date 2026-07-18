@@ -207,16 +207,7 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 		log.Debug().Msgf("Using tunnel server address from environment: %s", serverAddr)
 	}
 
-	// Get admin port. OS-assigned (port 0) rather than a scan from a fixed
-	// base: scanning from 30000 landed exactly on the tunnel data-plane range
-	// (TUNNEL_PORT_RANGE_START=30000) — with SO_REUSEADDR the loopback bind
-	// succeeds alongside Docker's wildcard publish and silently shadows the
-	// tunnel's host port for loopback traffic (or blocks the publish).
-	port := 7400
-	randomPort, err := common.GetRandomFreePort()
-	if err == nil {
-		port = randomPort
-	}
+	port := pickAdminPort()
 	log.Debug().Msgf("Using port %d for Frp webserver", port)
 
 	// Initialize YAML config structure
@@ -391,18 +382,47 @@ func (builder *TunnelConfigBuilder) Reset() {
 	*builder = initialize(builder.appConfig)
 }
 
-func (builder *TunnelConfigBuilder) SetAdminPort() {
-	// OS-assigned, for the same reason as in initialize(): a scan from 30000
-	// collides with the tunnel data-plane port range.
-	port := 7400
-	randomPort, err := common.GetRandomFreePort()
+// adminPortScanStart is the base of the dedicated range for frpc's loopback
+// admin webserver. It sits below every contested pool on a device: the OS
+// ephemeral range (32768-60999 — every outbound localhost connection borrows a
+// source port there, and such a port stays busy for the connection's whole
+// lifetime), the agent's app host-port pool (40000-49999), and the tunnel
+// data-plane range (30000+). 7400 itself is skipped: local-dev frps listens
+// there.
+const adminPortScanStart = 7411
+
+// pickAdminPort chooses the loopback port for frpc's admin webserver by
+// scanning up from adminPortScanStart. An OS-assigned port (localhost:0) is
+// only the last resort: it comes from the ephemeral range, where the port that
+// was free at pick time is routinely taken later by an outbound connection —
+// frpc then exits at startup with "bind: address already in use", and kept
+// doing so on every retry because nothing re-picked the port.
+func pickAdminPort() int {
+	port, err := common.GetFreePortFromStart(adminPortScanStart)
 	if err == nil {
-		port = randomPort
+		return port
 	}
+
+	log.Warn().Err(err).Msg("admin port scan found no free port, falling back to an OS-assigned port")
+	port, err = common.GetRandomFreePort()
+	if err == nil {
+		return port
+	}
+
+	return adminPortScanStart
+}
+
+// SetAdminPort re-picks the admin webserver port and persists it. Persisting
+// matters: frpc reads frpc.yaml, not our in-memory config, so without
+// SaveConfig a restart after "bind: address already in use" would spawn frpc
+// on the very port that just failed.
+func (builder *TunnelConfigBuilder) SetAdminPort() {
+	port := pickAdminPort()
 
 	log.Debug().Msgf("Using port %d for Frp webserver", port)
 
 	builder.yamlConfig.WebServer.Port = port
+	builder.SaveConfig()
 }
 
 func (builder *TunnelConfigBuilder) SetCommonVariable(key FrpcVariable, value string) {

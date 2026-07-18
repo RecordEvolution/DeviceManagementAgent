@@ -60,7 +60,11 @@ func filterValidDotEnvLines(envLines []string) (valid []string, skippedKeys []st
 	return valid, skippedKeys
 }
 
-func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App) (string, []string, error) {
+// dockerCompose is the authored compose definition the app is (re)started
+// from; it identifies the port entries whose managed host port assignments are
+// announced as MAPPED_PORT_FOR_<port>. Callers must have recorded those
+// assignments first (rewriteComposeHostPorts runs before this).
+func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App, dockerCompose map[string]interface{}) (string, []string, error) {
 	var envLines []string
 
 	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
@@ -116,6 +120,8 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 
 		envLines = append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
 	}
+
+	envLines = append(envLines, sm.StateObserver.AppManager.mappedPortEnvsForCompose(payload, dockerCompose)...)
 
 	validLines, skippedKeys := filterValidDotEnvLines(envLines)
 	return strings.Join(validLines, "\n"), skippedKeys, nil
@@ -205,7 +211,7 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		}
 	}
 
-	dotEnvFileContents, skippedEnvKeys, err := sm.generateDotEnvContents(config, payload, app)
+	dotEnvFileContents, skippedEnvKeys, err := sm.generateDotEnvContents(config, payload, app, sourceCompose)
 	if err != nil {
 		return "", err
 	}

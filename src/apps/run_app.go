@@ -8,6 +8,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/errdefs"
+	reagentnetwork "reagent/network"
 	"reagent/system"
 	"reagent/tunnel"
 	"strings"
@@ -575,6 +576,13 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 		fmt.Sprintf("TUNNEL_DOMAIN=%s", tunnelDomainForApps(config)),
 	}
 
+	// Computed at container start: an IP change is reflected on the next app
+	// restart. LAN deployments are expected to use static IPs or DHCP
+	// reservations.
+	if lanIP := reagentnetwork.GetPrimaryLANIP(); lanIP != "" {
+		environmentVariables = append(environmentVariables, fmt.Sprintf("DEVICE_LAN_IP=%s", lanIP))
+	}
+
 	if payload.InstanceKey > 0 {
 		// Instance devices: apps compose the cloud-forwarded route
 		// https://i<INSTANCE_KEY>-<deviceKey>-<appName>-<port>.<cloud edge>.
@@ -604,11 +612,30 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		return nil, nil, err
 	}
 
+	containerName := payload.ContainerName.Prod
+	if app.Stage == common.DEV {
+		containerName = payload.ContainerName.Dev
+	}
+
+	// Apps run on the default bridge network with their declared ports
+	// published on agent-managed host ports. Publishing (instead of the
+	// former NetworkMode "host") is what keeps concurrent apps from fighting
+	// over the same host port: every container may listen on its declared
+	// port privately, and the agent picks a collision-free host port.
+	// Computed before the environment variables so the resulting host ports
+	// can be announced to the app as MAPPED_PORT_FOR_<port>.
+	exposedPorts, portBindings, err := sm.computePortBindings(payload, portRules, containerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	mappedPortEnvs := mappedPortEnvsFromBindings(portBindings)
+
 	var containerConfig container.Config
 
 	if app.Stage == common.DEV {
 		// Write all environment variables to files
 		allEnvVars := append(systemDefaultVariables, environmentTemplateDefaults...)
+		allEnvVars = append(allEnvVars, mappedPortEnvs...)
 		err := writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)
@@ -686,6 +713,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 		// Write all environment variables to files
 		allEnvVars := append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
+		allEnvVars = append(allEnvVars, mappedPortEnvs...)
 		err = writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)
@@ -707,20 +735,6 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		return nil, nil, err
 	}
 
-	containerName := payload.ContainerName.Prod
-	if app.Stage == common.DEV {
-		containerName = payload.ContainerName.Dev
-	}
-
-	// Apps run on the default bridge network with their declared ports
-	// published on agent-managed host ports. Publishing (instead of the
-	// former NetworkMode "host") is what keeps concurrent apps from fighting
-	// over the same host port: every container may listen on its declared
-	// port privately, and the agent picks a collision-free host port.
-	exposedPorts, portBindings, err := sm.computePortBindings(payload, portRules, containerName)
-	if err != nil {
-		return nil, nil, err
-	}
 	containerConfig.ExposedPorts = exposedPorts
 
 	hostConfig := container.HostConfig{

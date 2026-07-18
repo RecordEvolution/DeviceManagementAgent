@@ -77,6 +77,36 @@ type Ipv4Address struct {
 
 var ipv4regex = regexp.MustCompile(IPv4RegExp)
 
+// GetPrimaryLANIP returns the device's primary LAN IPv4 address: the source
+// address the OS picks for the default route (no packet is sent — UDP connect
+// only resolves routing), falling back to the first address reported by
+// GetIPv4Addresses on hosts without a default route. Virtual bridge/veth
+// interfaces are skipped in the fallback. Returns "" when no address can be
+// determined.
+func GetPrimaryLANIP() string {
+	conn, err := net.Dial("udp4", "8.8.8.8:80")
+	if err == nil {
+		defer conn.Close()
+		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP != nil {
+			return addr.IP.String()
+		}
+	}
+
+	addresses, err := GetIPv4Addresses()
+	if err != nil {
+		return ""
+	}
+
+	for _, address := range addresses {
+		if strings.HasPrefix(address.InterfaceName, "veth") || strings.HasPrefix(address.InterfaceName, "br-") {
+			continue
+		}
+		return address.Ip
+	}
+
+	return ""
+}
+
 func GetIPv4Addresses() ([]Ipv4Address, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {

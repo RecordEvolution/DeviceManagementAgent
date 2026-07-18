@@ -5,6 +5,8 @@
 package tunnel
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"reagent/common"
 	"reagent/config"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // frp defaults loginFailExit to true, so the intended false has to actually be
@@ -502,6 +505,47 @@ func TestGetAdminPortInitialised(t *testing.T) {
 	port, err := builder.GetAdminPort()
 	require.NoError(t, err)
 	assert.Greater(t, port, 0)
+}
+
+// frpc reads frpc.yaml, not the builder's memory: SetAdminPort must write the
+// re-picked port to disk, or the recovery path respawns frpc on the very port
+// that just failed with "bind: address already in use" — forever.
+func TestSetAdminPortPersistsToDisk(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	// Divert the in-memory port without saving, so persistence (not a stale
+	// file from initialize()) is what the assertion proves.
+	builder.SetCommonVariable(ADMIN_PORT, "48000")
+
+	builder.SetAdminPort()
+
+	memPort, err := builder.GetAdminPort()
+	require.NoError(t, err)
+	assert.NotEqual(t, 48000, memPort, "SetAdminPort must re-pick the port")
+
+	raw, err := os.ReadFile(builder.ConfigPath)
+	require.NoError(t, err)
+
+	var onDisk FrpcYamlConfig
+	require.NoError(t, yaml.Unmarshal(raw, &onDisk))
+	require.NotNil(t, onDisk.WebServer)
+	assert.Equal(t, memPort, onDisk.WebServer.Port, "the re-picked admin port must be persisted for frpc to see")
+}
+
+// A port that is bound — by a stale frpc, an outbound connection, anything —
+// must never be picked for the admin webserver again.
+func TestPickAdminPortSkipsBoundPorts(t *testing.T) {
+	first := pickAdminPort()
+	require.GreaterOrEqual(t, first, adminPortScanStart)
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", first))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	second := pickAdminPort()
+	assert.NotEqual(t, first, second, "a bound port must not be re-picked")
+	assert.GreaterOrEqual(t, second, adminPortScanStart)
 }
 
 // GetState matches a stored config to its frpc status by tunnel id. Only
