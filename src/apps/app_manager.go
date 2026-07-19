@@ -215,6 +215,10 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		return err
 	}
 
+	if app == nil {
+		return fmt.Errorf("app (%d, %s) does not exist in the local app store", payload.AppKey, payload.Stage)
+	}
+
 	app.StateLock.Lock()
 	curAppState := app.CurrentState
 	requestedAppState := app.RequestedState
@@ -588,6 +592,11 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 			return err
 		}
 
+		if app == nil {
+			log.Warn().Msgf("no local app entry for requested app (%s, %s), skipping", payload.AppName, payload.Stage)
+			continue
+		}
+
 		safe.Go(func() {
 			app.StateLock.Lock()
 			currentAppState := app.CurrentState
@@ -666,6 +675,10 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("Failed to get app in UpdateCurrentAppState")
 		return err
+	}
+
+	if app == nil {
+		return fmt.Errorf("app (%d, %s) does not exist in the local app store", payload.AppKey, payload.Stage)
 	}
 
 	app.StateLock.Lock()

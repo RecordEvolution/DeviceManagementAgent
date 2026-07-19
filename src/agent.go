@@ -297,7 +297,18 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	// machine fails new RUNNING/BUILDING/DOWNLOADING transitions.
 	if runtime.GOOS == "linux" {
 		diskguard.EnsurePreventionConfig()
+		// Watch the daemon's actual data-root: on FlockOS it lives on the apps
+		// partition (e.g. /apps/docker), not the /var/lib/docker default.
+		var dataRoot string
+		infoCtx, cancelInfo := context.WithTimeout(context.Background(), 10*time.Second)
+		if root, err := container.DataRootDir(infoCtx); err != nil {
+			log.Warn().Err(err).Msg("diskguard: could not resolve docker data-root, using default")
+		} else {
+			dataRoot = root
+		}
+		cancelInfo()
 		guard := diskguard.New(container, diskguard.Config{
+			DataRoot: dataRoot,
 			// On recovery, reinstate the apps' requested states (which were
 			// stopped/blocked during the emergency).
 			OnRecover: func() {

@@ -236,6 +236,14 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 		return err
 	}
 
+	// A requested state can exist without a local app entry, e.g. when a removal
+	// was requested while the app was still mid-transfer. Skip until the app is
+	// registered through CreateOrUpdateApp.
+	if app == nil {
+		log.Warn().Msgf("no local app entry for requested compose app (%s, %s), skipping state correction", requestedState.AppName, requestedState.Stage)
+		return nil
+	}
+
 	var foundComposeEntry *container.ComposeListEntry
 	for _, composeEntry := range composeListEntry {
 		if composeEntry.Name == composeName {
@@ -402,6 +410,11 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 		app, err := so.AppStore.GetApp(rState.AppKey, rState.Stage)
 		if err != nil {
 			return err
+		}
+
+		if app == nil {
+			log.Warn().Msgf("no local app entry for requested app (%s, %s), skipping state correction", rState.AppName, rState.Stage)
+			continue
 		}
 
 		ctx := context.Background()
