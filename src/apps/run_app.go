@@ -598,6 +598,38 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 	return environmentVariables
 }
 
+// remotePortEnvVars builds the env vars announcing the public side of an
+// app's tunneled ports. Every port rule gets the canonical
+// REMOTE_PORT_FOR_<port> name (with a _CLOUD companion for the
+// internet-facing cloud port an instance backend patched into the sync
+// payload); a rule's custom remote_port_environment name is emitted alongside
+// for backward compatibility.
+func (sm *StateMachine) remotePortEnvVars(config *config.Config, appName string, portRules []common.PortForwardRule) []string {
+	var envs []string
+	for _, portRule := range portRules {
+		names := []string{fmt.Sprintf("REMOTE_PORT_FOR_%d", portRule.Port)}
+		if portRule.RemotePortEnvironment != "" {
+			names = append(names, portRule.RemotePortEnvironment)
+		}
+
+		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(config.ReswarmConfig.DeviceKey), appName, portRule.Port)
+		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
+		activeTunnel := sm.StateObserver.AppManager.tunnelManager.Get(tunnelID)
+
+		for _, name := range names {
+			if activeTunnel != nil {
+				envs = append(envs, fmt.Sprintf("%s=%d", name, activeTunnel.Config.RemotePort))
+			}
+
+			// Payload-borne — no local tunnel object needed.
+			if portRule.CloudRemotePort > 0 {
+				envs = append(envs, fmt.Sprintf("%s_CLOUD=%d", name, portRule.CloudRemotePort))
+			}
+		}
+	}
+	return envs
+}
+
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
 	config := sm.Container.GetConfig()
 	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
@@ -623,19 +655,19 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	// over the same host port: every container may listen on its declared
 	// port privately, and the agent picks a collision-free host port.
 	// Computed before the environment variables so the resulting host ports
-	// can be announced to the app as MAPPED_PORT_FOR_<port>.
+	// can be announced to the app as DEVICE_PORT_FOR_<port>.
 	exposedPorts, portBindings, err := sm.computePortBindings(payload, portRules, containerName)
 	if err != nil {
 		return nil, nil, err
 	}
-	mappedPortEnvs := mappedPortEnvsFromBindings(portBindings)
+	devicePortEnvs := devicePortEnvsFromBindings(portBindings)
 
 	var containerConfig container.Config
 
 	if app.Stage == common.DEV {
 		// Write all environment variables to files
 		allEnvVars := append(systemDefaultVariables, environmentTemplateDefaults...)
-		allEnvVars = append(allEnvVars, mappedPortEnvs...)
+		allEnvVars = append(allEnvVars, devicePortEnvs...)
 		err := writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)
@@ -689,31 +721,11 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 			}
 		}
 
-		var remotePortEnvs []string
-		for _, portRule := range portRules {
-			if portRule.RemotePortEnvironment != "" {
-				subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(config.ReswarmConfig.DeviceKey), app.AppName, portRule.Port)
-				tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
-				tunnel := sm.StateObserver.AppManager.tunnelManager.Get(tunnelID)
-
-				if tunnel != nil {
-					portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
-					remotePortEnvs = append(remotePortEnvs, portEnv)
-				}
-
-				// Instance devices: the internet-facing cloud port of a
-				// tcp/udp tunnel, patched into the sync payload by the
-				// instance backend. Payload-borne — no local tunnel object
-				// needed.
-				if portRule.CloudRemotePort > 0 {
-					remotePortEnvs = append(remotePortEnvs, fmt.Sprintf("%s_CLOUD=%d", portRule.RemotePortEnvironment, portRule.CloudRemotePort))
-				}
-			}
-		}
+		remotePortEnvs := sm.remotePortEnvVars(config, app.AppName, portRules)
 
 		// Write all environment variables to files
 		allEnvVars := append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
-		allEnvVars = append(allEnvVars, mappedPortEnvs...)
+		allEnvVars = append(allEnvVars, devicePortEnvs...)
 		err = writeEnvironmentVariablesToFiles(appSpecificDirectory, allEnvVars)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to write environment variables to files: %w", err)

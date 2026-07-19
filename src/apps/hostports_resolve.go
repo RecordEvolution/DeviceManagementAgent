@@ -202,9 +202,9 @@ func (sm *StateMachine) computePortBindings(payload common.TransitionPayload, po
 	return exposedPorts, portBindings, nil
 }
 
-// mappedPortEnvLines renders one MAPPED_PORT_FOR_<declared port>=<host port>
+// devicePortEnvLines renders one DEVICE_PORT_FOR_<declared port>=<host port>
 // line per entry, sorted by declared port.
-func mappedPortEnvLines(hostPortByDeclared map[uint64]uint64) []string {
+func devicePortEnvLines(hostPortByDeclared map[uint64]uint64) []string {
 	declaredPorts := make([]uint64, 0, len(hostPortByDeclared))
 	for declared := range hostPortByDeclared {
 		declaredPorts = append(declaredPorts, declared)
@@ -213,17 +213,17 @@ func mappedPortEnvLines(hostPortByDeclared map[uint64]uint64) []string {
 
 	lines := make([]string, 0, len(declaredPorts))
 	for _, declared := range declaredPorts {
-		lines = append(lines, fmt.Sprintf("MAPPED_PORT_FOR_%d=%d", declared, hostPortByDeclared[declared]))
+		lines = append(lines, fmt.Sprintf("DEVICE_PORT_FOR_%d=%d", declared, hostPortByDeclared[declared]))
 	}
 	return lines
 }
 
-// mappedPortEnvsFromBindings builds the MAPPED_PORT_FOR_<port> environment
+// devicePortEnvsFromBindings builds the DEVICE_PORT_FOR_<port> environment
 // variables announcing which host port each published port landed on.
 // Single-container apps publish declared ports verbatim, so the container
 // port doubles as the declared port. When tcp and udp share a declared port
 // the tcp binding wins (deterministic via the sorted "port/proto" keys).
-func mappedPortEnvsFromBindings(portBindings nat.PortMap) []string {
+func devicePortEnvsFromBindings(portBindings nat.PortMap) []string {
 	containerPorts := make([]nat.Port, 0, len(portBindings))
 	for containerPort := range portBindings {
 		containerPorts = append(containerPorts, containerPort)
@@ -245,17 +245,17 @@ func mappedPortEnvsFromBindings(portBindings nat.PortMap) []string {
 		}
 	}
 
-	return mappedPortEnvLines(hostPortByDeclared)
+	return devicePortEnvLines(hostPortByDeclared)
 }
 
-// mappedPortEnvsForCompose builds the MAPPED_PORT_FOR_<port> environment
+// devicePortEnvsForCompose builds the DEVICE_PORT_FOR_<port> environment
 // variables for a compose app by reading the registry assignments
 // rewriteComposeHostPorts recorded for it. dockerCompose must be the authored
 // definition — the rewrite replaces the authored host ports, which are the
 // entries' declared identity. Unmanaged entries (ranges, variables) and
 // container-only ports no rule publishes carry no assignment and are skipped.
 // When two services share a declared port the first (sorted by service) wins.
-func (am *AppManager) mappedPortEnvsForCompose(payload common.TransitionPayload, dockerCompose map[string]interface{}) []string {
+func (am *AppManager) devicePortEnvsForCompose(payload common.TransitionPayload, dockerCompose map[string]interface{}) []string {
 	entries := parseComposePorts(dockerCompose)
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].DeclaredPort() != entries[j].DeclaredPort() {
@@ -282,7 +282,7 @@ func (am *AppManager) mappedPortEnvsForCompose(payload common.TransitionPayload,
 		}
 	}
 
-	return mappedPortEnvLines(hostPortByDeclared)
+	return devicePortEnvLines(hostPortByDeclared)
 }
 
 // rewriteComposeHostPorts replaces the host side of every published compose

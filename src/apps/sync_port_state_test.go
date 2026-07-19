@@ -237,7 +237,10 @@ func TestGenerateDotEnvContentsCloudRemotePort(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, skipped)
 	assert.Contains(t, contents, "WG_PORT_CLOUD=31099")
+	// The canonical name is emitted alongside the custom one.
+	assert.Contains(t, contents, "REMOTE_PORT_FOR_51820_CLOUD=31099")
 	// No local tunnel object -> the base WG_PORT env is absent; the cloud
 	// port must not depend on it.
 	assert.NotContains(t, contents, "\nWG_PORT=")
+	assert.NotContains(t, contents, "REMOTE_PORT_FOR_51820=")
 }

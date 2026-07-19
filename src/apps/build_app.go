@@ -62,7 +62,7 @@ func filterValidDotEnvLines(envLines []string) (valid []string, skippedKeys []st
 
 // dockerCompose is the authored compose definition the app is (re)started
 // from; it identifies the port entries whose managed host port assignments are
-// announced as MAPPED_PORT_FOR_<port>. Callers must have recorded those
+// announced as DEVICE_PORT_FOR_<port>. Callers must have recorded those
 // assignments first (rewriteComposeHostPorts runs before this).
 func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App, dockerCompose map[string]interface{}) (string, []string, error) {
 	var envLines []string
@@ -91,37 +91,17 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 			}
 		}
 
-		var remotePortEnvs []string
 		portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
 		if err != nil {
 			return "", nil, err
 		}
 
-		for _, portRule := range portRules {
-			if portRule.RemotePortEnvironment != "" {
-				subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(config.ReswarmConfig.DeviceKey), app.AppName, portRule.Port)
-				tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
-				tunnel := sm.StateObserver.AppManager.tunnelManager.Get(tunnelID)
-
-				if tunnel != nil {
-					portEnv := fmt.Sprintf("%s=%d", portRule.RemotePortEnvironment, tunnel.Config.RemotePort)
-					remotePortEnvs = append(remotePortEnvs, portEnv)
-				}
-
-				// Instance devices: the internet-facing cloud port of a
-				// tcp/udp tunnel, patched into the sync payload by the
-				// instance backend. Payload-borne — no local tunnel object
-				// needed.
-				if portRule.CloudRemotePort > 0 {
-					remotePortEnvs = append(remotePortEnvs, fmt.Sprintf("%s_CLOUD=%d", portRule.RemotePortEnvironment, portRule.CloudRemotePort))
-				}
-			}
-		}
+		remotePortEnvs := sm.remotePortEnvVars(config, app.AppName, portRules)
 
 		envLines = append(environmentVariables, append(remotePortEnvs, missingDefaultEnvs...)...)
 	}
 
-	envLines = append(envLines, sm.StateObserver.AppManager.mappedPortEnvsForCompose(payload, dockerCompose)...)
+	envLines = append(envLines, sm.StateObserver.AppManager.devicePortEnvsForCompose(payload, dockerCompose)...)
 
 	validLines, skippedKeys := filterValidDotEnvLines(envLines)
 	return strings.Join(validLines, "\n"), skippedKeys, nil

@@ -193,10 +193,10 @@ func TestMappedPortEnvsFromBindings(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{
-		"MAPPED_PORT_FOR_1883=40002",
-		"MAPPED_PORT_FOR_5000=40003",
-		"MAPPED_PORT_FOR_8080=40001",
-	}, mappedPortEnvsFromBindings(bindings))
+		"DEVICE_PORT_FOR_1883=40002",
+		"DEVICE_PORT_FOR_5000=40003",
+		"DEVICE_PORT_FOR_8080=40001",
+	}, devicePortEnvsFromBindings(bindings))
 }
 
 func TestMappedPortEnvsForCompose(t *testing.T) {
@@ -221,7 +221,7 @@ func TestMappedPortEnvsForCompose(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{
-		"MAPPED_PORT_FOR_1883=40011",
-		"MAPPED_PORT_FOR_8080=40010",
-	}, am.mappedPortEnvsForCompose(payload, dockerCompose))
+		"DEVICE_PORT_FOR_1883=40011",
+		"DEVICE_PORT_FOR_8080=40010",
+	}, am.devicePortEnvsForCompose(payload, dockerCompose))
 }
