@@ -162,15 +162,16 @@ func TestIntegrationDockerBuildAndImageOps(t *testing.T) {
 func TestIntegrationDockerPruneImages(t *testing.T) {
 	docker := newIntegrationDocker(t)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	// PruneDanglingImages shells out to `docker image prune -f`. It must return
 	// without error on a healthy daemon; output may be empty.
-	out, err := docker.PruneDanglingImages()
+	out, err := docker.PruneDanglingImages(ctx)
 	require.NoError(t, err, "PruneDanglingImages should succeed")
 	_ = out // output content is non-deterministic; presence of no error is enough.
 
 	// PruneImages uses the API. all=false prunes only dangling images.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
 	require.NoError(t, docker.PruneImages(ctx, map[string]interface{}{"all": false}),
 		"PruneImages(all=false) should succeed")
 }
