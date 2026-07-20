@@ -345,8 +345,8 @@ func TestDroppedUpdateIsRecoveredAfterTransitionCompletes(t *testing.T) {
 	require.False(t, app.SecureTransition(),
 		"precondition: lock free; acquiring it now models the running transition")
 
-	mt.EXPECT().TunnelCapable().Return(false).Maybe()  // syncPortState short-circuit
-	mt.EXPECT().GetState().Return(nil, nil).Maybe()    // UpdateTunnelState after the recovered transition
+	mt.EXPECT().TunnelCapable().Return(false).Maybe() // syncPortState short-circuit
+	mt.EXPECT().GetState().Return(nil, nil).Maybe()   // UpdateTunnelState after the recovered transition
 
 	// The cloud pushes an update mid-transition. The handler persists intent...
 	update := amPayload(42, "busy", common.RUNNING, common.PROD)
