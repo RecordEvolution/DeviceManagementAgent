@@ -353,8 +353,12 @@ func (docker *Docker) PruneAllImages() (string, error) {
 	return string(output), nil
 }
 
-func (docker *Docker) PruneDanglingImages() (string, error) {
-	cmd := exec.Command("docker", "image", "prune", "-f")
+// PruneDanglingImages removes dangling images. ctx bounds the run — on a
+// disk-full box the daemon can wedge and an unbounded prune then hangs its
+// caller forever (observed live: it kept diskguard from ever reporting the
+// emergency).
+func (docker *Docker) PruneDanglingImages(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "prune", "-f")
 	cmd.Stderr = cmd.Stdout
 	output, err := cmd.Output()
 	if err != nil {
@@ -399,8 +403,9 @@ func (docker *Docker) RemoveVolume(ctx context.Context, name string) error {
 }
 
 // PruneBuildCache removes the dangling build cache (docker builder prune).
-func (docker *Docker) PruneBuildCache() (string, error) {
-	cmd := exec.Command("docker", "builder", "prune", "-f")
+// ctx bounds the run (see PruneDanglingImages).
+func (docker *Docker) PruneBuildCache(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f")
 	cmd.Stderr = cmd.Stdout
 	output, err := cmd.Output()
 	if err != nil {

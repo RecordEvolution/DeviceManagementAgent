@@ -192,7 +192,7 @@ func TestPruneImageHandler(t *testing.T) {
 
 	t.Run("all=false prunes only dangling images", func(t *testing.T) {
 		cont := mocks.NewContainer(t)
-		cont.EXPECT().PruneDanglingImages().Return("", nil).Once()
+		cont.EXPECT().PruneDanglingImages(mock.Anything).Return("", nil).Once()
 
 		ex := &External{Container: cont, Privilege: priv(t, true)}
 
@@ -208,7 +208,7 @@ func TestPruneImageHandler(t *testing.T) {
 
 	t.Run("missing all key prunes only dangling images", func(t *testing.T) {
 		cont := mocks.NewContainer(t)
-		cont.EXPECT().PruneDanglingImages().Return("", nil).Once()
+		cont.EXPECT().PruneDanglingImages(mock.Anything).Return("", nil).Once()
 
 		ex := &External{Container: cont, Privilege: priv(t, true)}
 
@@ -239,7 +239,7 @@ func TestPruneImageHandler(t *testing.T) {
 
 	t.Run("propagates PruneDanglingImages error", func(t *testing.T) {
 		cont := mocks.NewContainer(t)
-		cont.EXPECT().PruneDanglingImages().Return("", errors.New("dangling boom")).Once()
+		cont.EXPECT().PruneDanglingImages(mock.Anything).Return("", errors.New("dangling boom")).Once()
 
 		ex := &External{Container: cont, Privilege: priv(t, true)}
 

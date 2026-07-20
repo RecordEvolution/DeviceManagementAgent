@@ -107,8 +107,10 @@ type Container interface {
 	Compose() *Compose
 	PruneSystem() (string, error)
 	PruneAllImages() (string, error)
-	PruneDanglingImages() (string, error)
-	PruneBuildCache() (string, error)
+	PruneDanglingImages(ctx context.Context) (string, error)
+	PruneBuildCache(ctx context.Context) (string, error)
+	ListDanglingVolumes(ctx context.Context) ([]VolumeResult, error)
+	RemoveVolume(ctx context.Context, name string) error
 	ListImages(ctx context.Context, options map[string]interface{}) ([]ImageResult, error)
 	ListContainers(ctx context.Context, options common.Dict) ([]ContainerResult, error)
 	WaitForDaemon(retryTimeout ...time.Duration) error

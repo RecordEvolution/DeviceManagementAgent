@@ -68,8 +68,8 @@ type fakeDocker struct {
 	removeErrs map[string]error
 }
 
-func (f *fakeDocker) PruneDanglingImages() (string, error) { return "", nil }
-func (f *fakeDocker) PruneBuildCache() (string, error)     { return "", nil }
+func (f *fakeDocker) PruneDanglingImages(ctx context.Context) (string, error) { return "", nil }
+func (f *fakeDocker) PruneBuildCache(ctx context.Context) (string, error)     { return "", nil }
 func (f *fakeDocker) ListDanglingVolumes(ctx context.Context) ([]container.VolumeResult, error) {
 	return f.volumes, f.listErr
 }

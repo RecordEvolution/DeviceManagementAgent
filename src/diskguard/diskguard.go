@@ -44,13 +44,25 @@ import (
 // Docker is the subset of the container layer the guard needs.
 // *container.Docker satisfies it.
 type Docker interface {
-	PruneDanglingImages() (string, error)
-	PruneBuildCache() (string, error)
+	PruneDanglingImages(ctx context.Context) (string, error)
+	PruneBuildCache(ctx context.Context) (string, error)
 	ListDanglingVolumes(ctx context.Context) ([]container.VolumeResult, error)
 	RemoveVolume(ctx context.Context, name string) error
 	ListContainers(ctx context.Context, options common.Dict) ([]container.ContainerResult, error)
 	StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error
 }
+
+// Every daemon touch is deadline-bounded: on a disk-full box the Docker daemon
+// itself is often wedged, and an unbounded call would hang the guard exactly
+// when it is needed most (observed live: a hanging prune kept a device
+// reporting healthy CONNECTED at ~300 MB free).
+const (
+	pruneTimeout    = 5 * time.Minute // image/build-cache prunes; slow disks take a while
+	dockerOpTimeout = 2 * time.Minute // list operations
+	removeTimeout   = 1 * time.Minute // per-volume remove
+	stopTimeout     = 30 * time.Second
+	cmdTimeout      = 2 * time.Minute // journalctl vacuum, apt-get clean
+)
 
 // emergency is the device-wide disk-emergency flag. It is read by the app state
 // machine (to fail RUNNING/BUILDING/DOWNLOADING transitions) and by the device
@@ -189,6 +201,14 @@ func (g *Guard) Run(ctx context.Context) {
 
 func (g *Guard) runOnce() {
 	free := g.freeBytes()
+	// Latch a critical reading BEFORE attempting any cleanup: the emergency
+	// flag (app-start gate + EMERGENCY heartbeat status) must never wait on
+	// cleanup steps, which all talk to a daemon that may be wedged. The steps
+	// are deadline-bounded too, but minutes of accumulated timeouts would
+	// still delay the report; the flag itself needs none of them.
+	if g.decide(free) == actEmergency {
+		g.updateEmergency(free)
+	}
 	if g.decide(free) != actNone {
 		log.Warn().Int64("free_mb", free>>20).Str("path", g.cfg.DataRoot).Msg("diskguard: low disk, running safe cleanup")
 		g.safeCleanup()
@@ -219,12 +239,20 @@ func (g *Guard) updateEmergency(free int64) {
 
 func (g *Guard) safeCleanup() {
 	if g.docker != nil {
-		if _, err := g.docker.PruneDanglingImages(); err != nil {
-			log.Error().Err(err).Msg("diskguard: prune dangling images failed")
-		}
-		if _, err := g.docker.PruneBuildCache(); err != nil {
-			log.Error().Err(err).Msg("diskguard: prune build cache failed")
-		}
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), pruneTimeout)
+			defer cancel()
+			if _, err := g.docker.PruneDanglingImages(ctx); err != nil {
+				log.Error().Err(err).Msg("diskguard: prune dangling images failed")
+			}
+		}()
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), pruneTimeout)
+			defer cancel()
+			if _, err := g.docker.PruneBuildCache(ctx); err != nil {
+				log.Error().Err(err).Msg("diskguard: prune build cache failed")
+			}
+		}()
 		g.pruneOrphanedVolumes()
 	}
 	g.run("journalctl", "--vacuum-size=100M")
@@ -257,7 +285,8 @@ func (g *Guard) safeCleanup() {
 // fresh ones, nothing ever re-attaches these. Named unlabeled volumes (user
 // `docker volume create`) and the appliance stack's project are never touched.
 func (g *Guard) pruneOrphanedVolumes() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), dockerOpTimeout)
+	defer cancel()
 	volumes, err := g.docker.ListDanglingVolumes(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("diskguard: list dangling volumes failed")
@@ -284,7 +313,7 @@ func (g *Guard) pruneOrphanedVolumes() {
 		project := v.Labels[composeProjectLabel]
 		if project == "" {
 			if len(v.Labels) == 0 && isAnonymousVolumeName(v.Name) {
-				g.removeVolume(ctx, v.Name, "anonymous, unreferenced")
+				g.removeVolume(v.Name, "anonymous, unreferenced")
 			}
 			continue
 		}
@@ -294,11 +323,13 @@ func (g *Guard) pruneOrphanedVolumes() {
 		if !g.hasAppDirForProject(project) {
 			continue
 		}
-		g.removeVolume(ctx, v.Name, "leaked by removed app "+project)
+		g.removeVolume(v.Name, "leaked by removed app "+project)
 	}
 }
 
-func (g *Guard) removeVolume(ctx context.Context, name string, reason string) {
+func (g *Guard) removeVolume(name string, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), removeTimeout)
+	defer cancel()
 	if err := g.docker.RemoveVolume(ctx, name); err != nil {
 		log.Error().Err(err).Str("volume", name).Msg("diskguard: failed to remove volume")
 	} else {
@@ -364,8 +395,9 @@ func (g *Guard) stopForeignContainers() {
 	if g.docker == nil {
 		return
 	}
-	ctx := context.Background()
-	containers, err := g.docker.ListContainers(ctx, common.Dict{})
+	listCtx, cancelList := context.WithTimeout(context.Background(), dockerOpTimeout)
+	containers, err := g.docker.ListContainers(listCtx, common.Dict{})
+	cancelList()
 	if err != nil {
 		log.Error().Err(err).Msg("diskguard: list containers failed")
 		return
@@ -381,7 +413,10 @@ func (g *Guard) stopForeignContainers() {
 		if len(c.Names) > 0 {
 			name = c.Names[0]
 		}
-		if err := g.docker.StopContainerByID(ctx, c.ID, 10*time.Second); err != nil {
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), stopTimeout)
+		err := g.docker.StopContainerByID(stopCtx, c.ID, 10*time.Second)
+		cancelStop()
+		if err != nil {
 			log.Error().Err(err).Str("container", name).Msg("diskguard: failed to stop container")
 		} else {
 			log.Warn().Str("container", name).Msg("diskguard: stopped non-platform container to halt disk growth")
@@ -415,7 +450,9 @@ func (g *Guard) truncateOversizedLogs() {
 }
 
 func (g *Guard) run(name string, args ...string) {
-	if err := exec.Command(name, args...).Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, name, args...).Run(); err != nil {
 		log.Warn().Err(err).Str("cmd", name).Msg("diskguard: command failed")
 	}
 }

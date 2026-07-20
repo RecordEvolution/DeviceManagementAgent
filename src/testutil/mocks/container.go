@@ -1194,6 +1194,68 @@ func (_c *Container_ListContainers_Call) RunAndReturn(run func(ctx context.Conte
 	return _c
 }
 
+// ListDanglingVolumes provides a mock function for the type Container
+func (_mock *Container) ListDanglingVolumes(ctx context.Context) ([]container.VolumeResult, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListDanglingVolumes")
+	}
+
+	var r0 []container.VolumeResult
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]container.VolumeResult, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []container.VolumeResult); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]container.VolumeResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Container_ListDanglingVolumes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListDanglingVolumes'
+type Container_ListDanglingVolumes_Call struct {
+	*mock.Call
+}
+
+// ListDanglingVolumes is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *Container_Expecter) ListDanglingVolumes(ctx any) *Container_ListDanglingVolumes_Call {
+	return &Container_ListDanglingVolumes_Call{Call: _e.mock.On("ListDanglingVolumes", ctx)}
+}
+
+func (_c *Container_ListDanglingVolumes_Call) Run(run func(ctx context.Context)) *Container_ListDanglingVolumes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *Container_ListDanglingVolumes_Call) Return(volumeResults []container.VolumeResult, err error) *Container_ListDanglingVolumes_Call {
+	_c.Call.Return(volumeResults, err)
+	return _c
+}
+
+func (_c *Container_ListDanglingVolumes_Call) RunAndReturn(run func(ctx context.Context) ([]container.VolumeResult, error)) *Container_ListDanglingVolumes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImages provides a mock function for the type Container
 func (_mock *Container) ListImages(ctx context.Context, options map[string]interface{}) ([]container.ImageResult, error) {
 	ret := _mock.Called(ctx, options)
@@ -1668,8 +1730,8 @@ func (_c *Container_PruneAllImages_Call) RunAndReturn(run func() (string, error)
 }
 
 // PruneBuildCache provides a mock function for the type Container
-func (_mock *Container) PruneBuildCache() (string, error) {
-	ret := _mock.Called()
+func (_mock *Container) PruneBuildCache(ctx context.Context) (string, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PruneBuildCache")
@@ -1677,16 +1739,16 @@ func (_mock *Container) PruneBuildCache() (string, error) {
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (string, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() string); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) string); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1699,13 +1761,20 @@ type Container_PruneBuildCache_Call struct {
 }
 
 // PruneBuildCache is a helper method to define mock.On call
-func (_e *Container_Expecter) PruneBuildCache() *Container_PruneBuildCache_Call {
-	return &Container_PruneBuildCache_Call{Call: _e.mock.On("PruneBuildCache")}
+//   - ctx context.Context
+func (_e *Container_Expecter) PruneBuildCache(ctx any) *Container_PruneBuildCache_Call {
+	return &Container_PruneBuildCache_Call{Call: _e.mock.On("PruneBuildCache", ctx)}
 }
 
-func (_c *Container_PruneBuildCache_Call) Run(run func()) *Container_PruneBuildCache_Call {
+func (_c *Container_PruneBuildCache_Call) Run(run func(ctx context.Context)) *Container_PruneBuildCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -1715,14 +1784,14 @@ func (_c *Container_PruneBuildCache_Call) Return(s string, err error) *Container
 	return _c
 }
 
-func (_c *Container_PruneBuildCache_Call) RunAndReturn(run func() (string, error)) *Container_PruneBuildCache_Call {
+func (_c *Container_PruneBuildCache_Call) RunAndReturn(run func(ctx context.Context) (string, error)) *Container_PruneBuildCache_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // PruneDanglingImages provides a mock function for the type Container
-func (_mock *Container) PruneDanglingImages() (string, error) {
-	ret := _mock.Called()
+func (_mock *Container) PruneDanglingImages(ctx context.Context) (string, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PruneDanglingImages")
@@ -1730,16 +1799,16 @@ func (_mock *Container) PruneDanglingImages() (string, error) {
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (string, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (string, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() string); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) string); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1752,13 +1821,20 @@ type Container_PruneDanglingImages_Call struct {
 }
 
 // PruneDanglingImages is a helper method to define mock.On call
-func (_e *Container_Expecter) PruneDanglingImages() *Container_PruneDanglingImages_Call {
-	return &Container_PruneDanglingImages_Call{Call: _e.mock.On("PruneDanglingImages")}
+//   - ctx context.Context
+func (_e *Container_Expecter) PruneDanglingImages(ctx any) *Container_PruneDanglingImages_Call {
+	return &Container_PruneDanglingImages_Call{Call: _e.mock.On("PruneDanglingImages", ctx)}
 }
 
-func (_c *Container_PruneDanglingImages_Call) Run(run func()) *Container_PruneDanglingImages_Call {
+func (_c *Container_PruneDanglingImages_Call) Run(run func(ctx context.Context)) *Container_PruneDanglingImages_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -1768,7 +1844,7 @@ func (_c *Container_PruneDanglingImages_Call) Return(s string, err error) *Conta
 	return _c
 }
 
-func (_c *Container_PruneDanglingImages_Call) RunAndReturn(run func() (string, error)) *Container_PruneDanglingImages_Call {
+func (_c *Container_PruneDanglingImages_Call) RunAndReturn(run func(ctx context.Context) (string, error)) *Container_PruneDanglingImages_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2348,6 +2424,63 @@ func (_c *Container_RemoveImagesByName_Call) Return(err error) *Container_Remove
 }
 
 func (_c *Container_RemoveImagesByName_Call) RunAndReturn(run func(ctx context.Context, imageName string, options map[string]interface{}) error) *Container_RemoveImagesByName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveVolume provides a mock function for the type Container
+func (_mock *Container) RemoveVolume(ctx context.Context, name string) error {
+	ret := _mock.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveVolume")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, name)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Container_RemoveVolume_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveVolume'
+type Container_RemoveVolume_Call struct {
+	*mock.Call
+}
+
+// RemoveVolume is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *Container_Expecter) RemoveVolume(ctx any, name any) *Container_RemoveVolume_Call {
+	return &Container_RemoveVolume_Call{Call: _e.mock.On("RemoveVolume", ctx, name)}
+}
+
+func (_c *Container_RemoveVolume_Call) Run(run func(ctx context.Context, name string)) *Container_RemoveVolume_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Container_RemoveVolume_Call) Return(err error) *Container_RemoveVolume_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Container_RemoveVolume_Call) RunAndReturn(run func(ctx context.Context, name string) error) *Container_RemoveVolume_Call {
 	_c.Call.Return(run)
 	return _c
 }

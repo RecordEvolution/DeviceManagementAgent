@@ -1071,7 +1071,6 @@ func (frpTm *FrpTunnelManager) SaveRemotePorts(payload common.TransitionPayload)
 		"swarm_key":  frpTm.config.ReswarmConfig.SwarmKey,
 		"stage":      payload.Stage,
 		"ports":      payload.Ports,
-		"foo":        "bar",
 	}}
 	log.Debug().Interface("update", update).Msg("Saving remote port with update payload")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
