@@ -138,13 +138,45 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 	log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
 	sm.Container.RemoveImageByName(removeImageByNameContext, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
 
-	// update the version of the local requested states
+	// The state validation will ensure it will reach it's requestedState again
+	return sm.persistPostUpdateRequestedState(payload, app)
+}
+
+// persistPostUpdateRequestedState records a completed update in the local
+// requested-state row: it collapses the version bookkeeping onto the freshly
+// installed version so the update gate does not re-fire, and it persists the
+// app's CURRENT target rather than the state this update was triggered with.
+//
+// The distinction is the fix for a stuck-in-PRESENT bug: an update is often
+// kicked off by switching the requested state to PRESENT, and the user may
+// switch it back to RUNNING while the image is still downloading. That later
+// change lands in app.RequestedState (and the row) via CreateOrUpdateApp, but
+// its RequestAppState is dropped because this transition holds the lock.
+// Writing the trigger's requested state here would clobber manually_requested_state
+// back to PRESENT, and VerifyState would then reconcile the app to PRESENT and
+// never return it to RUNNING. Persisting the live target instead lets VerifyState
+// drive it back to RUNNING.
+func (sm *StateMachine) persistPostUpdateRequestedState(payload common.TransitionPayload, app *common.App) error {
 	payload.NewestVersion = app.Version
 	payload.PresentVersion = app.Version
 	payload.Version = app.Version
 
-	// The state validation will ensure it will reach it's requestedState again
+	app.StateLock.Lock()
+	payload.RequestedState = app.RequestedState
+	app.StateLock.Unlock()
+
 	return sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
+}
+
+// composeUpdateErr classifies an error from a cancelable compose command. When
+// the update's context was canceled (a PRESENT request killed the CLI), the
+// underlying process error is reported as a canceled stream so RequestAppState
+// unwinds the transition as canceled rather than marking the app FAILED.
+func composeUpdateErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return errdefs.DockerStreamCanceled(err)
+	}
+	return err
 }
 
 func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *common.App) error {
@@ -172,6 +204,18 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
 	}
 
+	// Make the compose update cancelable. cancelUpdate (triggered by a PRESENT
+	// request while UPDATING) cancels this context, which kills the running
+	// `docker compose` pull/down so a hung command unwinds and releases the
+	// transition lock, instead of blocking on cmd.Wait() forever. The deferred
+	// cancel also frees the context on the normal (success/error) exit paths.
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.registerComposeUpdateCancel(payload.Stage, payload.AppKey, cancel)
+	defer func() {
+		sm.clearComposeUpdateCancel(payload.Stage, payload.AppKey)
+		cancel()
+	}()
+
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, true)
 	if err != nil {
 		return err
@@ -181,14 +225,14 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	// containers tagged with the same project name). Stop+Remove against the
 	// new file alone would leave behind containers for services that were
 	// renamed or dropped in the new compose. Volumes are preserved (no `-v`).
-	_, cmd, err := compose.DownRemoveOrphans(dockerComposePath)
+	_, cmd, err := compose.DownRemoveOrphansContext(ctx, dockerComposePath)
 	if err != nil {
-		return err
+		return composeUpdateErr(ctx, err)
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		return err
+		return composeUpdateErr(ctx, err)
 	}
 
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
@@ -211,19 +255,19 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
+	pullOutput, pullCmd, err := compose.PullContext(ctx, dockerComposePath)
 	if err != nil {
-		return err
+		return composeUpdateErr(ctx, err)
 	}
 
 	_, err = sm.LogManager.StreamLogsChannel(pullOutput, payload.ContainerName.Prod)
 	if err != nil {
-		return err
+		return composeUpdateErr(ctx, err)
 	}
 
 	err = pullCmd.Wait()
 	if err != nil {
-		return err
+		return composeUpdateErr(ctx, err)
 	}
 
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
@@ -246,12 +290,10 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 
 	// TODO: remove old images from docker-compose
 
-	// update the version of the local requested states
+	// Promote the new compose definition to the active one, then record the
+	// completed update (versions + the app's current target).
 	payload.DockerCompose = payload.NewDockerCompose
-	payload.NewestVersion = app.Version
-	payload.PresentVersion = app.Version
-	payload.Version = app.Version
 
 	// The state validation will ensure it will reach it's requestedState again
-	return sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
+	return sm.persistPostUpdateRequestedState(payload, app)
 }

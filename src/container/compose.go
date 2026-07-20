@@ -186,6 +186,13 @@ func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error)
 	return c.composeCommand(dockerComposePath, "pull")
 }
 
+// PullContext is Pull bound to a cancelable context: canceling ctx kills the
+// underlying `docker compose pull` process (see composeCommandContext), letting
+// an update abort a hung pull instead of blocking on cmd.Wait() forever.
+func (c *Compose) PullContext(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommandContext(ctx, dockerComposePath, "pull")
+}
+
 // PullIgnoreBuildable is for dev builds only, where images with a build section
 // were just built locally and must not be pulled. Deployed apps must keep using
 // Pull: their platform-rewritten compose files still contain build sections, but
@@ -307,6 +314,12 @@ func (c *Compose) Down(dockerComposePath string) (chan string, *exec.Cmd, error)
 // (no `-v`) so user data survives the update.
 func (c *Compose) DownRemoveOrphans(dockerComposePath string) (chan string, *exec.Cmd, error) {
 	return c.composeCommand(dockerComposePath, "down", "--remove-orphans")
+}
+
+// DownRemoveOrphansContext is DownRemoveOrphans bound to a cancelable context;
+// see PullContext.
+func (c *Compose) DownRemoveOrphansContext(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
+	return c.composeCommandContext(ctx, dockerComposePath, "down", "--remove-orphans")
 }
 
 func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {

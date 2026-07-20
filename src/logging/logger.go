@@ -6,6 +6,7 @@ import (
 	"os"
 	"reagent/common"
 	"reagent/config"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -20,12 +21,12 @@ func SetupLogger(cliArgs *config.CommandLineArguments) {
 		MaxBackups: 2,
 	}
 
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.TimeFieldFormat = time.RFC3339
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	var writer io.Writer
 	if cliArgs.PrettyLogging {
-		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
+		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
 		writer = io.MultiWriter(consoleWriter, rollingLogFile)
 	} else {
 		writer = rollingLogFile

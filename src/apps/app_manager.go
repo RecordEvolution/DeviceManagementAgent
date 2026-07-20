@@ -244,6 +244,26 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		return nil
 	}
 
+	// An update is genuinely in progress once the app is UPDATING: the update
+	// transition holds the lock for its whole duration. Refuse to pile new
+	// transitions onto it. A "keep going" request (RUNNING, BUILT, ...) would be
+	// dropped by the lock anyway and, worse, could re-drive the update in a loop
+	// via VerifyState's update recovery — so drop it. PRESENT (settle) and the
+	// teardown states (REMOVED, UNINSTALLED) are the escape hatches: they cancel
+	// the in-flight update first, which unwinds it and releases the lock, then run
+	// the requested terminal transition.
+	if curAppState == common.UPDATING {
+		switch payload.RequestedState {
+		case common.PRESENT, common.REMOVED, common.UNINSTALLED:
+			log.Info().Msgf("%s requested while updating %s (%s); canceling the in-flight update first", payload.RequestedState, app.AppName, app.Stage)
+			am.StateMachine.CancelTransition(app, payload)
+			return nil
+		default:
+			log.Info().Msgf("Update in progress for %s (%s); dropping request to %s", app.AppName, app.Stage, payload.RequestedState)
+			return nil
+		}
+	}
+
 	err = am.syncPortState(payload, app)
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("failed to sync port state")
@@ -642,8 +662,24 @@ func (am *AppManager) VerifyState(app *common.App) error {
 		return nil
 	}
 
-	if curAppState != requestedState {
-		log.Debug().Msgf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
+	// A pending update whose target state already matches the current state (e.g.
+	// an update requested while the app is RUNNING) would otherwise be missed:
+	// the state-equality check below never re-drives it, so a request dropped
+	// mid-transition (SecureTransition) is stranded until the next cloud push.
+	// Re-drive it here. The condition mirrors the InitTransition update gate, and
+	// it is self-terminating: a successful update collapses present==newest (so
+	// this is false next time), and a failed one lands in FAILED (returned above).
+	pendingUpdate := requestedStatePayload.RequestUpdate &&
+		requestedStatePayload.NewestVersion != requestedStatePayload.PresentVersion &&
+		requestedStatePayload.RequestedState != common.UNINSTALLED
+
+	if curAppState != requestedState || pendingUpdate {
+		if pendingUpdate && curAppState == requestedState {
+			log.Debug().Msgf("App (%s, %s) is in state %s but has a pending update (%s -> %s); re-driving...",
+				app.AppName, app.Stage, curAppState, requestedStatePayload.PresentVersion, requestedStatePayload.NewestVersion)
+		} else {
+			log.Debug().Msgf("App (%s, %s) is not in latest state (%s), transitioning to %s...", app.AppName, app.Stage, curAppState, requestedState)
+		}
 
 		// transition again
 		safe.Go(func() {

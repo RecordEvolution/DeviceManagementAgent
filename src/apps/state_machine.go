@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"context"
 	"fmt"
 	"reagent/common"
 	"reagent/container"
@@ -9,6 +10,7 @@ import (
 	"reagent/filesystem"
 	"reagent/logging"
 	"reagent/safe"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 )
@@ -21,17 +23,60 @@ type StateMachine struct {
 	Container     container.Container
 	LogManager    *logging.LogManager
 	appStates     []*common.App
+
+	// composeUpdateCancels holds the cancel func of each in-flight compose
+	// update, keyed by app. A PRESENT request during an update calls it (via
+	// cancelUpdate) to kill the `docker compose` CLI so a hung pull/down unwinds
+	// and releases the transition lock, instead of blocking on cmd.Wait() forever.
+	composeUpdateCancels     map[string]context.CancelFunc
+	composeUpdateCancelMutex sync.Mutex
 }
 
 func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, filesystem *filesystem.Filesystem) StateMachine {
 	appStates := make([]*common.App, 0)
 	return StateMachine{
-		StateObserver: observer,
-		Container:     container,
-		LogManager:    logManager,
-		Filesystem:    filesystem,
-		appStates:     appStates,
+		StateObserver:        observer,
+		Container:            container,
+		LogManager:           logManager,
+		Filesystem:           filesystem,
+		appStates:            appStates,
+		composeUpdateCancels: make(map[string]context.CancelFunc),
 	}
+}
+
+func composeUpdateKey(stage common.Stage, appKey uint64) string {
+	return fmt.Sprintf("%s_%d", stage, appKey)
+}
+
+// registerComposeUpdateCancel records the cancel func of an in-flight compose
+// update so cancelUpdate can reach it.
+func (sm *StateMachine) registerComposeUpdateCancel(stage common.Stage, appKey uint64, cancel context.CancelFunc) {
+	key := composeUpdateKey(stage, appKey)
+	sm.composeUpdateCancelMutex.Lock()
+	sm.composeUpdateCancels[key] = cancel
+	sm.composeUpdateCancelMutex.Unlock()
+}
+
+// clearComposeUpdateCancel drops the cancel func once the update has unwound.
+func (sm *StateMachine) clearComposeUpdateCancel(stage common.Stage, appKey uint64) {
+	key := composeUpdateKey(stage, appKey)
+	sm.composeUpdateCancelMutex.Lock()
+	delete(sm.composeUpdateCancels, key)
+	sm.composeUpdateCancelMutex.Unlock()
+}
+
+// cancelComposeUpdate cancels the context of an in-flight compose update for the
+// app, killing the docker compose CLI. Returns true if one was in flight.
+func (sm *StateMachine) cancelComposeUpdate(stage common.Stage, appKey uint64) bool {
+	key := composeUpdateKey(stage, appKey)
+	sm.composeUpdateCancelMutex.Lock()
+	cancel := sm.composeUpdateCancels[key]
+	sm.composeUpdateCancelMutex.Unlock()
+	if cancel != nil {
+		cancel()
+		return true
+	}
+	return false
 }
 
 func (sm *StateMachine) noActionTransitionFunc(TransitionPayload common.TransitionPayload, app *common.App) error {
@@ -139,7 +184,7 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 		common.UPDATING: {
 			common.PRESENT:     sm.cancelUpdate,
 			common.REMOVED:     sm.cancelUpdateAndRemove,
-			common.UNINSTALLED: sm.uninstallApp,
+			common.UNINSTALLED: sm.cancelUpdateAndUninstall,
 			common.RUNNING:     nil,
 		},
 		common.DELETING: {
