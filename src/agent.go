@@ -308,7 +308,23 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		}
 		cancelInfo()
 		guard := diskguard.New(container, diskguard.Config{
-			DataRoot: dataRoot,
+			DataRoot:       dataRoot,
+			AppsComposeDir: cliArgs.AppsComposeDir,
+			AppsBuildDir:   cliArgs.AppsBuildDir,
+			// Volumes of every locally known app (stopped included) are
+			// protected from the volume pruning; an error keeps the guard away
+			// from compose volumes entirely.
+			InstalledAppNames: func() ([]string, error) {
+				payloads, err := appStore.GetRequestedStates()
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(payloads))
+				for _, p := range payloads {
+					names = append(names, p.AppName)
+				}
+				return names, nil
+			},
 			// On recovery, reinstate the apps' requested states (which were
 			// stopped/blocked during the emergency).
 			OnRecover: func() {

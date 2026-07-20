@@ -6,9 +6,9 @@
 //     unbounded log sinks that most often fill a device — Docker container logs
 //     (daemon.json log-opts) and the systemd journal.
 //   - Run: a periodic loop that, below a warn threshold, reclaims space safely
-//     (prune dangling images + build cache, vacuum journald, apt clean, truncate
-//     runaway container logs); and below a critical threshold, enters a
-//     device-wide EMERGENCY state.
+//     (prune dangling images + build cache + certainly-unused volumes, vacuum
+//     journald, apt clean, truncate runaway container logs); and below a
+//     critical threshold, enters a device-wide EMERGENCY state.
 //   - The EMERGENCY state (IsEmergency) is exported so the rest of the agent can
 //     react: it is reported to the cloud in the device status, and the app state
 //     machine fails any transition to RUNNING/BUILDING/DOWNLOADING so apps can't
@@ -17,9 +17,12 @@
 //     ironflock-appliance compose stack, halting current disk growth without
 //     touching that stack (which carries remote reachability).
 //
-// SAFE: it never removes tagged or in-use images (offline devices can't re-pull)
-// and never touches volumes (app data). App containers are ephemeral — their
-// state lives in volumes — so stopping them is non-destructive.
+// SAFE: it never removes tagged or in-use images (offline devices can't re-pull).
+// Volumes are only removed when they are positively known to be unused (see
+// pruneOrphanedVolumes); anything attributable to an installed app — stopped or
+// running — or not attributable at all is left alone. App containers are
+// ephemeral — their state lives in volumes/bind mounts — so stopping them is
+// non-destructive.
 package diskguard
 
 import (
@@ -31,6 +34,7 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/safe"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +46,8 @@ import (
 type Docker interface {
 	PruneDanglingImages() (string, error)
 	PruneBuildCache() (string, error)
+	ListDanglingVolumes(ctx context.Context) ([]container.VolumeResult, error)
+	RemoveVolume(ctx context.Context, name string) error
 	ListContainers(ctx context.Context, options common.Dict) ([]container.ContainerResult, error)
 	StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error
 }
@@ -88,6 +94,17 @@ type Config struct {
 	WarnFreeBytes      int64         // run safe cleanup below this; also clears EMERGENCY at/above it (default 3 GiB)
 	EmergencyFreeBytes int64         // enter EMERGENCY below this (default 1 GiB)
 	LogMaxBytes        int64         // truncate container logs larger than this (default 50 MiB)
+	// AppsComposeDir/AppsBuildDir are the roots holding one directory per
+	// compose app (PROD/DEV respectively). A dangling compose volume is only
+	// attributed to the agent — and thus deletable when its app is gone — if a
+	// directory matching its project name exists under one of these.
+	AppsComposeDir string
+	AppsBuildDir   string
+	// InstalledAppNames returns the names of ALL locally known apps (stopped
+	// ones included); their compose volumes are never removed. An error means
+	// the installed set is unknown — compose volumes are then not touched at
+	// all rather than treated as orphaned.
+	InstalledAppNames func() ([]string, error)
 	// OnRecover is called once when the device leaves EMERGENCY, to reinstate the
 	// apps' previous requested states (which were stopped/blocked during it).
 	OnRecover func()
@@ -208,12 +225,134 @@ func (g *Guard) safeCleanup() {
 		if _, err := g.docker.PruneBuildCache(); err != nil {
 			log.Error().Err(err).Msg("diskguard: prune build cache failed")
 		}
+		g.pruneOrphanedVolumes()
 	}
 	g.run("journalctl", "--vacuum-size=100M")
 	if _, err := exec.LookPath("apt-get"); err == nil {
 		g.run("apt-get", "clean")
 	}
 	g.truncateOversizedLogs()
+}
+
+// pruneOrphanedVolumes removes volumes that are positively known to be unused.
+// Knowing that takes three facts, because "dangling" alone is not enough — a
+// stopped compose app has no containers (compose `down` removes them) yet its
+// named volumes hold app data it needs on the next start:
+//
+//  1. Docker's dangling filter: no container — running or stopped — references
+//     the volume.
+//  2. The agent's local app database lists every installed app, stopped ones
+//     included; a compose volume is owned by the app whose normalized name is
+//     in its com.docker.compose.project label, so any volume of a listed app
+//     is kept.
+//  3. Attribution: a dangling compose volume of a NOT-listed project is only
+//     deleted when the agent can prove the project was its own: uninstall runs
+//     `compose down -v` BEFORE removing the app's compose directory, so an
+//     interrupted teardown always leaves that directory behind. A project with
+//     no such directory may be someone else's (a user compose stack on an
+//     appliance host) and is left alone.
+//
+// Anonymous volumes (unlabeled 64-hex names, auto-created by Dockerfile VOLUME
+// directives) are certainly unused once dangling: a recreated container gets
+// fresh ones, nothing ever re-attaches these. Named unlabeled volumes (user
+// `docker volume create`) and the appliance stack's project are never touched.
+func (g *Guard) pruneOrphanedVolumes() {
+	ctx := context.Background()
+	volumes, err := g.docker.ListDanglingVolumes(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("diskguard: list dangling volumes failed")
+		return
+	}
+	if len(volumes) == 0 {
+		return
+	}
+
+	installed := map[string]bool{}
+	installedKnown := false
+	if g.cfg.InstalledAppNames != nil {
+		if names, err := g.cfg.InstalledAppNames(); err != nil {
+			log.Error().Err(err).Msg("diskguard: cannot read installed apps; leaving compose volumes alone")
+		} else {
+			installedKnown = true
+			for _, n := range names {
+				installed[normalizeProjectName(n)] = true
+			}
+		}
+	}
+
+	for _, v := range volumes {
+		project := v.Labels[composeProjectLabel]
+		if project == "" {
+			if len(v.Labels) == 0 && isAnonymousVolumeName(v.Name) {
+				g.removeVolume(ctx, v.Name, "anonymous, unreferenced")
+			}
+			continue
+		}
+		if project == applianceComposeProject || !installedKnown || installed[project] {
+			continue
+		}
+		if !g.hasAppDirForProject(project) {
+			continue
+		}
+		g.removeVolume(ctx, v.Name, "leaked by removed app "+project)
+	}
+}
+
+func (g *Guard) removeVolume(ctx context.Context, name string, reason string) {
+	if err := g.docker.RemoveVolume(ctx, name); err != nil {
+		log.Error().Err(err).Str("volume", name).Msg("diskguard: failed to remove volume")
+	} else {
+		log.Info().Str("volume", name).Str("reason", reason).Msg("diskguard: removed unused volume")
+	}
+}
+
+// hasAppDirForProject reports whether a per-app directory matching the compose
+// project name exists under the agent's compose or build roots. Compose derives
+// a project name by normalizing the compose file's directory name, so the same
+// normalization is applied to each candidate directory before comparing.
+func (g *Guard) hasAppDirForProject(project string) bool {
+	for _, root := range []string{g.cfg.AppsComposeDir, g.cfg.AppsBuildDir} {
+		if root == "" {
+			continue
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() && normalizeProjectName(e.Name()) == project {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeProjectName mirrors how docker compose derives a default project
+// name from a directory name: lowercase, drop characters outside [a-z0-9_-],
+// and trim leading separators.
+func normalizeProjectName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimLeft(b.String(), "_-")
+}
+
+// isAnonymousVolumeName reports whether name looks like a Docker-generated
+// anonymous volume ID (64 hex characters).
+func isAnonymousVolumeName(name string) bool {
+	if len(name) != 64 {
+		return false
+	}
+	for _, r := range name {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // stopForeignContainers stops every running container that is NOT part of the

@@ -27,6 +27,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/rs/zerolog/log"
 )
@@ -361,6 +362,40 @@ func (docker *Docker) PruneDanglingImages() (string, error) {
 	}
 
 	return string(output), nil
+}
+
+// VolumeResult is the subset of a Docker volume the callers need to decide
+// whether it is safe to remove.
+type VolumeResult struct {
+	Name   string
+	Labels map[string]string
+}
+
+// ListDanglingVolumes lists volumes not referenced by ANY container, running
+// or stopped.
+func (docker *Docker) ListDanglingVolumes(ctx context.Context) ([]VolumeResult, error) {
+	args := filters.NewArgs()
+	args.Add("dangling", "true")
+
+	resp, err := docker.client.VolumeList(ctx, volume.ListOptions{Filters: args})
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]VolumeResult, 0, len(resp.Volumes))
+	for _, v := range resp.Volumes {
+		if v == nil {
+			continue
+		}
+		results = append(results, VolumeResult{Name: v.Name, Labels: v.Labels})
+	}
+	return results, nil
+}
+
+// RemoveVolume removes a volume by name. Not forced: a volume a container
+// attached to since it was listed errors instead of being deleted.
+func (docker *Docker) RemoveVolume(ctx context.Context, name string) error {
+	return docker.client.VolumeRemove(ctx, name, false)
 }
 
 // PruneBuildCache removes the dangling build cache (docker builder prune).
