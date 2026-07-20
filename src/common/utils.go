@@ -28,6 +28,22 @@ func BuildComposeContainerName(stage Stage, appKey uint64, appName string) strin
 	return strings.ToLower(fmt.Sprintf("%s_%d_%s_compose", stage, appKey, appName))
 }
 
+// NormalizeComposeProjectName mirrors how docker compose derives a default
+// project name from a directory name: lowercase, drop characters outside
+// [a-z0-9_-], and trim leading separators. The agent runs compose without -p,
+// so the project name (and the com.docker.compose.project label on every
+// container/volume of the app) is the normalized compose directory name,
+// which BuildComposeContainerName provides.
+func NormalizeComposeProjectName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimLeft(b.String(), "_-")
+}
+
 func BuildImageName(stage Stage, arch string, appKey uint64, appName string) string {
 	return strings.ToLower(fmt.Sprintf("%s_%s_%d_%s", stage, arch, appKey, appName))
 }

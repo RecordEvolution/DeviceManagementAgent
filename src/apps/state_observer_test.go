@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -245,19 +246,45 @@ func TestObserverAddObserver(t *testing.T) {
 	})
 }
 
-func TestObserverRemoveObserver(t *testing.T) {
-	t.Run("returns false when no observer is registered", func(t *testing.T) {
+func TestObserverRemoveOwnObserver(t *testing.T) {
+	t.Run("no-op when no observer is registered", func(t *testing.T) {
 		so, _, _, _ := newObserverHarness(t)
 
-		removed := so.removeObserver(common.PROD, 1, "missing")
-		assert.False(t, removed)
+		so.removeOwnObserver("prod_1_missing", context.Background())
+		assert.Empty(t, so.activeObservers)
 	})
 
-	t.Run("compose remove returns false when none registered", func(t *testing.T) {
+	t.Run("removes and cancels its own entry", func(t *testing.T) {
 		so, _, _, _ := newObserverHarness(t)
 
-		removed := so.removeComposeObserver(common.DEV, 3, "missing-compose")
-		assert.False(t, removed)
+		ownerCtx, cancel := context.WithCancel(context.Background())
+		so.activeObservers["prod_1_mine"] = &AppStateObserver{
+			AppKey: 1, AppName: "mine", Stage: common.PROD,
+			cancel: cancel, ctx: ownerCtx,
+		}
+
+		so.removeOwnObserver("prod_1_mine", ownerCtx)
+		assert.Empty(t, so.activeObservers)
+		assert.Error(t, ownerCtx.Err(), "own context must be cancelled on removal")
+	})
+
+	t.Run("leaves a replacement observer alone", func(t *testing.T) {
+		so, _, _, _ := newObserverHarness(t)
+
+		// A dying goroutine (old ctx) must not tear down the fresh observer
+		// the event spawner registered under the same name.
+		oldCtx, oldCancel := context.WithCancel(context.Background())
+		oldCancel()
+		newCtx, newCancel := context.WithCancel(context.Background())
+		defer newCancel()
+		so.activeObservers["prod_1_app"] = &AppStateObserver{
+			AppKey: 1, AppName: "app", Stage: common.PROD,
+			cancel: newCancel, ctx: newCtx,
+		}
+
+		so.removeOwnObserver("prod_1_app", oldCtx)
+		assert.NotEmpty(t, so.activeObservers, "replacement observer must survive")
+		assert.NoError(t, newCtx.Err(), "replacement observer must not be cancelled")
 	})
 }
 

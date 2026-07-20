@@ -34,7 +34,6 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/safe"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -359,17 +358,10 @@ func (g *Guard) hasAppDirForProject(project string) bool {
 	return false
 }
 
-// normalizeProjectName mirrors how docker compose derives a default project
-// name from a directory name: lowercase, drop characters outside [a-z0-9_-],
-// and trim leading separators.
+// normalizeProjectName is the compose default-project-name derivation, shared
+// with the state observer's label-based container lookups.
 func normalizeProjectName(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimLeft(b.String(), "_-")
+	return common.NormalizeComposeProjectName(name)
 }
 
 // isAnonymousVolumeName reports whether name looks like a Docker-generated

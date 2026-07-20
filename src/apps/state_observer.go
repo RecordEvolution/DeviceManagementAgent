@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +24,30 @@ type AppStateObserver struct {
 	AppKey  uint64
 	AppName string
 	errChan chan error
+	// cancel stops the observer's polling goroutine. Removing an observer
+	// only from the map used to leave its goroutine polling forever (the
+	// container events spawner then added a fresh one on the next start
+	// event, one leaked poller per restart cycle — observed as dozens of
+	// concurrent docker CLI spawns pinning dockerd on small devices).
+	cancel context.CancelFunc
+	// ctx identifies the goroutine this map entry belongs to, so a dying
+	// observer's deferred cleanup can prove it still owns the entry and
+	// never tears down a replacement registered under the same name.
+	ctx context.Context
+}
+
+// removeOwnObserver is the observers' deferred self-cleanup: it removes the
+// map entry only when it still belongs to the calling goroutine (ownerCtx).
+// The event spawner may have already replaced the entry with a fresh
+// observer — that replacement must survive.
+func (so *StateObserver) removeOwnObserver(mapKey string, ownerCtx context.Context) {
+	so.observerMapMutex.Lock()
+	observer := so.activeObservers[mapKey]
+	if observer != nil && observer.ctx == ownerCtx {
+		observer.cancel()
+		delete(so.activeObservers, mapKey)
+	}
+	so.observerMapMutex.Unlock()
 }
 
 type StateObserver struct {
@@ -120,58 +145,20 @@ func (so *StateObserver) Notify(app *common.App, achievedState common.AppState) 
 	return so.NotifyRemote(app, achievedState)
 }
 
-func (so *StateObserver) removeObserver(stage common.Stage, appKey uint64, appName string) bool {
-	containerName := common.BuildContainerName(stage, appKey, appName)
-	so.observerMapMutex.Lock()
-	observer := so.activeObservers[containerName]
-
-	deletedObserver := false
-	if observer != nil {
-		close(observer.errChan)
-		delete(so.activeObservers, containerName)
-		deletedObserver = true
-
-		log.Debug().Msgf("removed an observer for %s (%s)", appName, stage)
-	}
-	so.observerMapMutex.Unlock()
-
-	return deletedObserver
-}
-
-func (so *StateObserver) removeComposeObserver(stage common.Stage, appKey uint64, appName string) bool {
-	composeAppName := common.BuildComposeContainerName(stage, appKey, appName)
-	so.observerMapMutex.Lock()
-	observer := so.activeObservers[composeAppName]
-
-	deletedObserver := false
-	if observer != nil {
-		close(observer.errChan)
-		delete(so.activeObservers, composeAppName)
-		deletedObserver = true
-		log.Debug().Msgf("removed a compose observer for %s (%s)", appName, stage)
-	}
-	so.observerMapMutex.Unlock()
-
-	return deletedObserver
-}
-
 func (so *StateObserver) addComposeObserver(stage common.Stage, appKey uint64, appName string) (bool, error) {
 	composeName := common.BuildComposeContainerName(stage, appKey, appName)
-	compose := so.Container.Compose()
-	composeEntryList, err := compose.List()
+
+	// Existence check straight against the Docker API (compose labels its
+	// containers with the project name) instead of shelling out a
+	// `docker compose ls` — this runs on every container start event.
+	listCtx, listCancel := context.WithTimeout(context.Background(), time.Second*30)
+	containers, err := so.listComposeProjectContainers(listCtx, composeName)
+	listCancel()
 	if err != nil {
 		return false, err
 	}
 
-	var foundComposeEntry *container.ComposeListEntry
-	for _, composeEntry := range composeEntryList {
-		if composeEntry.Name == composeName {
-			foundComposeEntry = &composeEntry
-			break
-		}
-	}
-
-	if foundComposeEntry == nil {
+	if len(containers) == 0 {
 		log.Debug().Msgf("No compose was found for %s, not creating an observer...", composeName)
 		return false, nil
 	}
@@ -179,12 +166,15 @@ func (so *StateObserver) addComposeObserver(stage common.Stage, appKey uint64, a
 	createdObserver := false
 	so.observerMapMutex.Lock()
 	if so.activeObservers[composeName] == nil {
-		errC := so.observeComposeAppState(stage, appKey, appName)
+		ctx, cancel := context.WithCancel(context.Background())
+		errC := so.observeComposeAppState(ctx, stage, appKey, appName)
 		so.activeObservers[composeName] = &AppStateObserver{
 			AppKey:  appKey,
 			AppName: appName,
 			Stage:   stage,
 			errChan: errC,
+			cancel:  cancel,
+			ctx:     ctx,
 		}
 		createdObserver = true
 
@@ -212,12 +202,15 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	createdObserver := false
 	so.observerMapMutex.Lock()
 	if so.activeObservers[containerName] == nil {
-		errC := so.observeAppState(stage, appKey, appName)
+		observerCtx, cancel := context.WithCancel(context.Background())
+		errC := so.observeAppState(observerCtx, stage, appKey, appName)
 		so.activeObservers[containerName] = &AppStateObserver{
 			AppKey:  appKey,
 			AppName: appName,
 			Stage:   stage,
 			errChan: errC,
+			cancel:  cancel,
+			ctx:     observerCtx,
 		}
 		createdObserver = true
 		log.Debug().Msgf("created an observer for %s (%s)", appName, stage)
@@ -320,16 +313,15 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 		return nil
 	}
 
-	containerStatuses, err := compose.Status(foundComposeEntry.ConfigFiles)
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), time.Second*30)
+	containers, err := so.listComposeProjectContainers(statusCtx, composeName)
+	cancelStatus()
 	if err != nil {
-		log.Error().Err(err).Msgf("Failed to get container status for compose app with config %s", foundComposeEntry.ConfigFiles)
+		log.Error().Err(err).Msgf("Failed to get container status for compose app %s", composeName)
 		return err
 	}
 
-	latestAppState, err := so.aggregateStatuses(containerStatuses)
-	if err != nil {
-		return err
-	}
+	latestAppState := aggregateContainerResults(containers)
 
 	app.StateLock.Lock()
 	currentAppState := app.CurrentState
@@ -542,7 +534,18 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 	return nil
 }
 
-func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appName string) chan error {
+// sleepCtx sleeps for d or until ctx is cancelled; it reports whether the
+// caller should continue (false = cancelled, stop observing).
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
+func (so *StateObserver) observeAppState(observerCtx context.Context, stage common.Stage, appKey uint64, appName string) chan error {
 	errorC := make(chan error, 1)
 	pollingRate := time.Second * 1
 
@@ -550,11 +553,15 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 		lastKnownStatus := "UKNOWN"
 
 		defer func() {
-			so.removeObserver(stage, appKey, appName)
+			so.removeOwnObserver(common.BuildContainerName(stage, appKey, appName), observerCtx)
 		}()
 
 		for {
-			ctx := context.Background()
+			if observerCtx.Err() != nil {
+				return
+			}
+
+			ctx := observerCtx
 			containerName := common.BuildContainerName(stage, appKey, appName)
 
 			state, err := so.Container.GetContainerState(ctx, containerName)
@@ -588,7 +595,9 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			// always executed the state check on init
 			if lastKnownStatus == state.Status {
 				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
-				time.Sleep(pollingRate)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
 				continue
 			}
 
@@ -620,7 +629,9 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			alreadyTransitioning := app.SecureTransition()
 			if alreadyTransitioning {
 				log.Debug().Msg("State observer: app is already transitioning, waiting for transition to finish...")
-				time.Sleep(pollingRate)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
 				continue
 			} else {
 				app.UnlockTransition()
@@ -669,100 +680,96 @@ func (so *StateObserver) observeAppState(stage common.Stage, appKey uint64, appN
 			// update the last recorded status
 			lastKnownStatus = state.Status
 
-			time.Sleep(pollingRate)
+			if !sleepCtx(observerCtx, pollingRate) {
+				return
+			}
 		}
 	})
 
 	return errorC
 }
 
-func (so *StateObserver) aggregateStatuses(containerStatuses []container.ComposeStatus) (common.AppState, error) {
-	notRunningContainers := make([]string, 0)
-	for _, status := range containerStatuses {
-		// If one container is running, we say that it is running
-		if status.State == "running" {
-			return common.RUNNING, nil
-		} else {
-			notRunningContainers = append(notRunningContainers, status.Name)
-		}
-	}
+// listComposeProjectContainers returns every container (running or not) of a
+// compose app in one Docker API call, via the project label docker compose
+// stamps on all containers it creates. Replaces the former
+// `docker compose ls` + `docker compose ps` CLI spawns: each of those cost
+// two OS processes (docker CLI + compose plugin) and a full container
+// enumeration in dockerd — polled every second per app, that alone pinned
+// dockerd/containerd on small devices.
+func (so *StateObserver) listComposeProjectContainers(ctx context.Context, composeAppName string) ([]container.ContainerResult, error) {
+	project := common.NormalizeComposeProjectName(composeAppName)
+	return so.Container.ListContainers(ctx, common.Dict{
+		"all":     true,
+		"filters": filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
+	})
+}
 
+// aggregateContainerResults derives one app state from a compose project's
+// containers: RUNNING when any container runs; otherwise FAILED when any
+// exited non-zero; otherwise PRESENT. ListContainers already carries the
+// exit code, so no per-container inspect calls are needed.
+func aggregateContainerResults(containers []container.ContainerResult) common.AppState {
 	aggregatedState := common.PRESENT
-	for _, notRunningContainer := range notRunningContainers {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		state, err := so.Container.GetContainerState(ctx, notRunningContainer)
-		if err != nil {
-			cancel()
-			return "", err
+	for _, cont := range containers {
+		if cont.State == "running" {
+			return common.RUNNING
 		}
 
-		cancel()
-
-		if state.Status == "exited" && state.ExitCode > 0 {
+		if cont.State == "exited" && cont.ExitCode > 0 {
 			aggregatedState = common.FAILED
 		}
 	}
 
-	return aggregatedState, nil
+	return aggregatedState
 }
 
-func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint64, appName string) chan error {
+func (so *StateObserver) observeComposeAppState(observerCtx context.Context, stage common.Stage, appKey uint64, appName string) chan error {
 	errorC := make(chan error, 1)
+	// Same cadence as the plain-container observers. A tick is one
+	// label-filtered ListContainers API call served from dockerd's in-memory
+	// store — cheap enough for 1s. (The old implementation shelled out
+	// `docker compose ls` + `docker compose ps` per tick — four OS processes
+	// per app per second, which pinned dockerd on small devices; never poll
+	// via the compose CLI here again.)
 	pollingRate := time.Second * 1
 
 	safe.Go(func() {
 		var lastKnownStatus common.AppState
+		composeAppName := common.BuildComposeContainerName(stage, appKey, appName)
 
 		defer func() {
-			so.removeComposeObserver(stage, appKey, appName)
+			so.removeOwnObserver(composeAppName, observerCtx)
 		}()
 
 		for {
-			composeAppName := common.BuildComposeContainerName(stage, appKey, appName)
-			compose := so.Container.Compose()
-			composeEntryList, err := compose.List()
-			if err != nil {
+			if observerCtx.Err() != nil {
 				return
 			}
 
-			var foundComposeEntry *container.ComposeListEntry
-			for _, composeEntry := range composeEntryList {
-				if composeEntry.Name == composeAppName {
-					foundComposeEntry = &composeEntry
-					break
+			listCtx, cancelList := context.WithTimeout(observerCtx, time.Second*30)
+			containers, err := so.listComposeProjectContainers(listCtx, composeAppName)
+			cancelList()
+			if err != nil {
+				if observerCtx.Err() != nil {
+					return
 				}
+
+				// Transient daemon errors must not hot-loop: the old CLI
+				// variant re-spawned processes back-to-back on this path.
+				log.Error().Err(err).Msgf("Failed to list containers for compose app %s", composeAppName)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
+				continue
 			}
 
-			if foundComposeEntry == nil {
-				app, err := so.AppStore.GetApp(appKey, stage)
-				if err != nil {
-					log.Error().Err(err).Msg("failed to get app")
-					return
-				}
-
-				if app == nil {
-					return
-				}
-
-				// TODO: check if this actually makes sense, what if it's being deleted?
-				// app.StateLock.Lock()
-				// app.CurrentState = common.PRESENT
-				// app.StateLock.Unlock()
-
-				// log.Debug().Msgf("No container was found for compose app %s, removing observer..", composeAppName)
+			if len(containers) == 0 {
+				// Project has no containers anymore (torn down or removed);
+				// the events spawner recreates an observer when they return.
 				return
 			}
 
-			containerStatuses, err := compose.Status(foundComposeEntry.ConfigFiles)
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to get container status for compose app with config %s", foundComposeEntry.ConfigFiles)
-				continue
-			}
-
-			latestAppState, err := so.aggregateStatuses(containerStatuses)
-			if err != nil {
-				continue
-			}
+			latestAppState := aggregateContainerResults(containers)
 
 			app, err := so.AppStore.GetApp(appKey, stage)
 			if err != nil {
@@ -783,7 +790,9 @@ func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint6
 			alreadyTransitioning := app.SecureTransition()
 			if alreadyTransitioning {
 				log.Debug().Msg("State observer: compose app is already transitioning, waiting for transition to finish...")
-				time.Sleep(pollingRate)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
 				continue
 			} else {
 				app.UnlockTransition()
@@ -793,7 +802,9 @@ func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint6
 			// always executed the state check on init
 			if lastKnownStatus == latestAppState && latestAppState == curAppState {
 				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
-				time.Sleep(pollingRate)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
 				continue
 			}
 
@@ -835,7 +846,9 @@ func (so *StateObserver) observeComposeAppState(stage common.Stage, appKey uint6
 			// update the last recorded status
 			lastKnownStatus = latestAppState
 
-			time.Sleep(pollingRate)
+			if !sleepCtx(observerCtx, pollingRate) {
+				return
+			}
 		}
 	})
 
@@ -856,37 +869,15 @@ func (so *StateObserver) initObserverSpawner() chan error {
 			select {
 			case event := <-messageC:
 				switch event.Action {
-				case "die", "kill", "destroy":
-					containerName := event.Actor.Attributes["name"]
-					match := ContainerNameRegexExp.FindStringSubmatch(containerName)
-					matchCompose := ComposeContainerNameRegexExp.FindStringSubmatch(containerName)
-
-					if len(matchCompose) != 0 {
-
-						// Compose container looks as follows:
-						// dev_1336_markopetzoldomaewamoushindeiru_compose-web-1
-						// dev_1336_markopetzoldomaewamoushindeiru_compose-db-1
-						// We only need the first part to identify the compose
-						composeContainerName := strings.Split(containerName, "-")[0]
-						stage, key, name, err := common.ParseComposeContainerName(composeContainerName)
-						if err != nil {
-							continue
-						}
-
-						so.removeComposeObserver(stage, key, name)
-
-						continue
-					}
-
-					if len(match) != 0 {
-						stage, key, name, err := common.ParseContainerName(containerName)
-						if err != nil {
-							continue
-						}
-
-						so.removeObserver(stage, key, name)
-					}
-
+				// die/kill/destroy events used to tear the observer down here.
+				// That is redundant — observers self-terminate once the
+				// container (or the compose project's last container) is gone,
+				// and a stopped-but-existing container must STAY observed so
+				// its FAILED/exited state is still noticed and reported. Worse,
+				// on every service restart the remove+re-add pair leaked the
+				// old polling goroutine (remove never stopped it), stacking up
+				// concurrent pollers until dockerd was pinned. Only create /
+				// start events matter to the spawner.
 				case "create", "start":
 					containerName := event.Actor.Attributes["name"]
 					match := ContainerNameRegexExp.FindStringSubmatch(containerName)
@@ -935,12 +926,6 @@ func (so *StateObserver) ObserveAppStates() error {
 		return err
 	}
 
-	compose := so.Container.Compose()
-	composeListEntry, err := compose.List()
-	if err != nil {
-		return err
-	}
-
 	for _, app := range apps {
 		// Only create observers for apps that should have containers running
 		// Skip apps in REMOVED, UNINSTALLED, FAILED, BUILT, PUBLISHED states
@@ -959,17 +944,11 @@ func (so *StateObserver) ObserveAppStates() error {
 		createdObserver := so.addObserver(app.Stage, app.AppKey, app.AppName)
 
 		if !createdObserver {
-			var composeApp *container.ComposeListEntry
-			composeAppName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
-			for _, composeEntry := range composeListEntry {
-				if composeEntry.Name == composeAppName {
-					composeApp = &composeEntry
-					break
-				}
-			}
-
-			if composeApp != nil {
-				so.addComposeObserver(app.Stage, app.AppKey, app.AppName)
+			// addComposeObserver checks via the Docker API whether the app
+			// has a compose project at all and no-ops when it does not.
+			_, err := so.addComposeObserver(app.Stage, app.AppKey, app.AppName)
+			if err != nil {
+				log.Error().Err(err).Msgf("failed to add compose observer for %s (%s)", app.AppName, app.Stage)
 			}
 		}
 
