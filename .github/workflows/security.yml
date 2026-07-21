@@ -12,8 +12,6 @@ name: security
 
 on:
   pull_request:
-  push:
-    branches: [master]
   schedule:
     # Mondays 06:17 UTC — catch CVEs newly disclosed against unchanged code.
     - cron: "17 6 * * 1"

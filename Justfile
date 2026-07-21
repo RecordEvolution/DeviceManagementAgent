@@ -246,7 +246,8 @@ bump-patch:
     IFS=. read -r major minor patch <<< "$current"
     next="${major}.${minor}.$((patch + 1))"
     printf '%s' "$next" > src/release/version.txt
-    echo "Bumped $current -> $next. Now commit everything and run: just release"
+    jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
 
 # Follow with `just release` to tag + trigger the build/publish CI.
 # Bump the minor version in src/release/version.txt (resets patch) and commit it.
@@ -262,7 +263,8 @@ bump-minor:
     IFS=. read -r major minor patch <<< "$current"
     next="${major}.$((minor + 1)).0"
     printf '%s' "$next" > src/release/version.txt
-    echo "Bumped $current -> $next. Now commit everything and run: just release"
+    jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
 
 # Follow with `just release` to tag + trigger the build/publish CI.
 # Bump the major version in src/release/version.txt (resets minor and patch) and commit it.
@@ -278,7 +280,8 @@ bump-major:
     IFS=. read -r major minor patch <<< "$current"
     next="$((major + 1)).0.0"
     printf '%s' "$next" > src/release/version.txt
-    echo "Bumped $current -> $next. Now commit everything and run: just release"
+    jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
 
 # Requires a clean working tree; promote afterwards with `just promote`.
 # Tag the current commit as v<version.txt> and push (triggers build/publish CI).

@@ -114,6 +114,18 @@ func (fs *Filesystem) Write(chunk FileChunk) error {
 	}
 
 	if chunk.Data == "END" {
+		// A stale END from a superseded transfer must not tear down the
+		// transfer that currently owns the slot. When two publishes for the
+		// same app overlap they share this containerName key; only the transfer
+		// whose ID matches the active one may finalize and delete it. Without
+		// this guard an earlier transfer's END deletes the live transfer's
+		// entry, and its next chunk hits "no active transfer". BEGIN (last-wins,
+		// closing the prior handle) and the data path already scope by ID.
+		if activeTransfer.ID != chunk.ID {
+			log.Debug().Msg("Ignoring END from a transfer that was reset")
+			return nil
+		}
+
 		var err error
 		if activeTransfer.File != nil {
 			err = activeTransfer.File.Sync()
