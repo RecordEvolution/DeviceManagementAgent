@@ -156,6 +156,41 @@ func (docker *Docker) ListContainers(ctx context.Context, options common.Dict) (
 	return listOfDict, nil
 }
 
+// GetComposePublishedPorts returns the host ports currently published by the
+// containers of a compose project, keyed like PublishedPortKey
+// (<service>|<targetPort>/<protocol>). It reads them straight from the Docker
+// API — never shell out `docker compose ps` for this: it runs on the
+// transition's critical section, and on boot (when a restarted agent recovers
+// its ports) dockerd is at its most contended, where a compose-CLI invocation
+// can stall the whole transition for tens of seconds. An empty map when the
+// project has no published ports (e.g. it is not up).
+func (docker *Docker) GetComposePublishedPorts(ctx context.Context, projectName string) (map[string]uint64, error) {
+	project := common.NormalizeComposeProjectName(projectName)
+	cList, err := docker.client.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	published := make(map[string]uint64)
+	for _, cont := range cList {
+		service := cont.Labels["com.docker.compose.service"]
+		for _, port := range cont.Ports {
+			// A stopped container has no host binding (PublicPort == 0); only a
+			// live mapping is worth recovering.
+			if port.PublicPort == 0 {
+				continue
+			}
+			key := PublishedPortKey(service, uint64(port.PrivatePort), port.Type)
+			published[key] = uint64(port.PublicPort)
+		}
+	}
+
+	return published, nil
+}
+
 func (docker *Docker) GetContainer(ctx context.Context, containerName string) (types.Container, error) {
 	filters := filters.NewArgs()
 	filters.Add("name", containerName)

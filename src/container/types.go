@@ -77,6 +77,7 @@ type Container interface {
 	Build(ctx context.Context, pathToTar string, options types.ImageBuildOptions) (io.ReadCloser, error)
 	GetContainerState(ctx context.Context, containerName string) (ContainerState, error)
 	GetContainerPortBindings(ctx context.Context, containerName string) (map[string]uint64, error)
+	GetComposePublishedPorts(ctx context.Context, projectName string) (map[string]uint64, error)
 	GetContainerNetworkMode(ctx context.Context, containerName string) (string, error)
 	ListenForContainerEvents(ctx context.Context) (<-chan events.Message, <-chan error)
 	GetContainer(ctx context.Context, containerName string) (types.Container, error)

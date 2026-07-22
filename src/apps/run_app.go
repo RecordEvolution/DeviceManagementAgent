@@ -101,6 +101,14 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 
 	compose := sm.Container.Compose()
 
+	// Mark STARTING before SetupComposeFiles: that step reads the previous
+	// generation's published ports from the Docker API, which can be slow on a
+	// contended daemon; leaving the app in PRESENT until then misleads the UI.
+	err = sm.setState(app, common.STARTING)
+	if err != nil {
+		return err
+	}
+
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
@@ -112,11 +120,6 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		if writeErr != nil {
 			return writeErr
 		}
-		return err
-	}
-
-	err = sm.setState(app, common.STARTING)
-	if err != nil {
 		return err
 	}
 
@@ -248,12 +251,16 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
+	// Mark STARTING before SetupComposeFiles: on a contended boot that step
+	// (a Docker-API read of the previous generation's published ports) can take
+	// several seconds, and until the app leaves PRESENT the cloud sees it as
+	// not-yet-starting while re-drive pushes just bounce off the held lock.
+	err = sm.setState(app, common.STARTING)
 	if err != nil {
 		return err
 	}
 
-	err = sm.setState(app, common.STARTING)
+	dockerComposePath, err := sm.SetupComposeFiles(payload, app, false)
 	if err != nil {
 		return err
 	}

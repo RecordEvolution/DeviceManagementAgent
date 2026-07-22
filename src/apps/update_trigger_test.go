@@ -641,6 +641,9 @@ func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 			// The teardown transitions call removeApp; an unsupported compose
 			// short-circuits it (no docker compose CLI) so the test stays a unit.
 			mc.EXPECT().Compose().Return(&containerpkg.Compose{Supported: false}).Maybe()
+			// SetupComposeFiles now recovers published ports via the Docker API
+			// (not `docker compose ps`); the teardown path reaches it.
+			mc.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
 
 			amSeed(t, st, 62, "cancelme", common.UPDATING, common.PROD)
 

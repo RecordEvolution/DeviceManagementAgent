@@ -767,6 +767,74 @@ func (_mock *Container) GetContainerPortBindings(ctx context.Context, containerN
 	return r0, r1
 }
 
+// GetComposePublishedPorts provides a mock function for the type Container
+func (_mock *Container) GetComposePublishedPorts(ctx context.Context, projectName string) (map[string]uint64, error) {
+	ret := _mock.Called(ctx, projectName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetComposePublishedPorts")
+	}
+
+	var r0 map[string]uint64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (map[string]uint64, error)); ok {
+		return returnFunc(ctx, projectName)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) map[string]uint64); ok {
+		r0 = returnFunc(ctx, projectName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]uint64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, projectName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Container_GetComposePublishedPorts_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetComposePublishedPorts'
+type Container_GetComposePublishedPorts_Call struct {
+	*mock.Call
+}
+
+// GetComposePublishedPorts is a helper method to define mock.On call
+//   - ctx context.Context
+//   - projectName string
+func (_e *Container_Expecter) GetComposePublishedPorts(ctx any, projectName any) *Container_GetComposePublishedPorts_Call {
+	return &Container_GetComposePublishedPorts_Call{Call: _e.mock.On("GetComposePublishedPorts", ctx, projectName)}
+}
+
+func (_c *Container_GetComposePublishedPorts_Call) Run(run func(ctx context.Context, projectName string)) *Container_GetComposePublishedPorts_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Container_GetComposePublishedPorts_Call) Return(stringToUint64 map[string]uint64, err error) *Container_GetComposePublishedPorts_Call {
+	_c.Call.Return(stringToUint64, err)
+	return _c
+}
+
+func (_c *Container_GetComposePublishedPorts_Call) RunAndReturn(run func(ctx context.Context, projectName string) (map[string]uint64, error)) *Container_GetComposePublishedPorts_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Container_GetContainerPortBindings_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetContainerPortBindings'
 type Container_GetContainerPortBindings_Call struct {
 	*mock.Call

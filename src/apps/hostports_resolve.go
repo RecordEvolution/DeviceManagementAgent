@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reagent/common"
-	"reagent/config"
 	"reagent/container"
 	"reagent/errdefs"
 	"reagent/tunnel"
@@ -25,14 +24,26 @@ func hostPortKeyForRule(stage common.Stage, appKey uint64, rule common.PortForwa
 	return hostPortKey{Stage: stage, AppKey: appKey, Protocol: wireProtocol(rule.Protocol), Port: rule.Port}
 }
 
-// composeFilePathFor returns where SetupComposeFiles writes the app's compose
-// file (mirrors its directory layout).
-func composeFilePathFor(cfg *config.Config, stage common.Stage, appName string) string {
-	targetDir := cfg.CommandLineArguments.AppsBuildDir
-	if stage == common.PROD {
-		targetDir = cfg.CommandLineArguments.AppsComposeDir
+// publishedComposeHostPorts reads the host ports the app's compose project
+// currently publishes, keyed like container.PublishedPortKey. Recovering a
+// still-running previous generation's ports keeps them stable across restarts
+// and agent updates. It reads them from the Docker API rather than
+// `docker compose ps`: this runs on the transition's critical section, and on
+// boot — exactly when a restarted agent recovers ports — dockerd is at its
+// most contended, where a compose-CLI invocation can stall the whole
+// transition for tens of seconds. An empty map when the project is not up (its
+// ports then come from the persisted host_port hints instead).
+func (am *AppManager) publishedComposeHostPorts(payload common.TransitionPayload) map[string]uint64 {
+	project := common.BuildComposeContainerName(payload.Stage, payload.AppKey, payload.AppName)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	published, err := am.StateMachine.Container.GetComposePublishedPorts(ctx, project)
+	if err != nil {
+		log.Debug().Err(err).Str("app", payload.AppName).Msg("Could not read published compose ports")
+		return map[string]uint64{}
 	}
-	return targetDir + "/" + appName + "/" + DockerFileName
+	return published
 }
 
 // bindingKey is how GetContainerPortBindings keys a container port.
@@ -115,14 +126,7 @@ func (am *AppManager) findComposeRulePort(payload common.TransitionPayload, rule
 			continue
 		}
 
-		cfg := am.StateMachine.Container.GetConfig()
-		composePath := composeFilePathFor(cfg, payload.Stage, payload.AppName)
-		published, err := am.StateMachine.Container.Compose().GetPublishedPorts(composePath)
-		if err != nil {
-			log.Debug().Err(err).Str("app", payload.AppName).Msg("Could not read published compose ports")
-			return entry.Service, 0
-		}
-
+		published := am.publishedComposeHostPorts(payload)
 		return entry.Service, published[container.PublishedPortKey(entry.Service, entry.ContainerPort, entry.Protocol)]
 	}
 	return "", 0
@@ -295,16 +299,8 @@ func (am *AppManager) devicePortEnvsForCompose(payload common.TransitionPayload,
 // rewrite mutates it.
 func (sm *StateMachine) rewriteComposeHostPorts(payload common.TransitionPayload, dockerCompose map[string]interface{}) error {
 	am := sm.StateObserver.AppManager
-	cfg := sm.Container.GetConfig()
 
-	// Host ports of a still-running previous project generation: recovering
-	// them keeps ports stable across restarts and agent updates.
-	composePath := composeFilePathFor(cfg, payload.Stage, payload.AppName)
-	published, err := sm.Container.Compose().GetPublishedPorts(composePath)
-	if err != nil {
-		log.Debug().Err(err).Str("app", payload.AppName).Msg("Could not read published compose ports")
-		published = map[string]uint64{}
-	}
+	published := am.publishedComposeHostPorts(payload)
 
 	portRules, err := tunnel.InterfaceToPortForwardRule(payload.Ports)
 	if err != nil {
