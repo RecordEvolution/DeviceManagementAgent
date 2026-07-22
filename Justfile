@@ -1,7 +1,7 @@
 # IronFlock device management agent (reagent). Run `just` to list recipes.
 
 ROOT_DIR := justfile_directory()
-FRP_VERSION := "0.69.1"
+FRP_VERSION := "0.70.0"
 MOCKERY_VERSION := "v3.7.1"
 GOVULNCHECK_VERSION := "v1.3.0"
 CYCLONEDX_GOMOD_VERSION := "v1.10.0"

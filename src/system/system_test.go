@@ -285,8 +285,8 @@ func TestBuildBinaryDownloadURL(t *testing.T) {
 
 	// frpc rides the re-agent bucket via the /frpc sub-path so the appliance
 	// /dl/re-agent/* proxy covers it with no route change.
-	got = buildBinaryDownloadURL(base, "re-agent/frpc", "windows", "amd64", "0.69.1", "frpc")
-	if want := base + "/re-agent/frpc/windows/amd64/0.69.1/frpc.exe"; got != want {
+	got = buildBinaryDownloadURL(base, "re-agent/frpc", "windows", "amd64", "0.70.0", "frpc")
+	if want := base + "/re-agent/frpc/windows/amd64/0.70.0/frpc.exe"; got != want {
 		t.Fatalf("frpc windows URL = %q, want %q", got, want)
 	}
 }
