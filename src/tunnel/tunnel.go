@@ -56,6 +56,20 @@ const (
 	CapabilityUnavailable
 )
 
+// defaultLoginDeadline bounds how long Start() waits for frpc to log in to frps
+// before declaring tunnels unavailable. It must not fire on a healthy device
+// (login normally completes in a second or two) but must be short enough that a
+// disabled/unreachable frps surfaces on the UI within a heartbeat or two.
+//
+// This exists because loginFailExit=false (see frp.go) makes frpc retry a failed
+// login forever instead of exiting: without a deadline, Start() would block on
+// the login ack indefinitely and capability would stay pinned at
+// CapabilityStarting (which reads as capable), so an appliance with the tunnel
+// service turned off would wrongly report tunnels available and never show the
+// warning badge. The manager holds it as a field (frpTm.loginDeadline) so tests
+// can shorten it.
+const defaultLoginDeadline = 30 * time.Second
+
 func (c TunnelCapability) String() string {
 	switch c {
 	case CapabilityStarting:
@@ -96,6 +110,10 @@ type FrpTunnelManager struct {
 	capability   atomic.Int32
 	capabilityMu sync.Mutex
 	lastErr      string
+	// loginDeadline is how long Start() waits for frpc to log in before latching
+	// CapabilityUnavailable (see defaultLoginDeadline). A field so tests can
+	// shorten it; zero falls back to defaultLoginDeadline.
+	loginDeadline time.Duration
 	// reacquireFrpc re-fetches the frpc binary when it is found missing at
 	// runtime (e.g. antivirus deleted it). Injected by the agent so the tunnel
 	// package need not import system; nil in tests means "do not re-acquire".
@@ -492,6 +510,14 @@ func (frpTm *FrpTunnelManager) Start() error {
 				default:
 				}
 
+				// Mark the device tunnel-capable here, not only via the startup
+				// ack below: if Start() already returned CapabilityUnavailable on
+				// the login deadline (frps was down/disabled), the ack is no
+				// longer being read — but frpc keeps retrying, so a login that
+				// lands later must still flip the device back to Available. This
+				// is the self-heal path when a disabled frps is turned back on.
+				frpTm.setCapability(CapabilityAvailable, nil)
+
 				// Send initial ack for startup
 				ack(nil)
 			}
@@ -602,14 +628,34 @@ func (frpTm *FrpTunnelManager) Start() error {
 		}
 	}()
 
-	startErr := <-ackChan
-	if startErr != nil {
-		frpTm.setCapability(CapabilityUnavailable, startErr)
-		return startErr
+	deadline := frpTm.loginDeadline
+	if deadline <= 0 {
+		deadline = defaultLoginDeadline
 	}
 
-	frpTm.setCapability(CapabilityAvailable, nil)
-	return nil
+	select {
+	case startErr := <-ackChan:
+		if startErr != nil {
+			frpTm.setCapability(CapabilityUnavailable, startErr)
+			return startErr
+		}
+
+		frpTm.setCapability(CapabilityAvailable, nil)
+		return nil
+
+	case <-time.After(deadline):
+		// frpc spawned fine but has not logged in to frps within the deadline.
+		// Because loginFailExit=false frpc never exits on a login failure — it
+		// retries forever — so a disabled or unreachable frps (e.g. the
+		// appliance tunnel profile is off) would otherwise leave capability at
+		// CapabilityStarting indefinitely and the device would keep reporting
+		// tunnels as available. Latch Unavailable so the heartbeat and UI badge
+		// reflect reality, but leave frpc running and return success to the
+		// supervisor: the scanner's login-success branch re-marks the device
+		// Available the moment a later login lands, without a restart.
+		frpTm.setCapability(CapabilityUnavailable, errors.New("frpc did not log in to frps within the deadline"))
+		return nil
+	}
 }
 
 // SuperviseStart brings the tunnel client up with bounded exponential backoff.
@@ -723,6 +769,7 @@ func NewFrpTunnelManager(messenger messenger.Messenger, config *config.Config) (
 		activeTunnelConfigs: make(map[string]*Tunnel),
 		loginChan:           make(chan bool, 10), // Buffered to avoid blocking
 		isLoggedIn:          false,
+		loginDeadline:       defaultLoginDeadline,
 	}
 
 	return frpTunnelManager, nil

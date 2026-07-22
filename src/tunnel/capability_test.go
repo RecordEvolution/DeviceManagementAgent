@@ -152,6 +152,66 @@ func TestStopWithoutClientIsSafe(t *testing.T) {
 	assert.NoError(t, m.Stop())
 }
 
+// A frps that never accepts the login — turned off on the appliance, or simply
+// down — must not leave the device reporting tunnels as available. Because
+// loginFailExit=false frpc retries the login forever instead of exiting, Start()
+// cannot wait for the process to die; the login deadline is what latches
+// Unavailable so the heartbeat and UI badge reflect reality.
+func TestStartLatchesUnavailableWhenLoginNeverArrives(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake frpc is a shell script")
+	}
+
+	m := newCapabilityTestManager(t)
+	m.loginDeadline = 200 * time.Millisecond
+
+	// frpc that reaches no server and never logs in, but stays alive past the
+	// deadline — exactly what real frpc does with loginFailExit=false against an
+	// unreachable frps. (A short sleep keeps t.Cleanup's Stop() from blocking on
+	// process reaping.)
+	fake := "#!/bin/sh\necho '[E] connect to server error: connection refused'\nsleep 2\n"
+	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
+	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
+	t.Cleanup(func() { _ = m.Stop() })
+
+	require.NoError(t, m.Start(), "Start must succeed and leave frpc running to self-heal, not error out")
+
+	cap, _ := m.Capability()
+	assert.Equal(t, CapabilityUnavailable, cap, "a login that never arrives must latch Unavailable")
+	assert.False(t, m.TunnelCapable())
+}
+
+// The Unavailable latch from a missed login deadline is not terminal: frpc keeps
+// retrying, so when the frps it could not reach comes back (the appliance tunnel
+// profile is switched on again), the login that finally lands must flip the
+// device back to Available without a restart.
+func TestLoginAfterDeadlineHealsToAvailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake frpc is a shell script")
+	}
+
+	m := newCapabilityTestManager(t)
+	m.loginDeadline = 200 * time.Millisecond
+
+	// Miss the deadline first (no login for ~1s), then log in successfully.
+	fake := "#!/bin/sh\necho '[E] connect to server error: connection refused'\nsleep 1\necho 'login to server success'\nsleep 2\n"
+	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
+	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
+	t.Cleanup(func() { _ = m.Stop() })
+
+	require.NoError(t, m.Start())
+
+	// Start returned on the deadline: the device is Unavailable right now...
+	cap, _ := m.Capability()
+	require.Equal(t, CapabilityUnavailable, cap)
+
+	// ...but the late login must heal it back to Available.
+	require.Eventually(t, func() bool {
+		c, _ := m.Capability()
+		return c == CapabilityAvailable
+	}, 3*time.Second, 50*time.Millisecond, "a login after the deadline must restore Available")
+}
+
 // End-to-end reproduction of the production failure with a real spawned
 // process: the admin port is taken by another socket (in the field: any
 // outbound localhost connection, a stale frpc, a Docker publish), and frpc —
