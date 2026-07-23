@@ -152,64 +152,146 @@ func TestStopWithoutClientIsSafe(t *testing.T) {
 	assert.NoError(t, m.Stop())
 }
 
-// A frps that never accepts the login — turned off on the appliance, or simply
-// down — must not leave the device reporting tunnels as available. Because
-// loginFailExit=false frpc retries the login forever instead of exiting, Start()
-// cannot wait for the process to die; the login deadline is what latches
-// Unavailable so the heartbeat and UI badge reflect reality.
-func TestStartLatchesUnavailableWhenLoginNeverArrives(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fake frpc is a shell script")
-	}
+// reachableFrps points the manager at a live local listener, standing in for a
+// running frps control port.
+func reachableFrps(t *testing.T, m *FrpTunnelManager) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
 
-	m := newCapabilityTestManager(t)
-	m.loginDeadline = 200 * time.Millisecond
-
-	// frpc that reaches no server and never logs in, but stays alive past the
-	// deadline — exactly what real frpc does with loginFailExit=false against an
-	// unreachable frps. (A short sleep keeps t.Cleanup's Stop() from blocking on
-	// process reaping.)
-	fake := "#!/bin/sh\necho '[E] connect to server error: connection refused'\nsleep 2\n"
-	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
-	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
-	t.Cleanup(func() { _ = m.Stop() })
-
-	require.NoError(t, m.Start(), "Start must succeed and leave frpc running to self-heal, not error out")
-
-	cap, _ := m.Capability()
-	assert.Equal(t, CapabilityUnavailable, cap, "a login that never arrives must latch Unavailable")
-	assert.False(t, m.TunnelCapable())
+	m.configBuilder.yamlConfig.ServerAddr = "127.0.0.1"
+	m.configBuilder.yamlConfig.ServerPort = ln.Addr().(*net.TCPAddr).Port
 }
 
-// The Unavailable latch from a missed login deadline is not terminal: frpc keeps
-// retrying, so when the frps it could not reach comes back (the appliance tunnel
-// profile is switched on again), the login that finally lands must flip the
-// device back to Available without a restart.
-func TestLoginAfterDeadlineHealsToAvailable(t *testing.T) {
+// unreachableFrps points the manager at a port nothing is listening on, standing
+// in for the appliance tunnel profile being switched off.
+func unreachableFrps(t *testing.T, m *FrpTunnelManager) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close()) // hand the port back before anyone can use it
+
+	m.configBuilder.yamlConfig.ServerAddr = "127.0.0.1"
+	m.configBuilder.yamlConfig.ServerPort = port
+}
+
+// The capability verdict comes from dialling frps, because frpc logs to a file
+// and never tells us on stdout that it logged in.
+func TestProbeCapabilityFollowsFrpsReachability(t *testing.T) {
+	t.Run("reachable frps is capable", func(t *testing.T) {
+		m := newCapabilityTestManager(t)
+		reachableFrps(t, m)
+		m.clientAlive.Store(true)
+
+		m.probeCapability()
+
+		cap, _ := m.Capability()
+		assert.Equal(t, CapabilityAvailable, cap)
+		assert.True(t, m.TunnelCapable())
+	})
+
+	t.Run("unreachable frps is not capable", func(t *testing.T) {
+		m := newCapabilityTestManager(t)
+		unreachableFrps(t, m)
+		m.clientAlive.Store(true)
+
+		m.probeCapability()
+
+		cap, lastErr := m.Capability()
+		assert.Equal(t, CapabilityUnavailable, cap)
+		assert.False(t, m.TunnelCapable())
+		assert.Contains(t, lastErr, "frps unreachable")
+	})
+}
+
+// A start failure (missing/quarantined frpc) owns the capability. A frps that
+// merely happens to be reachable must not paper over it.
+func TestProbeCapabilityIgnoredWithoutRunningClient(t *testing.T) {
+	m := newCapabilityTestManager(t)
+	reachableFrps(t, m)
+	m.MarkUnavailable("frpc binary quarantined")
+
+	m.probeCapability() // clientAlive is false
+
+	cap, lastErr := m.Capability()
+	assert.Equal(t, CapabilityUnavailable, cap, "a reachable frps must not revive a device whose frpc cannot run")
+	assert.Equal(t, "frpc binary quarantined", lastErr)
+}
+
+// Regression (found in production): frpc logs to /var/log/frpc.log, so
+// "login to server success" never reaches the stdout the agent scans and the
+// login ack never arrives. Treating that silence as failure marked every healthy
+// device "tunnel disabled". A working tunnel must stay capable.
+func TestStartStaysCapableWhenLoginAckNeverArrivesButFrpsIsUp(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake frpc is a shell script")
 	}
 
 	m := newCapabilityTestManager(t)
 	m.loginDeadline = 200 * time.Millisecond
+	reachableFrps(t, m)
 
-	// Miss the deadline first (no login for ~1s), then log in successfully.
-	fake := "#!/bin/sh\necho '[E] connect to server error: connection refused'\nsleep 1\necho 'login to server success'\nsleep 2\n"
+	// frpc that runs happily but says nothing on stdout — the production case.
+	fake := "#!/bin/sh\nsleep 2\n"
 	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
 	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
 	t.Cleanup(func() { _ = m.Stop() })
 
 	require.NoError(t, m.Start())
 
-	// Start returned on the deadline: the device is Unavailable right now...
+	cap, _ := m.Capability()
+	assert.Equal(t, CapabilityAvailable, cap, "a silent frpc against a reachable frps must NOT be reported unavailable")
+	assert.True(t, m.TunnelCapable())
+}
+
+// The appliance case the badge exists for: frpc is up and retrying (loginFailExit
+// = false keeps it alive), but the tunnel service is off, so nothing accepts a
+// connection and the device must report itself unavailable.
+func TestStartReportsUnavailableWhenFrpsIsDown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake frpc is a shell script")
+	}
+
+	m := newCapabilityTestManager(t)
+	m.loginDeadline = 200 * time.Millisecond
+	unreachableFrps(t, m)
+
+	fake := "#!/bin/sh\necho '[E] connect to server error: connection refused'\nsleep 2\n"
+	frpcPath := filepath.Join(m.config.CommandLineArguments.AgentDir, "frpc")
+	require.NoError(t, os.WriteFile(frpcPath, []byte(fake), 0o755))
+	t.Cleanup(func() { _ = m.Stop() })
+
+	require.NoError(t, m.Start(), "Start must succeed and leave frpc retrying, not error out")
+
+	cap, _ := m.Capability()
+	assert.Equal(t, CapabilityUnavailable, cap)
+	assert.False(t, m.TunnelCapable())
+}
+
+// The verdict is never permanent: once frps comes up, the next probe clears it.
+// This is what saves an appliance where the agent wins the boot race against the
+// frps container.
+func TestUnavailableRecoversOnceFrpsComesUp(t *testing.T) {
+	m := newCapabilityTestManager(t)
+	unreachableFrps(t, m)
+	m.clientAlive.Store(true)
+
+	m.probeCapability()
 	cap, _ := m.Capability()
 	require.Equal(t, CapabilityUnavailable, cap)
 
-	// ...but the late login must heal it back to Available.
-	require.Eventually(t, func() bool {
-		c, _ := m.Capability()
-		return c == CapabilityAvailable
-	}, 3*time.Second, 50*time.Millisecond, "a login after the deadline must restore Available")
+	// frps starts listening on the very port that was refused a moment ago.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", m.configBuilder.yamlConfig.ServerPort))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	m.probeCapability()
+
+	cap, lastErr := m.Capability()
+	assert.Equal(t, CapabilityAvailable, cap, "a recovered frps must clear the badge without an agent restart")
+	assert.Empty(t, lastErr)
 }
 
 // End-to-end reproduction of the production failure with a real spawned

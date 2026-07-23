@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"reagent/messenger/topics"
 	"reagent/safe"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,19 +58,34 @@ const (
 	CapabilityUnavailable
 )
 
-// defaultLoginDeadline bounds how long Start() waits for frpc to log in to frps
-// before declaring tunnels unavailable. It must not fire on a healthy device
-// (login normally completes in a second or two) but must be short enough that a
-// disabled/unreachable frps surfaces on the UI within a heartbeat or two.
+// defaultLoginDeadline bounds how long Start() waits for frpc to announce a
+// successful login on its stdout before falling back to probing frps directly.
 //
-// This exists because loginFailExit=false (see frp.go) makes frpc retry a failed
-// login forever instead of exiting: without a deadline, Start() would block on
-// the login ack indefinitely and capability would stay pinned at
-// CapabilityStarting (which reads as capable), so an appliance with the tunnel
-// service turned off would wrongly report tunnels available and never show the
-// warning badge. The manager holds it as a field (frpTm.loginDeadline) so tests
-// can shorten it.
+// A deadline is needed because loginFailExit=false (see frp.go) makes frpc retry
+// a failed login forever instead of exiting, so the login ack may never arrive
+// and Start() would otherwise block for good. The manager holds it as a field
+// (frpTm.loginDeadline) so tests can shorten it.
+//
+// Note the ack usually does NOT arrive even on a perfectly healthy device: frp.go
+// points frpc's logger at a FILE (log.to = /var/log/frpc.log), so
+// "login to server success" never reaches the stdout this agent scans. Expiry
+// therefore means "no news", NOT "broken" — which is why the deadline hands off
+// to a reachability probe instead of declaring the device unavailable.
 const defaultLoginDeadline = 30 * time.Second
+
+const (
+	// frpsProbeTimeout bounds a single reachability dial to the frps control port.
+	frpsProbeTimeout = 5 * time.Second
+	// capabilityProbeInterval re-checks reachability so the reported capability
+	// tracks reality instead of latching whatever happened to be true at boot.
+	// It matters most on an appliance, where the agent (host) and the frps
+	// container start together: the first probe can lose that race, and only a
+	// repeat check clears the badge once frps finishes coming up.
+	capabilityProbeInterval = 60 * time.Second
+	// tunnelStatePollInterval is how often the device re-reads its own proxy
+	// state to decide whether the cloud needs a resync nudge.
+	tunnelStatePollInterval = 10 * time.Second
+)
 
 func (c TunnelCapability) String() string {
 	switch c {
@@ -110,10 +127,18 @@ type FrpTunnelManager struct {
 	capability   atomic.Int32
 	capabilityMu sync.Mutex
 	lastErr      string
-	// loginDeadline is how long Start() waits for frpc to log in before latching
-	// CapabilityUnavailable (see defaultLoginDeadline). A field so tests can
+	// loginDeadline is how long Start() waits for a login ack before falling back
+	// to a reachability probe (see defaultLoginDeadline). A field so tests can
 	// shorten it; zero falls back to defaultLoginDeadline.
 	loginDeadline time.Duration
+	// clientAlive is true while a spawned frpc process is running. The capability
+	// probe only speaks for a running client: when frpc could not start at all
+	// (binary missing/quarantined) that failure already owns the capability, and
+	// a reachable frps must not overwrite it with "available".
+	clientAlive atomic.Bool
+	// monitorOnce keeps exactly one capability monitor running for the lifetime
+	// of the manager, however many times Start() is called.
+	monitorOnce sync.Once
 	// reacquireFrpc re-fetches the frpc binary when it is found missing at
 	// runtime (e.g. antivirus deleted it). Injected by the agent so the tunnel
 	// package need not import system; nil in tests means "do not re-acquire".
@@ -337,6 +362,132 @@ func (frpTm *FrpTunnelManager) Capability() (TunnelCapability, string) {
 	return TunnelCapability(frpTm.capability.Load()), frpTm.lastErr
 }
 
+// frpsReachable dials the frps control endpoint this device is configured to
+// tunnel through, and reports whether it accepts a connection.
+//
+// This is the agent's only trustworthy capability signal. Watching frpc's stdout
+// for "login to server success" does not work in production: frp.go points
+// frpc's logger at a file, so that line lands in /var/log/frpc.log and never in
+// the pipe this process reads. A dial answers the question the UI badge actually
+// asks — can this device reach the tunnel server — without depending on how frpc
+// happens to be logging.
+//
+// It deliberately proves reachability only, not a completed frp handshake: a
+// reachable-but-rejecting frps still reads as capable. That is the safe
+// direction to be wrong in, and it matches the pre-existing behaviour of
+// treating a device as capable unless proven otherwise.
+func (frpTm *FrpTunnelManager) frpsReachable() error {
+	addr := net.JoinHostPort(
+		frpTm.configBuilder.yamlConfig.ServerAddr,
+		strconv.Itoa(frpTm.configBuilder.yamlConfig.ServerPort),
+	)
+
+	conn, err := net.DialTimeout("tcp", addr, frpsProbeTimeout)
+	if err != nil {
+		return err
+	}
+
+	return conn.Close()
+}
+
+// probeCapability sets the capability from a live reachability check. It is a
+// no-op unless an frpc process is running, so a start failure that already
+// latched Unavailable (missing or quarantined binary) is not overwritten by a
+// frps that merely happens to be up.
+func (frpTm *FrpTunnelManager) probeCapability() {
+	if !frpTm.clientAlive.Load() {
+		return
+	}
+
+	err := frpTm.frpsReachable()
+	if err != nil {
+		frpTm.setCapability(CapabilityUnavailable, fmt.Errorf("frps unreachable: %w", err))
+		return
+	}
+
+	frpTm.setCapability(CapabilityAvailable, nil)
+}
+
+// monitorCapability keeps the reported capability in step with whether frps is
+// actually reachable, for as long as a client is running. Without it the verdict
+// would be whatever a single probe saw moments after boot — permanently marking
+// a device tunnel-disabled because frps came up a few seconds later, or claiming
+// tunnels work long after the tunnel service was switched off.
+func (frpTm *FrpTunnelManager) monitorCapability() {
+	ticker := time.NewTicker(capabilityProbeInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		frpTm.probeCapability()
+	}
+}
+
+// tunnelStateFingerprint reduces the reported tunnel states to a canonical
+// string so the monitor can tell a genuine change from an identical re-read.
+// Sorted, because GetState's order follows the config file and must not be what
+// decides whether the cloud gets nudged.
+func tunnelStateFingerprint(states []TunnelState) string {
+	parts := make([]string, 0, len(states))
+
+	for _, state := range states {
+		var name, status string
+		var remotePort uint64
+		if state.Status != nil {
+			name = state.Status.Name
+			status = state.Status.Status
+			remotePort = state.Status.RemotePort
+		}
+
+		parts = append(parts, fmt.Sprintf("%s|%s|%d|%t|%t|%s|%s",
+			name, status, remotePort, state.Active, state.Error, state.ErrorMessage, state.URL))
+	}
+
+	sort.Strings(parts)
+	return strings.Join(parts, ";")
+}
+
+// monitorTunnelState nudges the cloud whenever this device's proxies change.
+//
+// The publish is only a trigger: REtunnel ignores the payload and re-queries
+// frps for authoritative state, so this needs to be reliable, not detailed.
+// Reliability is exactly what the previous mechanism lacked — it reacted to
+// "start proxy success" on frpc's stdout, but frp.go points frpc's logger at a
+// file, so those lines never arrive and the cloud was never nudged at all.
+// Reading frpc's admin API instead keeps this working regardless of how frpc
+// logs.
+//
+// GetState is called unconditionally: AllStatus already no-ops unless the device
+// is Available (so an unreachable frps cannot start a restart loop), and its
+// connection-refused branch is what re-supervises an frpc that died.
+func (frpTm *FrpTunnelManager) monitorTunnelState() {
+	ticker := time.NewTicker(tunnelStatePollInterval)
+	defer ticker.Stop()
+
+	lastFingerprint := ""
+
+	for range ticker.C {
+		states, err := frpTm.GetState()
+		if err != nil {
+			// frpc restarting or its admin API not up yet — try again next tick.
+			continue
+		}
+
+		fingerprint := tunnelStateFingerprint(states)
+		if fingerprint == lastFingerprint {
+			continue
+		}
+
+		lastFingerprint = fingerprint
+
+		err = frpTm.PublishTunnelState()
+		if err != nil {
+			log.Debug().Err(err).Msg("failed to publish tunnel state change")
+			// Re-publish next tick rather than sitting on an unsent change.
+			lastFingerprint = ""
+		}
+	}
+}
+
 // setCapability records the capability and publishes the change so the UI
 // reflects a mid-run flip (e.g. antivirus quarantining frpc) without waiting
 // for a re-fetch of get_agent_metadata.
@@ -474,6 +625,15 @@ func (frpTm *FrpTunnelManager) Start() error {
 	clientDone := make(chan struct{})
 	frpTm.clientProcess = frpCommand
 	frpTm.clientDone = clientDone
+	frpTm.clientAlive.Store(true)
+
+	// A client exists from here on, so keep re-checking whether it can still
+	// reach frps and whether its proxies changed. Started here rather than at
+	// boot because both are only meaningful once there is a process to speak for.
+	frpTm.monitorOnce.Do(func() {
+		safe.Go(frpTm.monitorCapability)
+		safe.Go(frpTm.monitorTunnelState)
+	})
 
 	// Buffered + guarded so exactly one result is delivered: login success, or
 	// the scanner ending (process exited) before login. Without the latter,
@@ -490,6 +650,9 @@ func (frpTm *FrpTunnelManager) Start() error {
 		defer close(clientDone)
 		defer func() { _ = frpCommand.Wait() }()
 		defer cancelNotifyContext()
+		// No process left to speak for: park the capability probe until the
+		// supervisor spawns a replacement.
+		defer frpTm.clientAlive.Store(false)
 		// If the loop exits without a prior ack, frpc died before login.
 		defer ack(errors.New("frpc exited before logging in to the server"))
 
@@ -546,6 +709,11 @@ func (frpTm *FrpTunnelManager) Start() error {
 				log.Error().Msgf("frp-err: %s", line)
 
 			} else {
+				// Best-effort only. In production frp.go sends frpc's logger to a
+				// file, so these lines never reach this pipe and none of the
+				// branches below fire — monitorTunnelState is what actually keeps
+				// the cloud in sync. Only startup-fatal output (e.g. the admin
+				// server failing to bind, handled below) reliably lands here.
 				proxyStarted := strings.Contains(line, "start proxy success")
 				proxyRemoved := strings.Contains(line, "proxy removed")
 				runAdminServerError := strings.Contains(line, "run admin server error")
@@ -644,16 +812,16 @@ func (frpTm *FrpTunnelManager) Start() error {
 		return nil
 
 	case <-time.After(deadline):
-		// frpc spawned fine but has not logged in to frps within the deadline.
-		// Because loginFailExit=false frpc never exits on a login failure — it
-		// retries forever — so a disabled or unreachable frps (e.g. the
-		// appliance tunnel profile is off) would otherwise leave capability at
-		// CapabilityStarting indefinitely and the device would keep reporting
-		// tunnels as available. Latch Unavailable so the heartbeat and UI badge
-		// reflect reality, but leave frpc running and return success to the
-		// supervisor: the scanner's login-success branch re-marks the device
-		// Available the moment a later login lands, without a restart.
-		frpTm.setCapability(CapabilityUnavailable, errors.New("frpc did not log in to frps within the deadline"))
+		// No login ack — which is the NORMAL case, not a failure: frpc logs to a
+		// file rather than the stdout scanned above, so the success line is
+		// invisible to us. Deciding "unavailable" here would mark every healthy
+		// device tunnel-disabled. Ask the network instead: if the frps control
+		// port accepts a connection the device can tunnel, otherwise it cannot.
+		//
+		// frpc is left running either way (it retries on its own), and the
+		// monitor started above keeps re-checking, so this verdict is never
+		// permanent in either direction.
+		frpTm.probeCapability()
 		return nil
 	}
 }

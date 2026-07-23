@@ -653,6 +653,65 @@ func TestGetTunnelConfigParsesDeclaredPort(t *testing.T) {
 	assert.Equal(t, uint64(41235), byProto[TCP].LocalPort)
 }
 
+// The cloud is nudged to resync only when the fingerprint changes, so an
+// unchanged read must fingerprint identically (no publish every 10s), and the
+// order GetState happens to return proxies in must not look like a change.
+func TestTunnelStateFingerprintStableAndOrderIndependent(t *testing.T) {
+	a := TunnelState{Status: &TunnelStatus{Name: "9-web-8080-http", Status: "running"}, Active: true, URL: "https://a"}
+	b := TunnelState{Status: &TunnelStatus{Name: "9-ssh-22-tcp", Status: "running", RemotePort: 30022}, Active: true, URL: "tcp://b"}
+
+	first := tunnelStateFingerprint([]TunnelState{a, b})
+
+	assert.Equal(t, first, tunnelStateFingerprint([]TunnelState{a, b}), "an identical re-read must not look like a change")
+	assert.Equal(t, first, tunnelStateFingerprint([]TunnelState{b, a}), "ordering must not look like a change")
+}
+
+// Every field the UI renders a port square from has to move the fingerprint,
+// or the cloud keeps showing a stale tunnel.
+func TestTunnelStateFingerprintDetectsChanges(t *testing.T) {
+	newState := func() []TunnelState {
+		return []TunnelState{{
+			Status: &TunnelStatus{Name: "9-ssh-22-tcp", Status: "running", RemotePort: 30022},
+			Active: true,
+		}}
+	}
+	baseline := tunnelStateFingerprint(newState())
+
+	tests := []struct {
+		name   string
+		mutate func(s *TunnelState)
+	}{
+		{"proxy stopped running", func(s *TunnelState) { s.Status.Status = "error" }},
+		{"remote port re-granted", func(s *TunnelState) { s.Status.RemotePort = 30099 }},
+		{"went inactive", func(s *TunnelState) { s.Active = false }},
+		{"error raised", func(s *TunnelState) { s.Error = true; s.ErrorMessage = "port already used" }},
+		{"url changed", func(s *TunnelState) { s.URL = "tcp://new" }},
+		{"proxy disappeared", func(s *TunnelState) { *s = TunnelState{} }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := newState()
+			tt.mutate(&changed[0])
+			assert.NotEqual(t, baseline, tunnelStateFingerprint(changed))
+		})
+	}
+}
+
+// A device with no proxies must fingerprint empty, so it never nudges the cloud
+// about nothing.
+func TestTunnelStateFingerprintEmptyWhenNoProxies(t *testing.T) {
+	assert.Empty(t, tunnelStateFingerprint(nil))
+	assert.Empty(t, tunnelStateFingerprint([]TunnelState{}))
+}
+
+// A configured proxy that frpc reports no status for arrives with a nil Status.
+func TestTunnelStateFingerprintHandlesNilStatus(t *testing.T) {
+	assert.NotPanics(t, func() {
+		tunnelStateFingerprint([]TunnelState{{Active: false}})
+	})
+}
+
 // A proxy left in frpc.yaml by a previous agent run may dial a stale host
 // port; AddTunnelConfig must update it in place (and keep the granted remote
 // port) instead of skipping.
