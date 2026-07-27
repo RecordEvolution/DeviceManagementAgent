@@ -17,23 +17,28 @@
 //     ironflock-appliance compose stack, halting current disk growth without
 //     touching that stack (which carries remote reachability).
 //
-// SAFE: it never removes tagged or in-use images (offline devices can't re-pull).
-// Volumes are only removed when they are positively known to be unused (see
-// pruneOrphanedVolumes); anything attributable to an installed app — stopped or
-// running — or not attributable at all is left alone. App containers are
-// ephemeral — their state lives in volumes/bind mounts — so stopping them is
-// non-destructive.
+// SAFE: it never removes in-use images, and never removes a tagged image whose
+// registry the device may be unable to reach (offline devices can't re-pull).
+// The one exception is an app image from a registry local to the device — an
+// appliance's on-box app registry — where a re-pull costs a loopback copy; see
+// reclaimSupersededAppImages. Volumes are only removed when they are positively
+// known to be unused (see pruneOrphanedVolumes); anything attributable to an
+// installed app — stopped or running — or not attributable at all is left
+// alone. App containers are ephemeral — their state lives in volumes/bind
+// mounts — so stopping them is non-destructive.
 package diskguard
 
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reagent/common"
 	"reagent/container"
 	"reagent/safe"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +54,8 @@ type Docker interface {
 	RemoveVolume(ctx context.Context, name string) error
 	ListContainers(ctx context.Context, options common.Dict) ([]container.ContainerResult, error)
 	StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error
+	ListImages(ctx context.Context, options map[string]interface{}) ([]container.ImageResult, error)
+	RemoveImage(ctx context.Context, imageID string, options map[string]interface{}) error
 }
 
 // Every daemon touch is deadline-bounded: on a disk-full box the Docker daemon
@@ -116,6 +123,16 @@ type Config struct {
 	// the installed set is unknown — compose volumes are then not touched at
 	// all rather than treated as orphaned.
 	InstalledAppNames func() ([]string, error)
+	// AppImageRegistry is the registry app images are pulled from (the
+	// device's docker_registry_url, e.g. "localhost:15001/"). It gates the
+	// superseded-app-image reclaim, which only runs when this registry is
+	// local to the device — see reclaimSupersededAppImages. Empty disables it.
+	AppImageRegistry string
+	// WantedAppImages returns every image reference (repo:tag) the device still
+	// needs: for each locally known app, its present and newest version in both
+	// stages. Anything else under AppImageRegistry is a superseded leftover. An
+	// error means the wanted set is unknown — no app image is then touched.
+	WantedAppImages func() (map[string]bool, error)
 	// OnRecover is called once when the device leaves EMERGENCY, to reinstate the
 	// apps' previous requested states (which were stopped/blocked during it).
 	OnRecover func()
@@ -253,6 +270,7 @@ func (g *Guard) safeCleanup() {
 			}
 		}()
 		g.pruneOrphanedVolumes()
+		g.reclaimSupersededAppImages()
 	}
 	g.run("journalctl", "--vacuum-size=100M")
 	if _, err := exec.LookPath("apt-get"); err == nil {
@@ -324,6 +342,129 @@ func (g *Guard) pruneOrphanedVolumes() {
 		}
 		g.removeVolume(v.Name, "leaked by removed app "+project)
 	}
+}
+
+// reclaimSupersededAppImages removes app image tags the device no longer needs.
+//
+// Removing a TAGGED image is otherwise off-limits for the guard (see the SAFE
+// note in the package doc): a device that cannot re-pull would be left unable
+// to restart its own apps. That objection disappears when app images come from
+// a registry local to the device — an appliance carries its own on-box app
+// registry, so a re-pull there is a loopback copy needing no network, no cloud
+// and no credentials beyond what the device already has. AppImageRegistry is
+// therefore the gate: only a loopback or private-network registry qualifies,
+// and a cloud device (whose docker_registry_url is a WAN host) skips this step
+// entirely.
+//
+// Within that registry a tag is removed only when it is BOTH not wanted (not a
+// present/newest version of a locally known app) AND not referenced by any
+// container, running or stopped. Removal is per-tag rather than per image ID,
+// so an image carrying one wanted and one superseded tag only loses the
+// superseded one. force is deliberately not set: if the daemon still sees a
+// reference the removal fails and the tag stays.
+//
+// This is the sweeper for leftovers that the normal paths missed — the
+// best-effort image removal on app update is bounded and its error discarded,
+// so a wedged or slow daemon silently strands the previous version's image.
+func (g *Guard) reclaimSupersededAppImages() {
+	host, ok := localRegistryHost(g.cfg.AppImageRegistry)
+	if !ok {
+		return
+	}
+	if g.cfg.WantedAppImages == nil {
+		return
+	}
+	wanted, err := g.cfg.WantedAppImages()
+	if err != nil {
+		log.Error().Err(err).Msg("diskguard: cannot read wanted app images; leaving app images alone")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), dockerOpTimeout)
+	defer cancel()
+
+	// all=true: a stopped container still pins its image, and its app is meant
+	// to start again.
+	containers, err := g.docker.ListContainers(ctx, common.Dict{"all": true})
+	if err != nil {
+		log.Error().Err(err).Msg("diskguard: list containers failed; leaving app images alone")
+		return
+	}
+	inUse := make(map[string]bool, len(containers))
+	for _, c := range containers {
+		inUse[c.ImageID] = true
+	}
+
+	images, err := g.docker.ListImages(ctx, map[string]interface{}{})
+	if err != nil {
+		log.Error().Err(err).Msg("diskguard: list images failed; leaving app images alone")
+		return
+	}
+	for _, img := range images {
+		if inUse[img.ID] {
+			continue
+		}
+		for _, tag := range img.RepoTags {
+			if registryHostOf(tag) != host || wanted[tag] {
+				continue
+			}
+			g.removeImageTag(tag)
+		}
+	}
+}
+
+func (g *Guard) removeImageTag(tag string) {
+	ctx, cancel := context.WithTimeout(context.Background(), removeTimeout)
+	defer cancel()
+	if err := g.docker.RemoveImage(ctx, tag, map[string]interface{}{"force": false, "pruneChildren": true}); err != nil {
+		log.Warn().Err(err).Str("image", tag).Msg("diskguard: failed to remove superseded app image")
+	} else {
+		log.Info().Str("image", tag).Msg("diskguard: removed superseded app image")
+	}
+}
+
+// registryHostOf returns the registry host of an image reference, or "" when
+// the reference carries none. Docker's own rule: the first path segment is a
+// registry host if it contains a "." or a ":", or is exactly "localhost";
+// otherwise it is an implicit Docker Hub namespace, as in "library/postgres".
+func registryHostOf(ref string) string {
+	slash := strings.Index(ref, "/")
+	if slash < 0 {
+		return ""
+	}
+	host := ref[:slash]
+	if !strings.ContainsAny(host, ".:") && !strings.EqualFold(host, "localhost") {
+		return ""
+	}
+	return host
+}
+
+// localRegistryHost reports the host of registryURL (a docker_registry_url such
+// as "localhost:15001/") when that registry lives on the device or its own
+// network, which is what makes its images cheaply re-pullable. Loopback and
+// RFC1918/link-local literals qualify; a DNS name other than localhost does
+// not, since it cannot be shown to be local without resolving it.
+func localRegistryHost(registryURL string) (string, bool) {
+	host := registryHostOf(strings.TrimSuffix(registryURL, "/") + "/")
+	if host == "" {
+		return "", false
+	}
+	name := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		name = h
+	}
+	name = strings.Trim(name, "[]")
+	if strings.EqualFold(name, "localhost") {
+		return host, true
+	}
+	ip := net.ParseIP(name)
+	if ip == nil {
+		return "", false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return host, true
+	}
+	return "", false
 }
 
 func (g *Guard) removeVolume(name string, reason string) {

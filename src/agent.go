@@ -325,6 +325,34 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 				}
 				return names, nil
 			},
+			// Superseded app images are reclaimed only when this registry is
+			// local to the device (an appliance's on-box registry), where a
+			// re-pull is a loopback copy. On cloud devices this is a WAN host
+			// and the guard leaves tagged app images alone.
+			AppImageRegistry: generalConfig.ReswarmConfig.DockerRegistryURL,
+			// Every image reference the device still needs: present AND newest
+			// version per stage, so a reclaim that races an in-flight update
+			// cannot delete the version being pulled or the one still running.
+			WantedAppImages: func() (map[string]bool, error) {
+				payloads, err := appStore.GetRequestedStates()
+				if err != nil {
+					return nil, err
+				}
+				wanted := make(map[string]bool, len(payloads)*4)
+				for _, p := range payloads {
+					for _, repo := range []string{p.RegistryImageName.Prod, p.RegistryImageName.Dev} {
+						if repo == "" {
+							continue
+						}
+						for _, version := range []string{p.PresentVersion, p.NewestVersion, p.Version} {
+							if version != "" {
+								wanted[repo+":"+version] = true
+							}
+						}
+					}
+				}
+				return wanted, nil
+			},
 			// On recovery, reinstate the apps' requested states (which were
 			// stopped/blocked during the emergency).
 			OnRecover: func() {
