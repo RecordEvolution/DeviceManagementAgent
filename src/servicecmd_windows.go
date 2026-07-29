@@ -193,6 +193,10 @@ func serviceInstall(args []string) error {
 	}
 	defer service.Close()
 
+	// From here on the service exists and can run. The remaining steps only harden it, so a
+	// failure is a warning: leaving a freshly registered device offline because a resilience
+	// nicety could not be configured is the worse outcome.
+
 	// Restart on every failure, never give up: the last action repeats when
 	// the list is exhausted, so the 120s delay throttles a crash loop while
 	// deliberate exit-for-restart (updates, remote restart) recovers in 5s.
@@ -202,13 +206,13 @@ func serviceInstall(args []string) error {
 		{Type: mgr.ServiceRestart, Delay: 120 * time.Second},
 	}, 86400)
 	if err != nil {
-		return fmt.Errorf("failed to set service recovery actions: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: could not set service recovery actions (the service will not auto-restart after a crash): %v\n", err)
 	}
 	// Also fire recovery when the process reports STOPPED with a non-zero
 	// exit code (belt and braces next to the crash-style exits).
 	err = service.SetRecoveryActionsOnNonCrashFailures(true)
 	if err != nil {
-		return fmt.Errorf("failed to enable recovery on non-crash failures: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: could not enable recovery on non-crash failures: %v\n", err)
 	}
 
 	err = eventlog.InstallAsEventCreate(serviceName, eventlog.Error|eventlog.Warning|eventlog.Info)
@@ -225,7 +229,7 @@ func serviceInstall(args []string) error {
 		"/RU", "SYSTEM",
 		"/TR", "\""+repairCmd+"\"")
 	if err != nil {
-		return fmt.Errorf("failed to register the repair scheduled task: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: could not register the repair scheduled task (an interrupted self-update will need a manual repair): %v\n", err)
 	}
 
 	if opts.Proxy != "" {
@@ -251,17 +255,51 @@ func serviceInstall(args []string) error {
 
 	fmt.Printf("Installed service %q (agent dir: %s)\n", serviceName, opts.AgentDir)
 
-	if opts.StartNow {
-		err = service.Start()
-		if err != nil {
-			return fmt.Errorf("installed, but failed to start the service: %w", err)
-		}
-		fmt.Println("Service started.")
-	} else {
-		fmt.Println("Start it with: reagent service start")
+	if !opts.StartNow {
+		fmt.Println("Not started (-noStart). Start it with: reagent service start")
+		return nil
 	}
 
+	err = service.Start()
+	if err != nil {
+		return fmt.Errorf("installed, but failed to start the service: %w", err)
+	}
+	err = waitForRunning(service, 30*time.Second)
+	if err != nil {
+		// The service is installed and set to start automatically, so this is not
+		// fatal — but say so plainly and point at the two places that explain why.
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "the service is installed and will retry at boot; check %s and the Windows event log (source %q)\n",
+			filepath.Join(opts.AgentDir, "reagent.log"), serviceName)
+		return nil
+	}
+	fmt.Println("Service started.")
+
 	return nil
+}
+
+// waitForRunning polls until the service reports RUNNING, so `service install` reports what
+// actually happened rather than merely that a start was requested. Execute() signals RUNNING
+// before its WAMP/Docker init finishes, so this resolves quickly and a timeout is a real
+// symptom rather than slow startup.
+func waitForRunning(service *mgr.Service, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := service.Query()
+		if err != nil {
+			return fmt.Errorf("could not query the service after starting it: %w", err)
+		}
+		switch status.State {
+		case svc.Running:
+			return nil
+		case svc.Stopped:
+			return fmt.Errorf("the service stopped immediately after starting (exit code %d)", status.Win32ExitCode)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the service did not report running within %s", timeout)
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 func serviceUninstall() error {

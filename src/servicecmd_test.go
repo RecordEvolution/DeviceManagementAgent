@@ -18,8 +18,27 @@ func TestParseServiceInstallFlagsDefaults(t *testing.T) {
 	assert.False(t, opts.AgentDirSet)
 	assert.Equal(t, filepath.Join(`C:\ProgramData`, "IronFlock", "Reagent"), opts.AgentDir)
 	assert.Equal(t, filepath.Join(opts.AgentDir, "apps"), opts.AppsDir)
-	assert.False(t, opts.StartNow)
+	assert.True(t, opts.StartNow, "installing must start the service by default")
 	assert.Empty(t, opts.Proxy)
+}
+
+// -start predates the start-by-default behaviour and is passed by every published
+// doc and provisioning script, so it must keep parsing (as a no-op).
+func TestParseServiceInstallFlagsStartIsAcceptedNoOp(t *testing.T) {
+	opts, err := parseServiceInstallFlags([]string{"-config", "dev.flock", "-start"}, `C:\ProgramData`, io.Discard)
+	require.NoError(t, err)
+	assert.True(t, opts.StartNow)
+}
+
+func TestParseServiceInstallFlagsNoStart(t *testing.T) {
+	opts, err := parseServiceInstallFlags([]string{"-config", "dev.flock", "-noStart"}, `C:\ProgramData`, io.Discard)
+	require.NoError(t, err)
+	assert.False(t, opts.StartNow)
+
+	// -noStart wins even when the legacy -start is also present.
+	opts, err = parseServiceInstallFlags([]string{"-config", "dev.flock", "-start", "-noStart"}, `C:\ProgramData`, io.Discard)
+	require.NoError(t, err)
+	assert.False(t, opts.StartNow)
 }
 
 func TestParseServiceInstallFlagsExplicit(t *testing.T) {
@@ -36,6 +55,11 @@ func TestParseServiceInstallFlagsExplicit(t *testing.T) {
 	assert.Equal(t, filepath.Join(`D:\data\reagent`, "apps"), opts.AppsDir)
 	assert.Equal(t, "http://proxy:3128", opts.Proxy)
 	assert.True(t, opts.StartNow)
+}
+
+func TestParseServiceInstallFlagsRejectsUnknown(t *testing.T) {
+	_, err := parseServiceInstallFlags([]string{"-config", "dev.flock", "-bogus"}, `C:\ProgramData`, io.Discard)
+	require.Error(t, err)
 }
 
 func TestParseServiceInstallFlagsRequiresConfig(t *testing.T) {

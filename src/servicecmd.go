@@ -107,7 +107,12 @@ func parseServiceInstallFlags(args []string, programData string, output io.Write
 	agentDir := flags.String("agentDir", "", "agent directory (default: %ProgramData%\\IronFlock\\Reagent)")
 	appsDir := flags.String("appsDir", "", "apps directory (default: <agentDir>\\apps)")
 	proxy := flags.String("proxy", "", "optional HTTP(S) proxy URL, written to the service environment")
-	startNow := flags.Bool("start", false, "start the service right after installing")
+	// Installing the agent and leaving it stopped is never what an operator wants — a device
+	// that was just registered should come online — so installing starts the service. `-start`
+	// stays accepted because every published doc and provisioning script passes it, but it is
+	// now the default and therefore a no-op.
+	noStart := flags.Bool("noStart", false, "install the service but do not start it")
+	_ = flags.Bool("start", false, "deprecated: installing already starts the service")
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -122,7 +127,7 @@ func parseServiceInstallFlags(args []string, programData string, output io.Write
 		ConfigPath:  *configPath,
 		AgentDirSet: *agentDir != "",
 		Proxy:       *proxy,
-		StartNow:    *startNow,
+		StartNow:    !*noStart,
 	}
 
 	opts.AgentDir = *agentDir

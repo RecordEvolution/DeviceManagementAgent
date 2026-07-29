@@ -105,9 +105,14 @@ on failure via SCM recovery actions, and **activates self-updates** (a console
 agent only downloads them). From an elevated (Administrator) prompt:
 
 ```
-reagent.exe service install -config path\to\config.flock -start
+reagent.exe service install -config path\to\config.flock
 reagent.exe service status|start|stop|uninstall
 ```
+
+`service install` **starts the service** when it finishes — a device that was just
+registered should come online without a second command. Pass `-noStart` to install
+without starting. (`-start` is still accepted for compatibility with older docs and
+provisioning scripts, but it no longer does anything.)
 
 What `service install` sets up:
 
@@ -189,10 +194,35 @@ gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagemen
 Making a staged version **live** is a deliberate manual step. Update `availableVersions.json` for the target environment(s), then:
 
 ```Shell
-just promote   # publishes src/release/version.txt + availableVersions.json to gs://re-agent
+just promote   # republishes the `latest` alias, then src/release/version.txt + availableVersions.json to gs://re-agent
 ```
 
 Agents read `availableVersions.json` to determine the latest version, so this publish **is** the release gate. (To promote only the available-versions list: `just publish-latestVersions`.)
+
+#### The `latest` alias
+
+`just promote` first runs `just publish-latest-alias`, which server-side-copies every binary staged under the **`production`** version to a `latest` version segment:
+
+```text
+gs://re-agent/windows/amd64/<version>/reagent.exe  ->  gs://re-agent/windows/amd64/latest/reagent.exe
+gs://re-agent/linux/arm64/<version>/reagent        ->  gs://re-agent/linux/arm64/latest/reagent
+...  (every os/arch in `targets`, plus the .sha256 sidecar for each)
+```
+
+This exists for the **manual install surface only**. Linux devices resolve the version themselves through `availableVersions.json` (`reswarmify`), but Windows has no such installer — the user downloads `reagent.exe` from a link in the docs and the platform UI, so that link must not carry a version. Those links point at:
+
+```text
+https://instance-registry.ironflock.com/dl/re-agent/windows/amd64/latest/reagent.exe
+https://instance-registry.ironflock.com/dl/re-agent/linux/<arch>/latest/reagent
+```
+
+(`/dl/re-agent/*` is the RESWARM registry-proxy route; it forwards verbatim to `https://storage.googleapis.com/re-agent/*`, so the raw GCS URL works identically.)
+
+The copy is byte-for-byte, so the Authenticode signature applied by `scripts/sign-windows.sh` and the `.sha256` sidecar published by `scripts/publish.sh` both stay valid. The alias objects are written with `Cache-Control: public, max-age=0` so they are always revalidated.
+
+Because it runs before `publish-latestVersions`, it also acts as a preflight guard: promoting a version whose binaries the release CI never published fails here, leaving the live `availableVersions.json` untouched.
+
+> **Never put `"latest"` into `availableVersions.json`.** The agent's OTA path feeds that value to `compareVersion()` ([`src/system/system.go`](src/system/system.go)) as a semver constraint, which would fail to parse. The alias is for humans; agents always resolve a concrete version.
 
 ### One-time CI setup (Workload Identity Federation)
 

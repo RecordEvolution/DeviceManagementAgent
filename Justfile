@@ -317,9 +317,58 @@ clean:
     rm -f build/*
     rm -f src/embedded/frpc_binary
 
-# Promote a staged version to live: publish version.txt + availableVersions.json.
+# Promote a staged version to live: republish the `latest` alias, then publish
+# version.txt + availableVersions.json.
 # This is the manual release gate — agents read availableVersions.json.
-promote: publish-version publish-latestVersions
+promote: publish-latest-alias publish-version publish-latestVersions
+
+# Docs and manual (Windows) installs need a link that never goes stale — there is no reswarmify
+# on Windows to resolve availableVersions.json for the user. Server-side copy, so the
+# Authenticode signature and the .sha256 sidecar carry over byte-for-byte.
+#
+# Runs FIRST in `promote`: it reads the local availableVersions.json and fails when nothing is
+# staged for that version, so a version the release CI never published is caught here — before
+# the live availableVersions.json flips and agents start chasing it.
+#
+# Alias the production version's binaries to gs://re-agent/<os>/<arch>/latest/
+publish-latest-alias:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    version=$(jq -r '.production' availableVersions.json)
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "availableVersions.json .production is not MAJOR.MINOR.PATCH: '$version'" >&2
+        exit 1
+    fi
+    # <os>/<arch>/<version>/<file> — four segments, so the five-segment frpc sub-tree
+    # (re-agent/frpc/<os>/<arch>/<frpver>/frpc) can never match this glob.
+    objects=$(gsutil ls "gs://re-agent/*/*/${version}/*" 2>/dev/null || true)
+    if [[ -z "$objects" ]]; then
+        echo "no binaries staged at gs://re-agent/*/*/${version}/ — did the release CI run?" >&2
+        exit 1
+    fi
+    echo "==> aliasing ${version} -> latest"
+    count=0
+    # read -r line-by-line rather than `for obj in $objects`: that would lean on IFS word
+    # splitting, which also splits on spaces and is a no-op in a non-bash shell.
+    while IFS= read -r obj; do
+        [[ -n "$obj" ]] || continue
+        rest=${obj#gs://re-agent/}
+        os=${rest%%/*}; rest=${rest#*/}
+        arch=${rest%%/*}; rest=${rest#*/}
+        ver=${rest%%/*}; file=${rest#*/}
+        [[ "$ver" == "$version" ]] || continue
+        # Cache-Control is set on the copy itself: publish.sh's bucket-wide setmeta runs at
+        # stage time, before these alias objects exist.
+        gsutil -q -h "Cache-Control:public, max-age=0" cp "$obj" "gs://re-agent/${os}/${arch}/latest/${file}"
+        echo "    ${os}/${arch}/${file}"
+        count=$((count + 1))
+    done <<< "$objects"
+    if [[ "$count" -eq 0 ]]; then
+        echo "matched no <os>/<arch>/${version}/<file> objects — bucket layout changed?" >&2
+        exit 1
+    fi
+    echo "==> aliased ${count} object(s) to latest"
 
 # Publish the binaries from the build folder
 publish:
