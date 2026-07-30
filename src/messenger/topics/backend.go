@@ -15,6 +15,11 @@ const UpdateDeviceArchitecture Topic = "reswarm.devices.update_device_architectu
 const CheckPrivilege Topic = "reswarm.devices.check_privilege"
 const SetDeviceTestament Topic = "reswarm.api.testament_device"
 
+// Immediate garbage collection of the appliance-local appstore registry
+// (registered by the registry auth service on the local router). Called by
+// diskguard on the appliance host when disk runs low.
+const RunRegistryGC Topic = "reswarm.registry.run_gc"
+
 // const UpdateAppTunnel Topic = "reswarm.devices.update_app_tunnel"
 const TunnelStateUpdate = "tunnel_state_update"
 const ExposePort Topic = "re.tunnel.expose_port"

@@ -39,6 +39,7 @@ import (
 	"reagent/container"
 	"reagent/safe"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -68,6 +69,13 @@ const (
 	removeTimeout   = 1 * time.Minute // per-volume remove
 	stopTimeout     = 30 * time.Second
 	cmdTimeout      = 2 * time.Minute // journalctl vacuum, apt-get clean
+
+	// Registry GC drains in-flight image transfers and walks the whole blob
+	// tree, so it gets a generous deadline — and a floor between runs: while
+	// in EMERGENCY safeCleanup re-runs every few seconds, and hammering the
+	// sweep would starve app syncs without freeing anything new.
+	registryGCTimeout     = 5 * time.Minute
+	registryGCMinInterval = 15 * time.Minute
 )
 
 // emergency is the device-wide disk-emergency flag. It is read by the app state
@@ -163,6 +171,15 @@ func (c *Config) withDefaults() {
 type Guard struct {
 	cfg    Config
 	docker Docker
+
+	// registryGC asks the appliance-local appstore registry for an immediate
+	// garbage collection. Wired via SetRegistryGC after the WAMP session
+	// exists (the guard itself is built and first run before any connection);
+	// nil = disabled. Mutex-guarded because the Run loop reads it while the
+	// startup goroutine may still be wiring it.
+	registryGCMu   sync.Mutex
+	registryGC     func(ctx context.Context)
+	lastRegistryGC time.Time
 }
 
 // New builds a Guard. docker may be nil (the container-dependent steps are then
@@ -170,6 +187,17 @@ type Guard struct {
 func New(docker Docker, cfg Config) *Guard {
 	cfg.withDefaults()
 	return &Guard{cfg: cfg, docker: docker}
+}
+
+// SetRegistryGC wires the immediate-registry-GC trigger once the WAMP session
+// exists (the SetMessenger pattern of the other subsystems, kept as a plain
+// function so this package stays free of the messenger dependency). fn is
+// called from the guard's background loop with a deadline-bounded context and
+// must be best-effort: log and return, never block beyond its context.
+func (g *Guard) SetRegistryGC(fn func(ctx context.Context)) {
+	g.registryGCMu.Lock()
+	defer g.registryGCMu.Unlock()
+	g.registryGC = fn
 }
 
 // decide maps free bytes to an action band. Pure function (testable). The warn
@@ -254,6 +282,11 @@ func (g *Guard) updateEmergency(free int64) {
 }
 
 func (g *Guard) safeCleanup() {
+	// Registry blobs of removed/superseded apps are often the largest
+	// reclaimable block on an appliance, and outside this path they wait on
+	// the registry's debounced sweep. First: it needs no Docker daemon (which
+	// may be wedged on a full disk) and frees space the prunes below can't.
+	g.triggerRegistryGC()
 	if g.docker != nil {
 		func() {
 			ctx, cancel := context.WithTimeout(context.Background(), pruneTimeout)
@@ -277,6 +310,27 @@ func (g *Guard) safeCleanup() {
 		g.run("apt-get", "clean")
 	}
 	g.truncateOversizedLogs()
+}
+
+// triggerRegistryGC runs the appstore registry's garbage collection now,
+// bypassing its debounce. No-op unless wired (SetRegistryGC — appliance host
+// only) and throttled to registryGCMinInterval between attempts. The throttle
+// stamps before the call: a failed sweep on a struggling box must not be
+// retried every emergency tick either.
+func (g *Guard) triggerRegistryGC() {
+	g.registryGCMu.Lock()
+	fn := g.registryGC
+	if fn == nil || time.Since(g.lastRegistryGC) < registryGCMinInterval {
+		g.registryGCMu.Unlock()
+		return
+	}
+	g.lastRegistryGC = time.Now()
+	g.registryGCMu.Unlock()
+
+	log.Info().Msg("diskguard: triggering immediate registry garbage collection")
+	ctx, cancel := context.WithTimeout(context.Background(), registryGCTimeout)
+	defer cancel()
+	fn(ctx)
 }
 
 // pruneOrphanedVolumes removes volumes that are positively known to be unused.

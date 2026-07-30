@@ -295,6 +295,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	// safely and entering a disk-emergency state (see diskguard.IsEmergency) that
 	// stops non-platform containers and is reported to the cloud, while the state
 	// machine fails new RUNNING/BUILDING/DOWNLOADING transitions.
+	var diskGuard *diskguard.Guard
 	if runtime.GOOS == "linux" {
 		diskguard.EnsurePreventionConfig()
 		// Watch the daemon's actual data-root: on FlockOS it lives on the apps
@@ -307,7 +308,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 			dataRoot = root
 		}
 		cancelInfo()
-		guard := diskguard.New(container, diskguard.Config{
+		diskGuard = diskguard.New(container, diskguard.Config{
 			DataRoot:       dataRoot,
 			AppsComposeDir: cliArgs.AppsComposeDir,
 			AppsBuildDir:   cliArgs.AppsBuildDir,
@@ -365,8 +366,8 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		// if the device boots disk-critical the emergency flag (and the app-start
 		// gate) is active before any container is started — and any containers
 		// Docker auto-restarted are stopped — instead of racing the Run loop.
-		guard.CheckNow()
-		safe.Go(func() { guard.Run(context.Background()) })
+		diskGuard.CheckNow()
+		safe.Go(func() { diskGuard.Run(context.Background()) })
 	}
 
 	// Reconcile local app state against the Docker daemon. fatal=true keeps
@@ -468,6 +469,31 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
 	tunnelManager.SetMessenger(mainSession)
+	// The appliance's appstore registry keeps its blobs on this same disk, and
+	// removed apps' blobs otherwise wait on the registry's debounced sweep.
+	// Give the diskguard a direct lever: an immediate registry garbage
+	// collection over the local router. Appliance HOST only — on a cloud
+	// device (or a device merely connected to an appliance) the same URI would
+	// reach a registry on someone else's disk. The docker/dev appliance
+	// variant carries no appliance_domain, hence the board-model fallback.
+	if diskGuard != nil &&
+		(generalConfig.ReswarmConfig.ApplianceDomain != "" ||
+			generalConfig.ReswarmConfig.Board.Model == "appliance") {
+		diskGuard.SetRegistryGC(func(ctx context.Context) {
+			result, err := mainSession.Call(ctx, topics.RunRegistryGC, nil, nil, nil, nil)
+			if err != nil {
+				log.Warn().Err(err).Msg("diskguard: registry GC call failed")
+				return
+			}
+			if len(result.Arguments) > 0 {
+				if res, ok := result.Arguments[0].(map[string]interface{}); ok {
+					log.Info().Fields(res).Msg("diskguard: registry GC completed")
+					return
+				}
+			}
+			log.Info().Msg("diskguard: registry GC completed")
+		})
+	}
 	// Let the tunnel manager re-fetch frpc if it is found missing at runtime
 	// (e.g. antivirus quarantined it) instead of crash-looping on a gone file.
 	tunnelManager.SetReacquireFrpc(systemAPI.DownloadFrpIfNotExists)
