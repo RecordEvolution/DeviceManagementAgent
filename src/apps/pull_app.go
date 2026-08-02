@@ -9,6 +9,36 @@ import (
 	"reagent/errdefs"
 )
 
+// pullComposeImages downloads the given services' images (all services when
+// none are given) via `docker compose pull`, streaming the CLI output to the
+// app's PROD log topic. ctx must be the context registered as the app's
+// cancelable compose transition (registerComposeTransitionCancel): a cancel
+// kills the CLI process, and the kill surfaces as a canceled stream so
+// RequestAppState unwinds the transition as canceled rather than marking the
+// app FAILED. Callers must register BEFORE publishing DOWNLOADING — the cloud
+// may answer that state with a cancel at any moment, and a cancel arriving
+// before registration would be lost while the pull keeps running.
+func (sm *StateMachine) pullComposeImages(ctx context.Context, payload common.TransitionPayload, dockerComposePath string, services []string) error {
+	compose := sm.Container.Compose()
+
+	pullOutput, pullCmd, err := compose.PullContext(ctx, dockerComposePath, services...)
+	if err != nil {
+		return composeTransitionErr(ctx, err)
+	}
+
+	_, err = sm.LogManager.StreamLogsChannel(pullOutput, payload.ContainerName.Prod)
+	if err != nil {
+		return composeTransitionErr(ctx, err)
+	}
+
+	err = pullCmd.Wait()
+	if err != nil {
+		return composeTransitionErr(ctx, err)
+	}
+
+	return nil
+}
+
 func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *common.App) error {
 	topicForLogStream := payload.ContainerName.Prod
 
@@ -16,6 +46,15 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 	if err != nil {
 		return err
 	}
+
+	// Register the cancelable pull context before publishing DOWNLOADING; see
+	// pullComposeImages.
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.registerComposeTransitionCancel(payload.Stage, payload.AppKey, cancel)
+	defer func() {
+		sm.clearComposeTransitionCancel(payload.Stage, payload.AppKey)
+		cancel()
+	}()
 
 	err = sm.setState(app, common.DOWNLOADING)
 	if err != nil {
@@ -68,17 +107,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	pullOutput, pullCmd, err := compose.Pull(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(pullOutput, topicForLogStream)
-	if err != nil {
-		return err
-	}
-
-	err = pullCmd.Wait()
+	err = sm.pullComposeImages(ctx, payload, dockerComposePath, nil)
 	if err != nil {
 		return err
 	}

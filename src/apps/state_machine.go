@@ -24,54 +24,57 @@ type StateMachine struct {
 	LogManager    *logging.LogManager
 	appStates     []*common.App
 
-	// composeUpdateCancels holds the cancel func of each in-flight compose
-	// update, keyed by app. A PRESENT request during an update calls it (via
-	// cancelUpdate) to kill the `docker compose` CLI so a hung pull/down unwinds
-	// and releases the transition lock, instead of blocking on cmd.Wait() forever.
-	composeUpdateCancels     map[string]context.CancelFunc
-	composeUpdateCancelMutex sync.Mutex
+	// composeTransitionCancels holds the cancel func of each in-flight cancelable
+	// compose transition (an update, or the pull phase of an install), keyed by
+	// app. A canceling request (cancelUpdate on a PRESENT request while UPDATING,
+	// cancelPull on a teardown request while DOWNLOADING) calls it to kill the
+	// `docker compose` CLI so a hung pull/down unwinds and releases the
+	// transition lock, instead of blocking on cmd.Wait() forever.
+	composeTransitionCancels     map[string]context.CancelFunc
+	composeTransitionCancelMutex sync.Mutex
 }
 
 func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, filesystem *filesystem.Filesystem) StateMachine {
 	appStates := make([]*common.App, 0)
 	return StateMachine{
-		StateObserver:        observer,
-		Container:            container,
-		LogManager:           logManager,
-		Filesystem:           filesystem,
-		appStates:            appStates,
-		composeUpdateCancels: make(map[string]context.CancelFunc),
+		StateObserver:            observer,
+		Container:                container,
+		LogManager:               logManager,
+		Filesystem:               filesystem,
+		appStates:                appStates,
+		composeTransitionCancels: make(map[string]context.CancelFunc),
 	}
 }
 
-func composeUpdateKey(stage common.Stage, appKey uint64) string {
+func composeTransitionKey(stage common.Stage, appKey uint64) string {
 	return fmt.Sprintf("%s_%d", stage, appKey)
 }
 
-// registerComposeUpdateCancel records the cancel func of an in-flight compose
-// update so cancelUpdate can reach it.
-func (sm *StateMachine) registerComposeUpdateCancel(stage common.Stage, appKey uint64, cancel context.CancelFunc) {
-	key := composeUpdateKey(stage, appKey)
-	sm.composeUpdateCancelMutex.Lock()
-	sm.composeUpdateCancels[key] = cancel
-	sm.composeUpdateCancelMutex.Unlock()
+// registerComposeTransitionCancel records the cancel func of an in-flight
+// cancelable compose transition so cancelUpdate/cancelPull can reach it.
+func (sm *StateMachine) registerComposeTransitionCancel(stage common.Stage, appKey uint64, cancel context.CancelFunc) {
+	key := composeTransitionKey(stage, appKey)
+	sm.composeTransitionCancelMutex.Lock()
+	sm.composeTransitionCancels[key] = cancel
+	sm.composeTransitionCancelMutex.Unlock()
 }
 
-// clearComposeUpdateCancel drops the cancel func once the update has unwound.
-func (sm *StateMachine) clearComposeUpdateCancel(stage common.Stage, appKey uint64) {
-	key := composeUpdateKey(stage, appKey)
-	sm.composeUpdateCancelMutex.Lock()
-	delete(sm.composeUpdateCancels, key)
-	sm.composeUpdateCancelMutex.Unlock()
+// clearComposeTransitionCancel drops the cancel func once the transition has
+// unwound.
+func (sm *StateMachine) clearComposeTransitionCancel(stage common.Stage, appKey uint64) {
+	key := composeTransitionKey(stage, appKey)
+	sm.composeTransitionCancelMutex.Lock()
+	delete(sm.composeTransitionCancels, key)
+	sm.composeTransitionCancelMutex.Unlock()
 }
 
-// cancelComposeUpdate cancels the context of an in-flight compose update for the
-// app, killing the docker compose CLI. Returns true if one was in flight.
-func (sm *StateMachine) cancelComposeUpdate(stage common.Stage, appKey uint64) bool {
-	key := composeUpdateKey(stage, appKey)
-	sm.composeUpdateCancelMutex.Lock()
-	cancel := sm.composeUpdateCancels[key]
-	sm.composeUpdateCancelMutex.Unlock()
+// cancelComposeTransition cancels the context of an in-flight compose transition
+// for the app, killing the docker compose CLI. Returns true if one was in flight.
+func (sm *StateMachine) cancelComposeTransition(stage common.Stage, appKey uint64) bool {
+	key := composeTransitionKey(stage, appKey)
+	sm.composeTransitionCancelMutex.Lock()
+	cancel := sm.composeTransitionCancels[key]
+	sm.composeTransitionCancelMutex.Unlock()
 	if cancel != nil {
 		cancel()
 		return true

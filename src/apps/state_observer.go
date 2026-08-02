@@ -11,6 +11,7 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -221,6 +222,54 @@ func (so *StateObserver) addObserver(stage common.Stage, appKey uint64, appName 
 	return createdObserver
 }
 
+// composeServicesWithMissingImages returns the (sorted) names of the compose
+// services whose image does not exist locally, matching loosely against the
+// RepoTags of the given image list. Services without an image field are
+// skipped. The boot reconciler treats an empty result as "all images present";
+// the install path (runProdComposeApp) uses the result both to decide whether
+// a real DOWNLOADING phase is needed and to pull only what is actually missing,
+// so the two stay consistent.
+func composeServicesWithMissingImages(dockerCompose map[string]interface{}, images []container.ImageResult) ([]string, error) {
+	services, ok := (dockerCompose["services"]).(map[string]interface{})
+	if !ok {
+		return nil, errors.New("failed to infer services")
+	}
+
+	missing := []string{}
+	for serviceName, serviceInterface := range services {
+		service, ok := (serviceInterface).(map[string]interface{})
+		if !ok {
+			return nil, errors.New("failed to infer service")
+		}
+
+		if service["image"] == nil {
+			continue
+		}
+
+		imageName := fmt.Sprint(service["image"])
+
+		foundImage := false
+		for _, image := range images {
+			for _, repoTag := range image.RepoTags {
+				if strings.Contains(repoTag, imageName) {
+					foundImage = true
+					break
+				}
+			}
+			if foundImage {
+				break
+			}
+		}
+
+		if !foundImage {
+			missing = append(missing, serviceName)
+		}
+	}
+
+	sort.Strings(missing)
+	return missing, nil
+}
+
 func (so *StateObserver) CorrectComposeAppState(requestedState common.TransitionPayload, images []container.ImageResult, composeListEntry []container.ComposeListEntry, updateRemote bool) error {
 	compose := so.Container.Compose()
 	composeName := common.BuildComposeContainerName(requestedState.Stage, requestedState.AppKey, requestedState.AppName)
@@ -250,39 +299,11 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 		currentAppState := app.CurrentState
 		app.StateLock.Unlock()
 
-		// Need to get images
-		services, ok := (requestedState.DockerCompose["services"]).(map[string]interface{})
-		if !ok {
-			return errors.New("failed to infer services")
+		missingImageServices, err := composeServicesWithMissingImages(requestedState.DockerCompose, images)
+		if err != nil {
+			return err
 		}
-
-		foundAllImages := true
-		for _, serviceInterface := range services {
-			service, ok := (serviceInterface).(map[string]interface{})
-			if !ok {
-				return errors.New("failed to infer service")
-			}
-
-			if service["image"] != nil {
-				imageName := fmt.Sprint(service["image"])
-
-				foundImage := false
-				for _, image := range images {
-					for _, repoTag := range image.RepoTags {
-						if strings.Contains(repoTag, imageName) {
-							foundImage = true
-							break
-						}
-					}
-				}
-
-				if !foundImage {
-					foundAllImages = false
-					break
-				}
-
-			}
-		}
+		foundAllImages := len(missingImageServices) == 0
 
 		hasComposeDir := compose.HasComposeDir(app.AppName, app.Stage)
 

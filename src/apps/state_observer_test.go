@@ -340,3 +340,67 @@ func TestObserverContainerNameRegex(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+// =============================================================================
+// composeServicesWithMissingImages — pure matching logic shared by the boot
+// reconciler and the install path's download-phase decision (runProdComposeApp).
+// =============================================================================
+
+func TestComposeServicesWithMissingImages(t *testing.T) {
+	compose := func(images ...string) map[string]interface{} {
+		services := map[string]interface{}{}
+		for i, image := range images {
+			services[string(rune('a'+i))] = map[string]interface{}{"image": image}
+		}
+		return map[string]interface{}{"services": services}
+	}
+
+	local := []containerpkg.ImageResult{
+		{RepoTags: []string{"registry.example.com/apps/prod_amd64_12_myapp:1.0.0"}},
+		{RepoTags: []string{"eclipse-mosquitto:2"}},
+		{RepoTags: nil}, // dangling image, no tags
+	}
+
+	t.Run("all images present", func(t *testing.T) {
+		missing, err := composeServicesWithMissingImages(compose("registry.example.com/apps/prod_amd64_12_myapp:1.0.0", "eclipse-mosquitto:2"), local)
+		require.NoError(t, err)
+		assert.Empty(t, missing)
+	})
+
+	t.Run("only the services with missing images are returned", func(t *testing.T) {
+		missing, err := composeServicesWithMissingImages(compose("eclipse-mosquitto:2", "dperson/samba:latest"), local)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"b"}, missing)
+	})
+
+	t.Run("untagged reference matches tagged local image", func(t *testing.T) {
+		missing, err := composeServicesWithMissingImages(compose("eclipse-mosquitto"), local)
+		require.NoError(t, err)
+		assert.Empty(t, missing)
+	})
+
+	t.Run("service without image field is skipped", func(t *testing.T) {
+		dockerCompose := map[string]interface{}{
+			"services": map[string]interface{}{
+				"built": map[string]interface{}{"build": "."},
+			},
+		}
+		missing, err := composeServicesWithMissingImages(dockerCompose, local)
+		require.NoError(t, err)
+		assert.Empty(t, missing)
+	})
+
+	t.Run("no local images at all returns every image service sorted", func(t *testing.T) {
+		missing, err := composeServicesWithMissingImages(compose("eclipse-mosquitto:2", "dperson/samba:latest"), nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b"}, missing)
+	})
+
+	t.Run("malformed compose errors", func(t *testing.T) {
+		_, err := composeServicesWithMissingImages(map[string]interface{}{"services": "garbage"}, local)
+		assert.Error(t, err)
+
+		_, err = composeServicesWithMissingImages(map[string]interface{}{"services": map[string]interface{}{"a": "garbage"}}, local)
+		assert.Error(t, err)
+	})
+}

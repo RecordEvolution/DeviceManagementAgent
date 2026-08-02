@@ -188,9 +188,14 @@ func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error)
 
 // PullContext is Pull bound to a cancelable context: canceling ctx kills the
 // underlying `docker compose pull` process (see composeCommandContext), letting
-// an update abort a hung pull instead of blocking on cmd.Wait() forever.
-func (c *Compose) PullContext(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommandContext(ctx, dockerComposePath, "pull")
+// a caller abort a hung pull instead of blocking on cmd.Wait() forever. When
+// service names are given, only those services are pulled (the install path
+// pulls just the services whose images are missing locally, mirroring
+// `compose up`'s implicit missing-only pull); without services the whole
+// project is pulled.
+func (c *Compose) PullContext(ctx context.Context, dockerComposePath string, services ...string) (chan string, *exec.Cmd, error) {
+	args := append([]string{"pull"}, services...)
+	return c.composeCommandContext(ctx, dockerComposePath, args...)
 }
 
 // PullIgnoreBuildable is for dev builds only, where images with a build section

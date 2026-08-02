@@ -168,11 +168,12 @@ func (sm *StateMachine) persistPostUpdateRequestedState(payload common.Transitio
 	return sm.StateObserver.AppStore.UpdateLocalRequestedState(payload)
 }
 
-// composeUpdateErr classifies an error from a cancelable compose command. When
-// the update's context was canceled (a PRESENT request killed the CLI), the
-// underlying process error is reported as a canceled stream so RequestAppState
-// unwinds the transition as canceled rather than marking the app FAILED.
-func composeUpdateErr(ctx context.Context, err error) error {
+// composeTransitionErr classifies an error from a cancelable compose command.
+// When the transition's context was canceled (a cancel request killed the CLI),
+// the underlying process error is reported as a canceled stream so
+// RequestAppState unwinds the transition as canceled rather than marking the
+// app FAILED.
+func composeTransitionErr(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return errdefs.DockerStreamCanceled(err)
 	}
@@ -210,9 +211,9 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	// transition lock, instead of blocking on cmd.Wait() forever. The deferred
 	// cancel also frees the context on the normal (success/error) exit paths.
 	ctx, cancel := context.WithCancel(context.Background())
-	sm.registerComposeUpdateCancel(payload.Stage, payload.AppKey, cancel)
+	sm.registerComposeTransitionCancel(payload.Stage, payload.AppKey, cancel)
 	defer func() {
-		sm.clearComposeUpdateCancel(payload.Stage, payload.AppKey)
+		sm.clearComposeTransitionCancel(payload.Stage, payload.AppKey)
 		cancel()
 	}()
 
@@ -227,12 +228,12 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	// renamed or dropped in the new compose. Volumes are preserved (no `-v`).
 	_, cmd, err := compose.DownRemoveOrphansContext(ctx, dockerComposePath)
 	if err != nil {
-		return composeUpdateErr(ctx, err)
+		return composeTransitionErr(ctx, err)
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		return composeUpdateErr(ctx, err)
+		return composeTransitionErr(ctx, err)
 	}
 
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
@@ -257,17 +258,17 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 
 	pullOutput, pullCmd, err := compose.PullContext(ctx, dockerComposePath)
 	if err != nil {
-		return composeUpdateErr(ctx, err)
+		return composeTransitionErr(ctx, err)
 	}
 
 	_, err = sm.LogManager.StreamLogsChannel(pullOutput, payload.ContainerName.Prod)
 	if err != nil {
-		return composeUpdateErr(ctx, err)
+		return composeTransitionErr(ctx, err)
 	}
 
 	err = pullCmd.Wait()
 	if err != nil {
-		return composeUpdateErr(ctx, err)
+		return composeTransitionErr(ctx, err)
 	}
 
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)

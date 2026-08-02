@@ -650,7 +650,7 @@ func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 			// A compose update is in flight, with its cancel func registered as
 			// updateComposeApp would.
 			canceled := make(chan struct{}, 1)
-			am.StateMachine.registerComposeUpdateCancel(common.PROD, 62, func() { canceled <- struct{}{} })
+			am.StateMachine.registerComposeTransitionCancel(common.PROD, 62, func() { canceled <- struct{}{} })
 
 			payload := amPayload(62, "cancelme", requested, common.PROD)
 			payload.DockerCompose = updComposeMap()
@@ -674,7 +674,7 @@ func TestCancelActiveUpdateCancelsComposeAndStream(t *testing.T) {
 		am, _, _, _, _, _ := amHarness(t)
 
 		canceled := false
-		am.StateMachine.registerComposeUpdateCancel(common.PROD, 64, func() { canceled = true })
+		am.StateMachine.registerComposeTransitionCancel(common.PROD, 64, func() { canceled = true })
 
 		payload := amPayload(64, "compose", common.PRESENT, common.PROD)
 		payload.DockerCompose = updComposeMap()

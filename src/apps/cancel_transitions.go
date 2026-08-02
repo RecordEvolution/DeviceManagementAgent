@@ -28,6 +28,23 @@ func (sm *StateMachine) cancelPull(payload common.TransitionPayload, app *common
 		return errors.New("cannot pull dev apps")
 	}
 
+	if payload.DockerCompose != nil {
+		// Compose pulls run via the docker compose CLI, not a docker-API
+		// stream, so CancelStream can't reach them — cancel through the
+		// transition's registered context instead, which kills the CLI. Unlike
+		// a canceled docker-API pull there may already be compose files, env
+		// mirrors and fully pulled service images on disk, so settle with a
+		// real teardown matching the requested state (like the STARTING row
+		// does) instead of only publishing REMOVED. Mirrors
+		// cancelUpdateAndRemove/cancelUpdateAndUninstall for compose updates.
+		sm.cancelComposeTransition(payload.Stage, payload.AppKey)
+
+		if payload.RequestedState == common.UNINSTALLED {
+			return sm.uninstallApp(payload, app)
+		}
+		return sm.removeApp(payload, app)
+	}
+
 	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
 
 	sm.Container.CancelStream(pullID)
@@ -50,7 +67,7 @@ func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common
 // the docker-API pull stream. No-op if nothing is in flight.
 func (sm *StateMachine) cancelActiveUpdate(payload common.TransitionPayload) {
 	if payload.DockerCompose != nil {
-		sm.cancelComposeUpdate(payload.Stage, payload.AppKey)
+		sm.cancelComposeTransition(payload.Stage, payload.AppKey)
 	} else {
 		pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
 		sm.Container.CancelStream(pullID)

@@ -251,11 +251,62 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	// Mark STARTING before SetupComposeFiles: on a contended boot that step
-	// (a Docker-API read of the previous generation's published ports) can take
-	// several seconds, and until the app leaves PRESENT the cloud sees it as
-	// not-yet-starting while re-drive pushes just bounce off the held lock.
-	err = sm.setState(app, common.STARTING)
+	// Decide up front whether this is a FRESH INSTALL whose service images
+	// still have to be downloaded. `compose up` pulls missing images
+	// implicitly, which used to leave the app in STARTING for the whole
+	// download — for a fresh install we surface a real DOWNLOADING phase below,
+	// explicitly pulling just the missing services (mirroring up's missing-only
+	// pull, so an unreachable third-party registry for an already-present
+	// shared image cannot fail the install). Restarts of an already-installed
+	// app deliberately keep the implicit pull: the cloud answers a cancel
+	// during DOWNLOADING with an uninstall — correct when an install is being
+	// canceled, but never what the stop button may do to an installed app.
+	// If the check itself fails, fall back to the implicit pull so a
+	// Docker-API hiccup cannot break a start that would otherwise succeed.
+	app.StateLock.Lock()
+	freshInstall := app.CurrentState == common.UNINSTALLED || app.CurrentState == common.REMOVED
+	app.StateLock.Unlock()
+
+	var missingImageServices []string
+	if freshInstall {
+		getImagesContext, cancelGetImages := context.WithTimeout(context.Background(), time.Second*30)
+		localImages, imagesErr := sm.Container.GetImages(getImagesContext, "")
+		cancelGetImages()
+		if imagesErr != nil {
+			log.Warn().Err(imagesErr).Msgf("failed to list local images for %s; deferring the download to compose up", payload.AppName)
+		} else {
+			missingImageServices, err = composeServicesWithMissingImages(payload.DockerCompose, localImages)
+			if err != nil {
+				log.Warn().Err(err).Msgf("failed to check compose images for %s; deferring the download to compose up", payload.AppName)
+				missingImageServices = nil
+			}
+		}
+	}
+	needsDownload := len(missingImageServices) > 0
+
+	// Register the cancelable pull context before publishing DOWNLOADING; see
+	// pullComposeImages.
+	var pullCtx context.Context
+	if needsDownload {
+		var cancelPull context.CancelFunc
+		pullCtx, cancelPull = context.WithCancel(context.Background())
+		sm.registerComposeTransitionCancel(payload.Stage, payload.AppKey, cancelPull)
+		defer func() {
+			sm.clearComposeTransitionCancel(payload.Stage, payload.AppKey)
+			cancelPull()
+		}()
+	}
+
+	// Mark STARTING (or DOWNLOADING when images must be pulled) before
+	// SetupComposeFiles: on a contended boot that step (a Docker-API read of
+	// the previous generation's published ports) can take several seconds, and
+	// until the app leaves PRESENT the cloud sees it as not-yet-starting while
+	// re-drive pushes just bounce off the held lock.
+	initialState := common.STARTING
+	if needsDownload {
+		initialState = common.DOWNLOADING
+	}
+	err = sm.setState(app, initialState)
 	if err != nil {
 		return err
 	}
@@ -285,14 +336,31 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
+	if needsDownload {
+		err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Downloading images for %s...", payload.AppName))
+		if err != nil {
+			return err
+		}
+
+		err = sm.pullComposeImages(pullCtx, payload, dockerComposePath, missingImageServices)
+		if err != nil {
+			return err
+		}
+	}
+
 	err = sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("Starting %s...", payload.AppName))
 	if err != nil {
 		return err
 	}
 
-	err = sm.setState(app, common.STARTING)
-	if err != nil {
-		return err
+	// Leave DOWNLOADING again once the pull is done. Without a download phase
+	// the early STARTING publish above already covers this — don't publish the
+	// same state twice.
+	if needsDownload {
+		err = sm.setState(app, common.STARTING)
+		if err != nil {
+			return err
+		}
 	}
 
 	outputChan, upCmd, err := compose.Up(dockerComposePath)
