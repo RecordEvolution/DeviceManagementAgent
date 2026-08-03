@@ -429,9 +429,53 @@ func normalizeNetworkMode(mode string) string {
 	return mode
 }
 
+// reassignComposePortsAfterBindConflict is reassignPortsAfterBindConflict for
+// compose apps. It walks the compose `ports:` entries rather than the tunnel
+// port rules: compose assignments are recorded under service-qualified keys
+// (rewriteComposeHostPorts), which a rule-derived key never matches, and a
+// compose app can publish ports no tunnel rule mentions at all.
+func (am *AppManager) reassignComposePortsAfterBindConflict(payload common.TransitionPayload, bindErr error) bool {
+	if payload.DockerCompose == nil {
+		return false
+	}
+
+	message := bindErr.Error()
+	reassigned := false
+	for _, entry := range parseComposePorts(payload.DockerCompose) {
+		if !entry.Rewritable {
+			continue
+		}
+
+		key := hostPortKey{
+			Stage:    payload.Stage,
+			AppKey:   payload.AppKey,
+			Protocol: entry.Protocol,
+			Port:     entry.DeclaredPort(),
+			Service:  entry.Service,
+		}
+
+		hostPort, ok := am.hostPorts.Get(key)
+		if !ok || !strings.Contains(message, fmt.Sprintf(":%d", hostPort)) {
+			continue
+		}
+
+		newPort, err := am.hostPorts.ReassignFresh(key)
+		if err != nil {
+			log.Error().Err(err).Str("service", entry.Service).Uint64("port", entry.DeclaredPort()).Msg("Failed to reassign compose host port after bind conflict")
+			continue
+		}
+
+		log.Warn().Str("app", payload.AppName).Str("service", entry.Service).Uint64("port", entry.DeclaredPort()).Uint64("oldHostPort", hostPort).Uint64("newHostPort", newPort).Msg("Host port was taken by another process, reassigned")
+		reassigned = true
+	}
+
+	return reassigned
+}
+
 // isPortAllocationError reports whether a container create/start failure is a
 // host port conflict (something outside the registry grabbed the port between
-// probe and bind).
+// probe and bind). For compose apps the conflict is reported by the CLI on
+// stderr, which reaches here inside a container.ComposeError.
 func isPortAllocationError(err error) bool {
 	if err == nil {
 		return false

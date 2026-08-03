@@ -67,22 +67,12 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 		return sm.LogManager.Write(containerName, sucessRemoveMessage)
 	}
 
-	_, cmd, err := compose.Down(dockerComposePath)
+	err = compose.Down(dockerComposePath)
 	if err != nil {
 		return err
 	}
 
-	err = cmd.Wait()
-	if err != nil {
-		return err
-	}
-
-	_, cmd, err = compose.Remove(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
+	err = compose.Remove(dockerComposePath)
 	if err != nil {
 		return err
 	}

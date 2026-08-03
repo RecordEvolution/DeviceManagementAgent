@@ -226,12 +226,7 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 	// containers tagged with the same project name). Stop+Remove against the
 	// new file alone would leave behind containers for services that were
 	// renamed or dropped in the new compose. Volumes are preserved (no `-v`).
-	_, cmd, err := compose.DownRemoveOrphansContext(ctx, dockerComposePath)
-	if err != nil {
-		return composeTransitionErr(ctx, err)
-	}
-
-	err = cmd.Wait()
+	err = compose.DownRemoveOrphansContext(ctx, dockerComposePath)
 	if err != nil {
 		return composeTransitionErr(ctx, err)
 	}

@@ -21,8 +21,11 @@ import (
 )
 
 type Compose struct {
-	Supported             bool
-	config                *config.Config
+	Supported bool
+	config    *config.Config
+	// binary is the CLI to invoke; empty means "docker". Swappable so tests can
+	// exercise the output/exit-code plumbing without a daemon.
+	binary                string
 	logStreamMap          map[string]*ComposeLog
 	composeProcessesMap   map[string]context.CancelFunc
 	composeProcessesMutex sync.Mutex
@@ -112,18 +115,151 @@ func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, er
 	return images, nil
 }
 
-func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, *exec.Cmd, error) {
+const (
+	// composeTailLines is how many of a compose command's last output lines are
+	// kept to explain a non-zero exit.
+	composeTailLines = 25
+
+	// composeStreamBuffer sizes the streamed output channel. Deep enough that a
+	// consumer never realistically falls behind, so the drop below stays
+	// theoretical.
+	composeStreamBuffer = 4096
+
+	// maxComposeLineBytes raises the per-line cap above bufio.Scanner's 64 KB
+	// default. A longer line would otherwise end the scan silently, stop
+	// draining the pipe and hang the CLI (and Wait) forever.
+	maxComposeLineBytes = 1024 * 1024
+)
+
+// composeOutputTail keeps the last lines a compose command wrote. The CLI
+// reports the actual reason for a failure (a port conflict, a missing image, a
+// registry denial) on stderr and then exits 1, so without the tail a caller
+// only ever sees the bare "exit status 1".
+type composeOutputTail struct {
+	mutex   sync.Mutex
+	lines   []string
+	dropped int
+}
+
+func (t *composeOutputTail) add(line string) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	if len(t.lines) == composeTailLines {
+		t.lines = t.lines[1:]
+	}
+	t.lines = append(t.lines, line)
+}
+
+func (t *composeOutputTail) recordDropped() {
+	t.mutex.Lock()
+	t.dropped++
+	t.mutex.Unlock()
+}
+
+func (t *composeOutputTail) String() string {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	lines := make([]string, 0, len(t.lines)+1)
+	if t.dropped > 0 {
+		lines = append(lines, fmt.Sprintf("(%d output line(s) dropped)", t.dropped))
+	}
+	for _, line := range t.lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "; ")
+}
+
+// ComposeError reports a `docker compose` invocation that exited non-zero,
+// naming the subcommand and quoting the tail of what the CLI printed.
+type ComposeError struct {
+	Subcommand string
+	Output     string
+	Err        error
+}
+
+func (e *ComposeError) Error() string {
+	if e.Output == "" {
+		return fmt.Sprintf("docker compose %s failed: %s", e.Subcommand, e.Err)
+	}
+	return fmt.Sprintf("docker compose %s failed: %s: %s", e.Subcommand, e.Err, e.Output)
+}
+
+func (e *ComposeError) Unwrap() error {
+	return e.Err
+}
+
+// ComposeCmd is a running `docker compose` invocation.
+type ComposeCmd struct {
+	cmd        *exec.Cmd
+	subcommand string
+	tail       *composeOutputTail
+	drained    chan struct{}
+}
+
+// Wait blocks until the command has exited and all of its output has been
+// read. A non-zero exit yields a *ComposeError carrying the CLI's own message.
+func (cc *ComposeCmd) Wait() error {
+	// exec.Cmd requires every read from StdoutPipe to have completed before
+	// Wait: Wait closes the pipe, so waiting here is what keeps the tail (and
+	// the streamed log lines) complete. The reader can never block, so this
+	// cannot wedge — see composeCommandContext.
+	<-cc.drained
+
+	err := cc.cmd.Wait()
+	if err == nil {
+		return nil
+	}
+
+	return &ComposeError{Subcommand: cc.subcommand, Output: cc.tail.String(), Err: err}
+}
+
+func (c *Compose) composeCommand(dockerComposePath string, providedArgs ...string) (chan string, *ComposeCmd, error) {
 	return c.composeCommandContext(context.Background(), dockerComposePath, providedArgs...)
 }
 
-func (c *Compose) composeCommandContext(ctx context.Context, dockerComposePath string, providedArgs ...string) (chan string, *exec.Cmd, error) {
+// composeCommandContext starts a compose command and streams its combined
+// output on the returned channel. run() is the variant for commands executed
+// purely for their effect.
+func (c *Compose) composeCommandContext(ctx context.Context, dockerComposePath string, providedArgs ...string) (chan string, *ComposeCmd, error) {
+	return c.startComposeCommand(ctx, dockerComposePath, true, providedArgs...)
+}
+
+// run executes a compose command to completion, discarding its output except
+// for the tail kept to explain a failure. Commands nothing consumes the stream
+// of (stop, rm, down) must go through here: an unconsumed stream blocks its
+// reader, which stops the pipe from being drained and deadlocks the CLI as
+// soon as it outgrows the pipe buffer.
+func (c *Compose) run(ctx context.Context, dockerComposePath string, providedArgs ...string) error {
+	_, cmd, err := c.startComposeCommand(ctx, dockerComposePath, false, providedArgs...)
+	if err != nil {
+		return err
+	}
+
+	return cmd.Wait()
+}
+
+func (c *Compose) startComposeCommand(ctx context.Context, dockerComposePath string, streamed bool, providedArgs ...string) (chan string, *ComposeCmd, error) {
 	finalArgs := []string{}
 	finalArgs = append(finalArgs, "compose", "-f", dockerComposePath)
 	finalArgs = append(finalArgs, providedArgs...)
 
-	cmd := exec.CommandContext(ctx, "docker", finalArgs...)
+	binary := c.binary
+	if binary == "" {
+		binary = "docker"
+	}
 
-	outputChan := make(chan string)
+	cmd := exec.CommandContext(ctx, binary, finalArgs...)
+
+	var outputChan chan string
+	if streamed {
+		outputChan = make(chan string, composeStreamBuffer)
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -138,20 +274,50 @@ func (c *Compose) composeCommandContext(ctx context.Context, dockerComposePath s
 		return nil, nil, err
 	}
 
+	subcommand := "compose"
+	if len(providedArgs) > 0 {
+		subcommand = providedArgs[0]
+	}
+
+	composeCmd := &ComposeCmd{
+		cmd:        cmd,
+		subcommand: subcommand,
+		tail:       &composeOutputTail{},
+		drained:    make(chan struct{}),
+	}
+
 	go func() {
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			text := scanner.Text()
-			outputChan <- text
+		defer close(composeCmd.drained)
+		if streamed {
+			defer close(outputChan)
 		}
 
-		close(outputChan)
+		scanner := bufio.NewScanner(stdoutPipe)
+		scanner.Buffer(make([]byte, 0, 64*1024), maxComposeLineBytes)
+
+		for scanner.Scan() {
+			text := scanner.Text()
+			composeCmd.tail.add(text)
+
+			if !streamed {
+				continue
+			}
+
+			// Never block: a stalled consumer must not stop the pipe from
+			// being drained. Dropping a log line is recoverable, wedging the
+			// transition is not — and the tail still carries the failure.
+			select {
+			case outputChan <- text:
+			default:
+				composeCmd.tail.recordDropped()
+			}
+		}
 	}()
 
-	return outputChan, cmd, nil
+	return outputChan, composeCmd, nil
 }
 
-func (c *Compose) Build(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
+func (c *Compose) Build(ctx context.Context, dockerComposePath string) (chan string, *ComposeCmd, error) {
 	return c.composeCommandContext(ctx, dockerComposePath, "build")
 }
 
@@ -178,11 +344,11 @@ func (c *Compose) CancelBuild(buildID string) error {
 	return nil
 }
 
-func (c *Compose) Push(dockerComposePath string) (chan string, *exec.Cmd, error) {
+func (c *Compose) Push(dockerComposePath string) (chan string, *ComposeCmd, error) {
 	return c.composeCommand(dockerComposePath, "push")
 }
 
-func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error) {
+func (c *Compose) Pull(dockerComposePath string) (chan string, *ComposeCmd, error) {
 	return c.composeCommand(dockerComposePath, "pull")
 }
 
@@ -193,7 +359,7 @@ func (c *Compose) Pull(dockerComposePath string) (chan string, *exec.Cmd, error)
 // pulls just the services whose images are missing locally, mirroring
 // `compose up`'s implicit missing-only pull); without services the whole
 // project is pulled.
-func (c *Compose) PullContext(ctx context.Context, dockerComposePath string, services ...string) (chan string, *exec.Cmd, error) {
+func (c *Compose) PullContext(ctx context.Context, dockerComposePath string, services ...string) (chan string, *ComposeCmd, error) {
 	args := append([]string{"pull"}, services...)
 	return c.composeCommandContext(ctx, dockerComposePath, args...)
 }
@@ -202,11 +368,11 @@ func (c *Compose) PullContext(ctx context.Context, dockerComposePath string, ser
 // were just built locally and must not be pulled. Deployed apps must keep using
 // Pull: their platform-rewritten compose files still contain build sections, but
 // the images have to come from the registry. Requires compose >= v2.17.
-func (c *Compose) PullIgnoreBuildable(dockerComposePath string) (chan string, *exec.Cmd, error) {
+func (c *Compose) PullIgnoreBuildable(dockerComposePath string) (chan string, *ComposeCmd, error) {
 	return c.composeCommand(dockerComposePath, "pull", "--ignore-buildable")
 }
 
-func (c *Compose) Up(dockerComposePath string) (chan string, *exec.Cmd, error) {
+func (c *Compose) Up(dockerComposePath string) (chan string, *ComposeCmd, error) {
 	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d")
 }
 
@@ -301,30 +467,30 @@ func (c *Compose) RefreshSupport() {
 	c.Supported = IsComposeSupported()
 }
 
-func (c *Compose) Stop(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "stop")
+func (c *Compose) Stop(dockerComposePath string) error {
+	return c.run(context.Background(), dockerComposePath, "stop")
 }
 
-func (c *Compose) Remove(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "rm", "-f")
+func (c *Compose) Remove(dockerComposePath string) error {
+	return c.run(context.Background(), dockerComposePath, "rm", "-f")
 }
 
-func (c *Compose) Down(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "down", "-v")
+func (c *Compose) Down(dockerComposePath string) error {
+	return c.run(context.Background(), dockerComposePath, "down", "-v")
 }
 
 // DownRemoveOrphans tears down the whole compose project — services in the
 // file plus any orphan containers tagged with the same project name (services
 // that were removed or renamed in a new compose file). Volumes are preserved
 // (no `-v`) so user data survives the update.
-func (c *Compose) DownRemoveOrphans(dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommand(dockerComposePath, "down", "--remove-orphans")
+func (c *Compose) DownRemoveOrphans(dockerComposePath string) error {
+	return c.run(context.Background(), dockerComposePath, "down", "--remove-orphans")
 }
 
 // DownRemoveOrphansContext is DownRemoveOrphans bound to a cancelable context;
 // see PullContext.
-func (c *Compose) DownRemoveOrphansContext(ctx context.Context, dockerComposePath string) (chan string, *exec.Cmd, error) {
-	return c.composeCommandContext(ctx, dockerComposePath, "down", "--remove-orphans")
+func (c *Compose) DownRemoveOrphansContext(ctx context.Context, dockerComposePath string) error {
+	return c.run(ctx, dockerComposePath, "down", "--remove-orphans")
 }
 
 func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {

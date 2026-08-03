@@ -161,7 +161,7 @@ func composeITTwoServiceCompose() map[string]any {
 // composeITDrainUp drains a `compose` command's output channel and waits for the
 // process to finish, mirroring what LogManager.StreamLogsChannel + cmd.Wait do
 // in the production runProdComposeApp / runDevComposeApp handlers.
-func composeITDrainUp(outputChan chan string, cmd *exec.Cmd) error {
+func composeITDrainUp(outputChan chan string, cmd *container.ComposeCmd) error {
 	for range outputChan {
 		// drain; the goroutine in composeCommandContext closes this on EOF
 	}

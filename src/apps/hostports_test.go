@@ -1,13 +1,16 @@
 package apps
 
 import (
+	"errors"
 	"fmt"
 	"reagent/common"
+	"reagent/container"
 	"sync"
 	"testing"
 
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestRegistry() *HostPortRegistry {
@@ -224,4 +227,73 @@ func TestMappedPortEnvsForCompose(t *testing.T) {
 		"DEVICE_PORT_FOR_1883=40011",
 		"DEVICE_PORT_FOR_8080=40010",
 	}, am.devicePortEnvsForCompose(payload, dockerCompose))
+}
+
+// A compose bind conflict reaches the retry as a container.ComposeError: the
+// CLI prints "Bind for 0.0.0.0:<port> failed: port is already allocated" and
+// exits 1, so classification has to survive the wrapping.
+func TestIsPortAllocationErrorMatchesComposeError(t *testing.T) {
+	composeErr := &container.ComposeError{
+		Subcommand: "up",
+		Output:     `Error response from daemon: driver failed programming external connectivity on endpoint prod_5_app-web-1: Bind for 0.0.0.0:40010 failed: port is already allocated`,
+		Err:        errors.New("exit status 1"),
+	}
+
+	assert.True(t, isPortAllocationError(composeErr))
+	assert.False(t, isPortAllocationError(&container.ComposeError{Subcommand: "up", Output: "manifest unknown", Err: errors.New("exit status 1")}))
+}
+
+func TestReassignComposePortsAfterBindConflict(t *testing.T) {
+	newPayload := func() common.TransitionPayload {
+		return common.TransitionPayload{
+			Stage:   common.PROD,
+			AppKey:  5,
+			AppName: "app",
+			DockerCompose: map[string]interface{}{
+				"services": map[string]interface{}{
+					"web":    map[string]interface{}{"ports": []interface{}{"8080:80"}},
+					"broker": map[string]interface{}{"ports": []interface{}{"1883:1883/udp"}},
+				},
+			},
+		}
+	}
+
+	webKey := hostPortKey{Stage: common.PROD, AppKey: 5, Protocol: "tcp", Port: 8080, Service: "web"}
+	brokerKey := hostPortKey{Stage: common.PROD, AppKey: 5, Protocol: "udp", Port: 1883, Service: "broker"}
+
+	t.Run("reassigns only the service whose host port is named in the error", func(t *testing.T) {
+		am := &AppManager{hostPorts: newTestRegistry()}
+		am.hostPorts.record(webKey, 40010)
+		am.hostPorts.record(brokerKey, 40011)
+
+		bindErr := errors.New("Bind for 0.0.0.0:40010 failed: port is already allocated")
+		assert.True(t, am.reassignComposePortsAfterBindConflict(newPayload(), bindErr))
+
+		web, ok := am.hostPorts.Get(webKey)
+		require.True(t, ok)
+		assert.NotEqual(t, uint64(40010), web, "the conflicting port is replaced")
+
+		broker, ok := am.hostPorts.Get(brokerKey)
+		require.True(t, ok)
+		assert.Equal(t, uint64(40011), broker, "an unrelated service keeps its port")
+	})
+
+	t.Run("no reassignment when the error names a port the app does not hold", func(t *testing.T) {
+		am := &AppManager{hostPorts: newTestRegistry()}
+		am.hostPorts.record(webKey, 40010)
+
+		bindErr := errors.New("Bind for 0.0.0.0:40099 failed: port is already allocated")
+		assert.False(t, am.reassignComposePortsAfterBindConflict(newPayload(), bindErr))
+
+		web, _ := am.hostPorts.Get(webKey)
+		assert.Equal(t, uint64(40010), web)
+	})
+
+	t.Run("single-container payloads are not compose payloads", func(t *testing.T) {
+		am := &AppManager{hostPorts: newTestRegistry()}
+		payload := newPayload()
+		payload.DockerCompose = nil
+
+		assert.False(t, am.reassignComposePortsAfterBindConflict(payload, errors.New("Bind for 0.0.0.0:40010 failed: port is already allocated")))
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"reagent/common"
 	"reagent/config"
+	reagentcontainer "reagent/container"
 	"reagent/errdefs"
 	reagentnetwork "reagent/network"
 	"reagent/system"
@@ -93,6 +94,81 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 	return nil
 }
 
+// composeUpAttempts bounds the retry when `docker compose up` loses a host
+// port to a process outside the agent between the registry's probe and
+// docker's bind.
+const composeUpAttempts = 3
+
+// teardownComposeProject stops and removes the project's containers.
+func teardownComposeProject(compose *reagentcontainer.Compose, dockerComposePath string) error {
+	err := compose.Stop(dockerComposePath)
+	if err != nil {
+		return err
+	}
+
+	return compose.Remove(dockerComposePath)
+}
+
+// composeUp brings the project up, streaming the CLI output to the app's log
+// topic. A bind conflict is retried with freshly assigned host ports, the
+// compose equivalent of what startContainer does for single-container apps.
+// The managed ports live in the compose file rather than in the launch call,
+// so a retry has to regenerate the file — and tear the half-started project
+// down first, or SetupComposeFiles recovers the conflicting port straight back
+// out of the still-running previous generation.
+//
+// On a failure that is not retryable the reason is written to the app log:
+// compose reports it on stderr and exits non-zero, and nothing else in the
+// transition surfaces it to the user.
+func (sm *StateMachine) composeUp(payload common.TransitionPayload, app *common.App, dockerComposePath string, logTopic string) error {
+	compose := sm.Container.Compose()
+
+	var lastErr error
+	for attempt := 0; attempt < composeUpAttempts; attempt++ {
+		outputChan, upCmd, err := compose.Up(dockerComposePath)
+		if err != nil {
+			return err
+		}
+
+		_, err = sm.LogManager.StreamLogsChannel(outputChan, logTopic)
+		if err != nil {
+			return err
+		}
+
+		lastErr = upCmd.Wait()
+		if lastErr == nil {
+			return nil
+		}
+
+		if !isPortAllocationError(lastErr) || !sm.StateObserver.AppManager.reassignComposePortsAfterBindConflict(payload, lastErr) {
+			break
+		}
+
+		log.Warn().Str("app", payload.AppName).Msg("Retrying compose up with freshly assigned host ports")
+
+		err = teardownComposeProject(compose, dockerComposePath)
+		if err != nil {
+			return err
+		}
+
+		_, err = sm.SetupComposeFiles(payload, app, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	sm.LogManager.Write(logTopic, fmt.Sprintf("The app failed to start, reason: %s", lastErr.Error()))
+
+	// Best effort: a failed `up` can leave part of the project behind, and the
+	// teardown error must not mask the reason the start failed.
+	cleanupErr := teardownComposeProject(compose, dockerComposePath)
+	if cleanupErr != nil {
+		log.Warn().Err(cleanupErr).Str("app", payload.AppName).Msg("Failed to clean up the compose project after a failed start")
+	}
+
+	return lastErr
+}
+
 func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *common.App) error {
 	err := sm.LogManager.ClearLogHistory(payload.ContainerName.Dev)
 	if err != nil {
@@ -123,22 +199,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	_, cmd, err := compose.Stop(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
-	if err != nil {
-		return err
-	}
-
-	_, cmd, err = compose.Remove(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
+	err = teardownComposeProject(compose, dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -148,17 +209,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	outputChan, upCmd, err := compose.Up(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(outputChan, payload.ContainerName.Dev)
-	if err != nil {
-		return err
-	}
-
-	err = upCmd.Wait()
+	err = sm.composeUp(payload, app, dockerComposePath, payload.ContainerName.Dev)
 	if err != nil {
 		return err
 	}
@@ -174,22 +225,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			_, cmd, cleanupErr := compose.Stop(dockerComposePath)
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			cleanupErr = cmd.Wait()
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			_, cmd, cleanupErr = compose.Remove(dockerComposePath)
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			cleanupErr = cmd.Wait()
+			cleanupErr := teardownComposeProject(compose, dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
@@ -316,22 +352,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	_, cmd, err := compose.Stop(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
-	if err != nil {
-		return err
-	}
-
-	_, cmd, err = compose.Remove(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
+	err = teardownComposeProject(compose, dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -363,17 +384,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		}
 	}
 
-	outputChan, upCmd, err := compose.Up(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	_, err = sm.LogManager.StreamLogsChannel(outputChan, payload.ContainerName.Prod)
-	if err != nil {
-		return err
-	}
-
-	err = upCmd.Wait()
+	err = sm.composeUp(payload, app, dockerComposePath, payload.ContainerName.Prod)
 	if err != nil {
 		return err
 	}
@@ -389,27 +400,12 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			_, cmd, cleanupErr := compose.Stop(dockerComposePath)
+			cleanupErr := teardownComposeProject(compose, dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
 
-			cleanupErr = cmd.Wait()
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			_, cmd, cleanupErr = compose.Remove(dockerComposePath)
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			cleanupErr = cmd.Wait()
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-
-			sm.LogManager.Write(payload.ContainerName.Dev, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
+			sm.LogManager.Write(payload.ContainerName.Prod, fmt.Sprintf("The app failed to start, reason: %s", err.Error()))
 			return err
 		}
 		break

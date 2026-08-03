@@ -78,22 +78,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
 	}
 
-	_, cmd, err := compose.Stop(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
-	if err != nil {
-		return err
-	}
-
-	_, cmd, err = compose.Remove(dockerComposePath)
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
+	err = teardownComposeProject(compose, dockerComposePath)
 	if err != nil {
 		return err
 	}

@@ -1,11 +1,16 @@
 package container
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"reagent/common"
 	"reagent/config"
@@ -321,4 +326,119 @@ func TestDockerComposeUnmarshal(t *testing.T) {
 	require.Contains(t, dc.Services, "builder")
 	assert.Equal(t, "./svc", dc.Services["builder"].Build)
 	assert.Empty(t, dc.Services["builder"].Image)
+}
+
+// =============================================================================
+// Command plumbing: a non-zero exit must carry the reason the CLI printed, and
+// an unconsumed output stream must never stall the command.
+// =============================================================================
+
+// newFakeComposeCompose returns a Compose whose "docker" is the given shell
+// script, so the exit-code/output plumbing is exercised without a daemon.
+func newFakeComposeCompose(t *testing.T, script string) *Compose {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "fake-docker")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
+
+	c := newTestCompose(builders.DefaultTestConfig(), true)
+	c.binary = path
+	return c
+}
+
+func TestComposeErrorNamesSubcommandAndQuotesOutput(t *testing.T) {
+	cause := errors.New("exit status 1")
+	err := &ComposeError{Subcommand: "up", Output: "Bind for 0.0.0.0:40001 failed: port is already allocated", Err: cause}
+
+	assert.Equal(t,
+		"docker compose up failed: exit status 1: Bind for 0.0.0.0:40001 failed: port is already allocated",
+		err.Error(),
+	)
+	// Callers classify by string match on the wrapped chain (isPortAllocationError).
+	assert.ErrorIs(t, err, cause)
+
+	bare := &ComposeError{Subcommand: "stop", Err: cause}
+	assert.Equal(t, "docker compose stop failed: exit status 1", bare.Error())
+}
+
+func TestComposeOutputTailKeepsTheLastLines(t *testing.T) {
+	tail := &composeOutputTail{}
+	for i := 0; i < composeTailLines+5; i++ {
+		tail.add(fmt.Sprintf("line-%d", i))
+	}
+
+	joined := tail.String()
+	assert.NotContains(t, joined, "line-4", "the oldest lines are evicted")
+	assert.Contains(t, joined, fmt.Sprintf("line-%d", composeTailLines+4), "the newest line is kept")
+	assert.Len(t, strings.Split(joined, "; "), composeTailLines)
+}
+
+// A failing stop/rm/down is run for effect and nothing consumes its stream;
+// the reason must still reach the caller instead of a bare "exit status 1".
+func TestComposeRunSurfacesTheCLIReason(t *testing.T) {
+	c := newFakeComposeCompose(t, `echo "no configuration file provided: not found" >&2; exit 1`)
+
+	err := c.Stop("/tmp/does-not-matter.yml")
+
+	var composeErr *ComposeError
+	require.ErrorAs(t, err, &composeErr)
+	assert.Equal(t, "stop", composeErr.Subcommand)
+	assert.Contains(t, err.Error(), "no configuration file provided: not found")
+}
+
+func TestComposeRunSucceedsSilently(t *testing.T) {
+	c := newFakeComposeCompose(t, `echo "Container app-web  Stopped"; exit 0`)
+
+	assert.NoError(t, c.Stop("/tmp/does-not-matter.yml"))
+	assert.NoError(t, c.Remove("/tmp/does-not-matter.yml"))
+	assert.NoError(t, c.Down("/tmp/does-not-matter.yml"))
+}
+
+// An unconsumed stream must not block its reader: a blocked reader stops the
+// pipe from being drained, which deadlocks the CLI once its output outgrows
+// the pipe buffer and hangs Wait forever.
+func TestComposeUnconsumedStreamDoesNotStall(t *testing.T) {
+	c := newFakeComposeCompose(t, `i=0; while [ $i -lt 20000 ]; do echo "chatter line $i"; i=$((i+1)); done; echo "boom" >&2; exit 1`)
+
+	// Deliberately drop the channel, exactly as an unread stream would.
+	_, cmd, err := c.composeCommandContext(context.Background(), "/tmp/does-not-matter.yml", "up")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case waitErr := <-done:
+		require.Error(t, waitErr)
+		assert.Contains(t, waitErr.Error(), "boom", "the tail survives the dropped stream")
+	case <-time.After(30 * time.Second):
+		t.Fatal("Wait blocked on an unconsumed output stream")
+	}
+}
+
+// A single line longer than bufio.Scanner's 64 KB default must not end the
+// scan: that would stop the pipe being drained and hang the command.
+func TestComposeLongOutputLineDoesNotStall(t *testing.T) {
+	c := newFakeComposeCompose(t, `awk 'BEGIN { s=""; while (length(s) < 200000) s = s "x"; print s }'; echo "tail marker" >&2; exit 1`)
+
+	outputChan, cmd, err := c.composeCommandContext(context.Background(), "/tmp/does-not-matter.yml", "up")
+	require.NoError(t, err)
+
+	lines := make([]string, 0, 2)
+	go func() {
+		for line := range outputChan {
+			lines = append(lines, line)
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case waitErr := <-done:
+		require.Error(t, waitErr)
+		assert.Contains(t, waitErr.Error(), "tail marker")
+	case <-time.After(30 * time.Second):
+		t.Fatal("Wait blocked on an over-long output line")
+	}
 }
