@@ -376,6 +376,17 @@ func (c *Compose) Up(dockerComposePath string) (chan string, *ComposeCmd, error)
 	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d")
 }
 
+// UpNoBuild is Up for deployed apps. Their compose files keep the authored
+// `build:` sections (see PullIgnoreBuildable), so when an image is missing
+// from the registry `up` silently falls back to building it — from a context
+// that only ever exists on a builder, never on a device. The build then fails
+// on the missing context directory, burying the real cause ("image not
+// found") under an unrelated lstat error. --no-build makes the pull failure
+// itself be the failure.
+func (c *Compose) UpNoBuild(dockerComposePath string) (chan string, *ComposeCmd, error) {
+	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d", "--no-build")
+}
+
 func (c *Compose) WaitForRunning(ctx context.Context, dockerComposePath string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {
 	errC := make(chan error, 1)
 	runningC := make(chan struct{}, 1)

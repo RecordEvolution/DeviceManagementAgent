@@ -123,9 +123,16 @@ func teardownComposeProject(compose *reagentcontainer.Compose, dockerComposePath
 func (sm *StateMachine) composeUp(payload common.TransitionPayload, app *common.App, dockerComposePath string, logTopic string) error {
 	compose := sm.Container.Compose()
 
+	// PROD images always come from the registry; DEV apps are built on the
+	// device by the BUILT transition, so their `up` may still build.
+	up := compose.Up
+	if payload.Stage == common.PROD {
+		up = compose.UpNoBuild
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < composeUpAttempts; attempt++ {
-		outputChan, upCmd, err := compose.Up(dockerComposePath)
+		outputChan, upCmd, err := up(dockerComposePath)
 		if err != nil {
 			return err
 		}
