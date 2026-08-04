@@ -70,9 +70,10 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.PruneImages:             ex.pruneImageHandler,
 		topics.GetAgentMetaData:        ex.getAgentMetadataHandler,
 		topics.ListContainers:          ex.listContainersHandler,
-		topics.GetAgentLogs:            ex.getAgentLogs,
 		topics.GetNetworkMetaData:      ex.getNetworkDataHandler,
 		topics.GetAppLogHistory:        ex.getAppLogHistoryHandler,
+		topics.QueryAppLogs:            ex.queryAppLogsHandler,
+		topics.QueryDeviceLogs:         ex.queryDeviceLogsHandler,
 		topics.GetTunnelState:          ex.getTunnelState,
 
 		topics.GetOSRelease:     ex.getOSReleaseHandler,

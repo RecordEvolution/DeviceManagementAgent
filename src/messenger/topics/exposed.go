@@ -9,6 +9,17 @@ const RequestTerminalSession Topic = "request_terminal_session"
 const StartTerminalSession Topic = "start_terminal_session"
 const StopTerminalSession Topic = "stop_terminal_session"
 const GetAppLogHistory Topic = "get_app_log_history"
+
+// QueryAppLogs is the windowed successor to GetAppLogHistory. The older topic
+// keeps its exact wire contract — the Studio log viewer consumes a flat
+// string[] and would break on a richer result — so range support arrives as a
+// separate procedure rather than as extra arguments on that one.
+const QueryAppLogs Topic = "query_app_logs"
+
+// QueryDeviceLogs reads the agent's own log: what the DEVICE did, across every
+// app. Bounded, time-windowed and severity-filtered.
+const QueryDeviceLogs Topic = "query_device_logs"
+
 const ListContainers Topic = "list_containers"
 
 const ListEthernetDevices Topic = "list_ethernet_devices"
@@ -30,7 +41,6 @@ const GetStorageData Topic = "get_storage_data"
 const GetNetworkMetaData Topic = "get_network_metadata"
 
 const GetAgentMetaData Topic = "get_agent_metadata"
-const GetAgentLogs Topic = "get_agent_logs"
 
 const UpdateAgent Topic = "update_agent"
 

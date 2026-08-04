@@ -13,6 +13,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/safe"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -504,7 +505,73 @@ func (c *Compose) DownRemoveOrphansContext(ctx context.Context, dockerComposePat
 	return c.run(ctx, dockerComposePath, "down", "--remove-orphans")
 }
 
-func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.ReadCloser, error) {
+// LogQuery bounds a one-shot log read.
+//
+// The zero value means "as much as the store still holds", which is what every
+// caller predating time-windowed queries expects. Since and Until are RFC3339
+// or Unix-seconds strings: resolve relative durations with common.ParseLogTime
+// before filling them in, so the device's clock is applied exactly once and the
+// same absolute window reaches both the Docker and the compose path.
+type LogQuery struct {
+	Tail       uint64
+	Since      string
+	Until      string
+	Timestamps bool
+}
+
+// ComposeArgs renders the query as `docker compose logs` flags.
+//
+// --no-color is unconditional: compose only auto-disables colour when it
+// detects a TTY, and an ANSI escape that survives into a log line is noise for
+// every consumer we have.
+func (q LogQuery) ComposeArgs() []string {
+	args := []string{"logs", "--no-color"}
+	if q.Tail > 0 {
+		args = append(args, "--tail", strconv.FormatUint(q.Tail, 10))
+	} else {
+		args = append(args, "--tail", "all")
+	}
+	if q.Timestamps {
+		args = append(args, "--timestamps")
+	}
+	if q.Since != "" {
+		args = append(args, "--since", q.Since)
+	}
+	if q.Until != "" {
+		args = append(args, "--until", q.Until)
+	}
+	return args
+}
+
+// DockerOptions renders the query as option keys for Container.Logs.
+func (q LogQuery) DockerOptions() common.Dict {
+	options := common.Dict{"follow": false, "stdout": true, "stderr": true}
+	if q.Tail > 0 {
+		options["tail"] = strconv.FormatUint(q.Tail, 10)
+	} else {
+		options["tail"] = "all"
+	}
+	if q.Timestamps {
+		options["timestamps"] = true
+	}
+	if q.Since != "" {
+		options["since"] = q.Since
+	}
+	if q.Until != "" {
+		options["until"] = q.Until
+	}
+	return options
+}
+
+// LogsByContainerName reads the logs of a whole compose project, addressed by
+// the agent's compose container name (`<stage>_<key>_<name>_compose`).
+//
+// Every service in the project is included, each line prefixed with its service
+// name — for a multi-container app that prefix is the only thing identifying
+// which service spoke, so it is deliberately kept. Output is CombinedOutput, so
+// compose's own progress and warning text on stderr is interleaved with the
+// container output.
+func (c *Compose) LogsByContainerName(containerName string, query LogQuery) (io.ReadCloser, error) {
 	composeListEntry, err := c.List()
 	if err != nil {
 		return nil, err
@@ -521,19 +588,22 @@ func (c *Compose) LogsByContainerName(containerName string, tail uint64) (io.Rea
 		return nil, errors.New("compose entry not found")
 	}
 
-	output, err := exec.Command("docker", "compose", "-f", foundComposeEntry.ConfigFiles, "logs", "--tail", fmt.Sprint(tail)).CombinedOutput()
-	if err != nil {
-		return nil, err
-	}
-
-	reader := strings.NewReader(string(output))
-	readCloser := io.NopCloser(reader)
-
-	return readCloser, nil
+	return c.logs(foundComposeEntry.ConfigFiles, query)
 }
 
-func (c *Compose) Logs(dockerComposePath string, tail uint64) (io.ReadCloser, error) {
-	output, err := exec.Command("docker", "compose", "-f", dockerComposePath, "logs", "--tail", fmt.Sprint(tail)).CombinedOutput()
+func (c *Compose) Logs(dockerComposePath string, query LogQuery) (io.ReadCloser, error) {
+	return c.logs(dockerComposePath, query)
+}
+
+func (c *Compose) logs(dockerComposePath string, query LogQuery) (io.ReadCloser, error) {
+	binary := c.binary
+	if binary == "" {
+		binary = "docker"
+	}
+
+	args := append([]string{"compose", "-f", dockerComposePath}, query.ComposeArgs()...)
+
+	output, err := exec.Command(binary, args...).CombinedOutput()
 	if err != nil {
 		return nil, err
 	}

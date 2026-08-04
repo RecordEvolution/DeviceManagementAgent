@@ -639,40 +639,63 @@ func (docker *Docker) Push(ctx context.Context, imageName string, options PushOp
 	return reader, nil
 }
 
-func (docker *Docker) Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error) {
+// logsOptionsFromDict maps the agent's option vocabulary onto the Docker SDK's.
+//
+// An unrecognised type for a known key is ignored rather than rejected, which
+// is the behaviour every call site has always relied on. `tail` is the one
+// exception worth calling out: it accepts a string ("50", "all") or a number,
+// because nexus hands a WAMP integer over as uint64 and the previous
+// string-only assertion silently fell through to Docker's "all" default.
+func logsOptionsFromDict(options common.Dict) container.LogsOptions {
 	containerOptions := container.LogsOptions{}
-	stdoutKw := options["stdout"]
-	stderrKw := options["stderr"]
-	followKw := options["follow"]
-	tailKw := options["tail"]
 
-	if stdoutKw != nil {
-		stdout, ok := stdoutKw.(bool)
-		if ok {
-			containerOptions.ShowStdout = stdout
-		}
+	if stdout, ok := options["stdout"].(bool); ok {
+		containerOptions.ShowStdout = stdout
 	}
 
-	if stderrKw != nil {
-		stderr, ok := stderrKw.(bool)
-		if ok {
-			containerOptions.ShowStderr = stderr
-		}
+	if stderr, ok := options["stderr"].(bool); ok {
+		containerOptions.ShowStderr = stderr
 	}
 
-	if followKw != nil {
-		follow, ok := followKw.(bool)
-		if ok {
-			containerOptions.Follow = follow
-		}
+	if follow, ok := options["follow"].(bool); ok {
+		containerOptions.Follow = follow
 	}
 
-	if tailKw != nil {
-		tail, ok := tailKw.(string)
-		if ok {
+	if tailKw := options["tail"]; tailKw != nil {
+		if tail, ok := tailKw.(string); ok {
 			containerOptions.Tail = tail
+		} else if tail, ok := common.ToUint64(tailKw); ok {
+			containerOptions.Tail = strconv.FormatUint(tail, 10)
 		}
 	}
+
+	// Since/Until pass through verbatim. The daemon parses RFC3339 and Unix
+	// seconds; relative durations are a CLI-side convenience and are resolved by
+	// the caller (common.ParseLogTime) before they reach here.
+	if since, ok := options["since"].(string); ok {
+		containerOptions.Since = since
+	}
+
+	if until, ok := options["until"].(string); ok {
+		containerOptions.Until = until
+	}
+
+	if timestamps, ok := options["timestamps"].(bool); ok {
+		containerOptions.Timestamps = timestamps
+	}
+
+	return containerOptions
+}
+
+// Logs reads a container's logs.
+//
+// Recognised option keys: stdout, stderr, follow, tail, since, until,
+// timestamps. The last three exist because Docker's json-file driver is the
+// only store on the device that stamps every record with a time — the agent's
+// own in-memory ring and its SQLite LogHistory blob keep bare strings — so a
+// time-windowed log query can only be answered here.
+func (docker *Docker) Logs(ctx context.Context, containerName string, options common.Dict) (io.ReadCloser, error) {
+	containerOptions := logsOptionsFromDict(options)
 
 	reader, err := docker.client.ContainerLogs(ctx, containerName, containerOptions)
 	if err != nil {

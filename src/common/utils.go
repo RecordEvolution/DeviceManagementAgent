@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"reagent/config"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
@@ -145,6 +147,85 @@ func EnvironmentVarsToStringArray(environmentsMap map[string]interface{}) []stri
 	}
 
 	return stringArray
+}
+
+// ToUint64 coerces a number decoded from a WAMP message to a uint64.
+//
+// nexus deserializes JSON with ugorji codec at its default SignedInteger:false,
+// so a non-negative integer arrives as uint64, a negative one as int64, and
+// only a genuinely fractional value as float64. Handlers that assert a single
+// concrete type therefore drop perfectly valid input on the floor — Docker.Logs
+// asserted `tail.(string)` and silently served the *whole* log whenever a
+// caller sent a number. Coerce here once instead of repeating the ladder.
+func ToUint64(value interface{}) (uint64, bool) {
+	switch typed := value.(type) {
+	case uint64:
+		return typed, true
+	case uint32:
+		return uint64(typed), true
+	case uint:
+		return uint64(typed), true
+	case int64:
+		if typed < 0 {
+			return 0, false
+		}
+		return uint64(typed), true
+	case int:
+		if typed < 0 {
+			return 0, false
+		}
+		return uint64(typed), true
+	case float64:
+		if typed < 0 || typed != math.Trunc(typed) {
+			return 0, false
+		}
+		return uint64(typed), true
+	case json.Number:
+		parsed, err := strconv.ParseUint(typed.String(), 10, 64)
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseUint(typed, 10, 64)
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
+// ParseLogTime resolves a caller-supplied log-window bound to an absolute time.
+//
+// Three forms are accepted, because the three callers that matter each reach
+// for a different one: RFC3339 ("2026-08-04T09:12:00Z") from a machine that
+// already knows the moment, a bare Unix-seconds value from anything speaking
+// Docker's own vocabulary, and a Go duration meaning "this long ago" ("30m",
+// "2h", "1h30m") from an assistant reasoning in relative terms.
+//
+// A duration is resolved against *now* on the DEVICE, not on the caller. That
+// is the correct reading of "the last 30 minutes" — the logs are the device's —
+// but it does mean an absolute bound and a relative one can disagree when the
+// device clock has drifted. Every log response echoes the device's own clock so
+// the caller can see the skew rather than silently mis-read an empty window.
+func ParseLogTime(value string, now time.Time) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, errors.New("empty log time")
+	}
+
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return parsed, nil
+	}
+
+	// A duration is "ago", so it may arrive with or without a leading '-'.
+	if duration, err := time.ParseDuration(strings.TrimPrefix(trimmed, "-")); err == nil {
+		if duration < 0 {
+			duration = -duration
+		}
+		return now.Add(-duration), nil
+	}
+
+	if seconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return time.Unix(seconds, 0).UTC(), nil
+	}
+
+	return time.Time{}, fmt.Errorf("%q is not an RFC3339 time, a Unix timestamp, or a duration", trimmed)
 }
 
 var StatusRegex = regexp.MustCompile(`\((.*?)\)`)

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reagent/common"
 	"reagent/errdefs"
@@ -182,57 +181,6 @@ func TestGetAppLogHistoryHandler(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, res)
 		assert.True(t, errdefs.IsInsufficientPrivileges(err))
-	})
-}
-
-// =============================================================================
-// getAgentLogs - reads the reagent log file from disk into a Dict
-//
-// No privilege gate: the handler just reads Config.LogFileLocation and shapes
-// the contents under the "reagent.log" key. A missing file is a soft case.
-// =============================================================================
-
-func TestGetAgentLogs(t *testing.T) {
-	t.Run("returns the log file contents under reagent.log", func(t *testing.T) {
-		logFile := filepath.Join(t.TempDir(), "reagent.log")
-		const contents = "boot line 1\nboot line 2\n"
-		require.NoError(t, os.WriteFile(logFile, []byte(contents), 0o644))
-
-		cfg := testConfig()
-		cfg.CommandLineArguments.LogFileLocation = logFile
-		ex := &External{Config: cfg}
-
-		res, err := ex.getAgentLogs(context.Background(), messenger.Result{
-			Details: systemDetails(),
-		})
-
-		require.NoError(t, err)
-		require.NotNil(t, res)
-		require.Len(t, res.Arguments, 1)
-
-		dict, ok := res.Arguments[0].(common.Dict)
-		require.True(t, ok)
-		assert.Equal(t, contents, dict["reagent.log"])
-	})
-
-	t.Run("reports a placeholder when the log file is missing", func(t *testing.T) {
-		// Point at a path that does not exist; os.IsNotExist branch fills a
-		// placeholder string instead of erroring.
-		cfg := testConfig()
-		cfg.CommandLineArguments.LogFileLocation = filepath.Join(t.TempDir(), "does-not-exist.log")
-		ex := &External{Config: cfg}
-
-		res, err := ex.getAgentLogs(context.Background(), messenger.Result{
-			Details: systemDetails(),
-		})
-
-		require.NoError(t, err)
-		require.NotNil(t, res)
-		require.Len(t, res.Arguments, 1)
-
-		dict, ok := res.Arguments[0].(common.Dict)
-		require.True(t, ok)
-		assert.Equal(t, "log file was not found", dict["reagent.log"])
 	})
 }
 
