@@ -26,6 +26,7 @@ type Messenger interface {
 	GetSessionID() uint64
 	GetConfig() *config.Config
 	Connected() bool
+	Reconnect()
 	UpdateRemoteDeviceStatus(status DeviceStatus) error
 	SetOnConnect(cb func(reconnect bool))
 	Close()

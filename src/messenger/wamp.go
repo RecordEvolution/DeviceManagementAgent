@@ -709,6 +709,25 @@ func (s *WampSession) SetupTestament() error {
 	return err
 }
 
+// Reconnect drops the current connection so the watcher dials a fresh one.
+// The new dial rebuilds the HELLO details from the live config, which is the
+// only way to change the session's authid ("<swarm_key>-<device_key>") — it is
+// negotiated once per connection. Used after the device is moved to another
+// project. No-op when there is no client; the watcher is already reconnecting.
+func (s *WampSession) Reconnect() {
+	s.mu.Lock()
+	c := s.client
+	s.mu.Unlock()
+
+	if c == nil {
+		return
+	}
+
+	// Closing makes Done() fire, which is what watchDisconnect is parked on.
+	// It re-enters connect(true) and the OnConnect callback runs again.
+	_ = c.Close()
+}
+
 // Close cancels the session's reconnect loop and closes the underlying
 // client. Safe to call multiple times.
 func (s *WampSession) Close() {

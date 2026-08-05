@@ -19,11 +19,12 @@ import (
 // messenger.Messenger interface. It records calls and lets tests configure
 // per-topic responses and simulate disconnects.
 type Messenger struct {
-	mu        sync.RWMutex
-	config    *config.Config
-	connected bool
-	done      chan struct{}
-	sessionID uint64
+	mu         sync.RWMutex
+	config     *config.Config
+	connected  bool
+	done       chan struct{}
+	sessionID  uint64
+	reconnects int
 
 	// Call tracking
 	PublishCalls   []PublishCall
@@ -183,6 +184,19 @@ func (m *Messenger) Connected() bool {
 
 func (m *Messenger) SetOnConnect(cb func(reconnect bool)) {
 	// No-op: store callback here if a test needs to assert on it.
+}
+
+func (m *Messenger) Reconnect() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reconnects++
+}
+
+// Reconnects reports how many times Reconnect was called.
+func (m *Messenger) Reconnects() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.reconnects
 }
 
 func (m *Messenger) Close() {

@@ -1,10 +1,14 @@
 package system
 
 import (
+	"path/filepath"
 	"testing"
 
 	"reagent/common"
 	"reagent/config"
+	"reagent/messenger/topics"
+	"reagent/testutil/builders"
+	"reagent/testutil/fakes"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -289,4 +293,87 @@ func TestBuildBinaryDownloadURL(t *testing.T) {
 	if want := base + "/re-agent/frpc/windows/amd64/0.70.0/frpc.exe"; got != want {
 		t.Fatalf("frpc windows URL = %q, want %q", got, want)
 	}
+}
+
+// A device moved to another project must pick the new swarm_key up on its very
+// first metadata refresh and report the change, because its WAMP authid
+// ("<swarm_key>-<device_key>") is negotiated per connection and every
+// device-scoped backend write is keyed on swarm_key. Missing the change strands
+// the device: it keeps addressing the project it just left.
+func TestUpdateDeviceMetadataDetectsProjectTransfer(t *testing.T) {
+	metadata := func(swarmKey interface{}) common.Result {
+		return common.Result{Arguments: []interface{}{map[string]interface{}{
+			"device_key":  uint64(1),
+			"swarm_key":   swarmKey,
+			"device_name": "test-device",
+			"swarm_name":  "new-project",
+			"ownername":   "someone",
+		}}}
+	}
+
+	newSystem := func(t *testing.T, res common.Result) (*System, *fakes.Messenger, *config.Config) {
+		t.Helper()
+		cfg := builders.NewTestConfigBuilder().WithSwarmKey(7).WithDeviceKey(1).Build()
+		// Persisting is part of the refresh; point it at a throwaway file.
+		cfg.CommandLineArguments.ConfigFileLocation = filepath.Join(t.TempDir(), "device.flock")
+
+		msg := fakes.NewMessengerWithConfig(cfg)
+		msg.SetCallResponse(string(topics.GetDeviceMetadata), res, nil)
+
+		sys := New(cfg, msg)
+		return &sys, msg, cfg
+	}
+
+	t.Run("reports the change and persists the new project", func(t *testing.T) {
+		sys, _, cfg := newSystem(t, metadata(uint64(42)))
+
+		changed, err := sys.UpdateDeviceMetadata()
+		require.NoError(t, err)
+		assert.True(t, changed, "a different swarm_key must be reported so the caller reconnects")
+		assert.Equal(t, 42, cfg.ReswarmConfig.SwarmKey)
+		assert.Equal(t, "new-project", cfg.ReswarmConfig.SwarmName)
+
+		reloaded, err := config.LoadReswarmConfig(cfg.CommandLineArguments.ConfigFileLocation)
+		require.NoError(t, err)
+		assert.Equal(t, 42, reloaded.SwarmKey, "the new project must survive an agent restart")
+	})
+
+	t.Run("unchanged project does not force a reconnect", func(t *testing.T) {
+		sys, _, cfg := newSystem(t, metadata(uint64(7)))
+
+		changed, err := sys.UpdateDeviceMetadata()
+		require.NoError(t, err)
+		assert.False(t, changed)
+		assert.Equal(t, 7, cfg.ReswarmConfig.SwarmKey)
+	})
+
+	// Which numeric type a swarm_key arrives as depends on the negotiated
+	// serializer. Asserting one concrete type silently skipped the transfer.
+	for _, tc := range []struct {
+		name     string
+		swarmKey interface{}
+	}{
+		{"uint64", uint64(42)},
+		{"int64", int64(42)},
+		{"float64", float64(42)},
+		{"int", 42},
+	} {
+		t.Run("accepts swarm_key as "+tc.name, func(t *testing.T) {
+			sys, _, cfg := newSystem(t, metadata(tc.swarmKey))
+
+			changed, err := sys.UpdateDeviceMetadata()
+			require.NoError(t, err)
+			assert.True(t, changed)
+			assert.Equal(t, 42, cfg.ReswarmConfig.SwarmKey)
+		})
+	}
+
+	t.Run("rejects a non-numeric swarm_key without touching the config", func(t *testing.T) {
+		sys, _, cfg := newSystem(t, metadata("not-a-number-at-all"))
+
+		changed, err := sys.UpdateDeviceMetadata()
+		require.Error(t, err)
+		assert.False(t, changed)
+		assert.Equal(t, 7, cfg.ReswarmConfig.SwarmKey)
+	})
 }

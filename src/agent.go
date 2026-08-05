@@ -82,10 +82,39 @@ func (agent *Agent) Shutdown(timeout time.Duration) {
 func (agent *Agent) OnConnect(reconnect bool) error {
 	var wg sync.WaitGroup
 
-	log.Info().Msg("Updating Remote Device Status ...")
-	err := agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
+	// Refresh the cached device/project identity before anything is written
+	// back. The device may have been moved to another project while we were
+	// away, and every device-scoped backend write is keyed on swarm_key: the
+	// backend resolves the device row by (device_key, swarm_key) and rejects a
+	// stale pairing outright. Doing this after the first status update — as it
+	// used to be — made the refresh unreachable for exactly the devices that
+	// needed it, since that update is the first thing to fail.
+	log.Info().Msg("Updating Device Meta Data ...")
+	swarmChanged, err := agent.System.UpdateDeviceMetadata()
 	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to update remote device status")
+		log.Error().Err(err).Msg("update device metadata")
+	}
+
+	// A new swarm_key is also a new WAMP identity — authid is
+	// "<swarm_key>-<device_key>", negotiated once per connection. Carry on over
+	// this session and every call would present the new swarm_key under the old
+	// authid, which the backend rejects just as hard as the stale pairing.
+	// Reconnect instead; OnConnect runs again from the top on the new session.
+	if swarmChanged {
+		log.Info().Msgf("Device was moved to project %s (%d), reconnecting with the new identity ...",
+			agent.Config.ReswarmConfig.SwarmName, agent.Config.ReswarmConfig.SwarmKey)
+		agent.Messenger.Reconnect()
+		return nil
+	}
+
+	log.Info().Msg("Updating Remote Device Status ...")
+	// Never fatal. A rejected status write is recoverable (the next heartbeat
+	// retries, and a reconnect re-runs the metadata refresh above), but exiting
+	// here takes the agent down before it can reach any of that — which is what
+	// left transferred devices in a permanent restart loop.
+	err = agent.Messenger.UpdateRemoteDeviceStatus(messenger.CONFIGURING)
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("failed to update remote device status")
 	}
 
 	// Register all endpoints early so terminal/system commands are available
@@ -118,12 +147,6 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		safe.Go(func() {
 			agent.TunnelManager.SuperviseStart()
 		})
-	}
-
-	log.Info().Msg("Updating Device Meta Data ...")
-	err = agent.System.UpdateDeviceMetadata()
-	if err != nil {
-		log.Error().Err(err).Msgf("update device metadata")
 	}
 
 	log.Info().Msg("Publishing agent metadata to backend ...")

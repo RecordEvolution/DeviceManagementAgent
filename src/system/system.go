@@ -454,26 +454,42 @@ func (system *System) GetFrpCurrentVersion() (string, error) {
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-func (system *System) UpdateDeviceMetadata() error {
+// UpdateDeviceMetadata refreshes the locally cached device/project identity
+// from the backend and persists it to the .flock config. It reports whether the
+// project (swarm) the device belongs to changed, because that also invalidates
+// our WAMP identity: authid is "<swarm_key>-<device_key>" and is fixed for the
+// life of a connection, so the caller has to reconnect before anything else is
+// sent — every device-scoped backend write is keyed on swarm_key and the
+// backend rejects a payload whose swarm_key disagrees with the session authid.
+//
+// The lookup is by device_key alone, so it works from a session whose authid
+// still carries the previous project.
+func (system *System) UpdateDeviceMetadata() (swarmChanged bool, err error) {
 	ctx := context.Background()
 	args := []interface{}{common.Dict{"device_key": system.config.ReswarmConfig.DeviceKey}}
 	res, err := system.messenger.Call(ctx, topics.GetDeviceMetadata, args, nil, nil, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	resultPayload, ok := res.Arguments[0].(map[string]interface{})
 	if !ok {
-		return errors.New("invalid payload")
+		return false, errors.New("invalid payload")
 	}
 
 	deviceName := fmt.Sprint(resultPayload["device_name"])
 	swarmName := fmt.Sprint(resultPayload["swarm_name"])
 	swarmOwnerName := fmt.Sprint(resultPayload["ownername"])
-	swarmKey, ok := resultPayload["swarm_key"].(uint64)
+	// Coerce instead of asserting a single concrete type: which of uint64 /
+	// int64 / float64 a number arrives as depends on the negotiated serializer,
+	// and getting this wrong strands the device — this is the only code path
+	// that can pick up a project transfer.
+	swarmKey, ok := common.ToUint64(resultPayload["swarm_key"])
 	if !ok {
-		return errors.New("swarm_key has invalid type")
+		return false, fmt.Errorf("swarm_key has invalid type %T", resultPayload["swarm_key"])
 	}
+
+	swarmChanged = system.config.ReswarmConfig.SwarmKey != int(swarmKey)
 
 	system.config.ReswarmConfig.Name = deviceName
 	system.config.ReswarmConfig.SwarmName = swarmName
@@ -482,7 +498,7 @@ func (system *System) UpdateDeviceMetadata() error {
 
 	err = config.SaveReswarmConfig(system.config.CommandLineArguments.ConfigFileLocation, system.config.ReswarmConfig)
 
-	return err
+	return swarmChanged, err
 }
 
 func (system *System) UpdateSystem(progressCallback func(filesystem.DownloadProgress), updateAgent bool) (UpdateResult, error) {
