@@ -114,7 +114,13 @@ type TransitionPayload struct {
 	// InstanceKey is the cloud-assigned key of the instance this device
 	// belongs to (sent by instance backends only; 0 on cloud devices). Apps
 	// receive it as INSTANCE_KEY to compose cloud-forwarded tunnel URLs.
-	InstanceKey          uint64
+	InstanceKey uint64
+	// AppCredEpoch is the generation of this app's per-app WAMP credential
+	// (cross-app data access). The agent derives APP_AUTH_SECRET for exactly
+	// this epoch and the backend verifies against it; bumping it server-side
+	// rotates the credential. 0 == absent == epoch 1, so an un-migrated
+	// backend needs no special handling.
+	AppCredEpoch         uint64
 	CallerAuthID         int
 	AppName              string
 	ImageName            StageBasedResult
@@ -193,4 +199,6 @@ type DeviceSyncResponse struct {
 	NewestVersion          string                 `json:"newest_version"`
 	Description            string                 `json:"description"`
 	AppKey                 uint64                 `json:"app_key"`
+	// Generation of this app's per-app WAMP credential; absent (0) = epoch 1.
+	AppCredEpoch uint64 `json:"app_cred_epoch"`
 }

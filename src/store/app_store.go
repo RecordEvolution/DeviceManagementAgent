@@ -135,6 +135,33 @@ func (am *AppStore) GetRegistryToken(callerID uint64) (string, error) {
 	return registryToken, nil
 }
 
+// GetAppCredKey fetches this device's per-app-credential HMAC key from the
+// backend, minting it there on first call. The RPC takes NO arguments — the
+// backend resolves the device from the session's own authid — so a device can
+// only ever obtain its own key.
+//
+// The key stays in agent memory and is never written into a container: it is
+// the material from which every app's APP_AUTH_SECRET is derived, so a
+// container that held it could mint its neighbours' credentials.
+func (am *AppStore) GetAppCredKey() (string, error) {
+	ctx := context.Background()
+	resp, err := am.Messenger.Call(ctx, topics.GetAppCredKey, []interface{}{}, nil, nil, nil)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.Arguments == nil || len(resp.Arguments) == 0 {
+		return "", fmt.Errorf("empty app_cred_key payload")
+	}
+
+	key, ok := resp.Arguments[0].(string)
+	if !ok || key == "" {
+		return "", fmt.Errorf("invalid app_cred_key payload")
+	}
+
+	return key, nil
+}
+
 // UpdateLocalAppState updates the local app database
 func (am *AppStore) UpdateLocalAppState(app *common.App, stateToSet common.AppState) error {
 	timestamp, err := am.database.UpsertAppState(app, stateToSet)
@@ -244,6 +271,7 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 		payload.EnvironmentVariables = deviceSyncState.Environment
 		payload.EnvironmentTemplate = deviceSyncState.EnvironmentTemplate
 		payload.Ports = deviceSyncState.Ports
+		payload.AppCredEpoch = deviceSyncState.AppCredEpoch
 
 		appPayloads = append(appPayloads, payload)
 	}

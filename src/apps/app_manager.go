@@ -264,6 +264,10 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 		}
 	}
 
+	// Its own call, not folded into syncPortState: that one early-returns for
+	// DEV, and DEV apps need their credential refreshed just as much.
+	refreshAppCredentialEnvFiles(am.StateMachine.Container.GetConfig(), am.StateMachine.AppCredKey(), payload)
+
 	err = am.syncPortState(payload, app)
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("failed to sync port state")
@@ -686,6 +690,15 @@ func (am *AppManager) VerifyState(app *common.App) error {
 			_ = am.RequestAppState(requestedStatePayload)
 		})
 	} else {
+		// Re-materialise the credential files for an app that needs no
+		// transition — covers an epoch bump (rotation) that happened while
+		// the device was offline.
+		refreshAppCredentialEnvFiles(
+			am.StateMachine.Container.GetConfig(),
+			am.StateMachine.AppCredKey(),
+			requestedStatePayload,
+		)
+
 		err = am.syncPortState(requestedStatePayload, app)
 		if err != nil {
 			log.Error().Stack().Err(err).Msgf("failed to sync port state")

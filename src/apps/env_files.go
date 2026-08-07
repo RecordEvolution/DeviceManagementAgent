@@ -89,3 +89,45 @@ func removeEnvFile(envDir string, name string) {
 		log.Debug().Err(err).Str("file", filePath).Msg("Failed to remove env file")
 	}
 }
+
+// refreshAppCredentialEnvFiles live-updates an app's per-app WAMP credential
+// files (APP_AUTH_ID.txt / APP_AUTH_SECRET.txt) in the /data/env bind mount,
+// and clears any DEVICE_SECRET.txt an older agent left behind.
+//
+// The bind mount is the ONLY channel that reaches a container without
+// recreating it — an env-var change alone never triggers a recreate
+// (containerNetworkConfigOutdated only reacts to network/host-port drift). A
+// credential rotated while the app is running therefore lands in the file
+// immediately; the SDK picks it up on its next connection attempt, because
+// both SDKs resolve injected values file-first, env-second.
+//
+// No-op when the credential cannot be derived (per-device key not fetched
+// yet): existing files are left INTACT rather than blanked, so a backend
+// outage can never invalidate a running app's credential.
+func refreshAppCredentialEnvFiles(cfg *config.Config, appCredKey string, payload common.TransitionPayload) {
+	envDir := appEnvFilesHostDir(cfg, payload.Stage, payload.AppName)
+
+	authID, secret := appCredential(cfg, appCredKey, payload)
+	if authID == "" || secret == "" {
+		return
+	}
+
+	if err := os.MkdirAll(envDir, 0700); err != nil {
+		log.Debug().Err(err).Str("dir", envDir).Msg("Failed to create env files dir")
+		return
+	}
+
+	writeSecretEnvFile(envDir, "APP_AUTH_ID", authID)
+	writeSecretEnvFile(envDir, "APP_AUTH_SECRET", secret)
+
+	// The device's realm1 credential is no longer injected; drop the stale
+	// file so an upgraded agent stops leaking it into the container.
+	removeEnvFile(envDir, "DEVICE_SECRET")
+}
+
+func writeSecretEnvFile(envDir string, name string, value string) {
+	filePath := filepath.Join(envDir, name+".txt")
+	if err := os.WriteFile(filePath, []byte(value), 0600); err != nil {
+		log.Debug().Err(err).Str("file", filePath).Msg("Failed to write env file")
+	}
+}

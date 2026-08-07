@@ -545,15 +545,37 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 	return nil
 }
 
+// reservedEnvNames may not be overridden by an app's own environment settings.
+// Docker takes the LAST occurrence of a duplicate, and payload env is appended
+// after the defaults — so without this filter an app could set its own
+// APP_AUTH_ID and volunteer a foreign app identity to the authenticator.
+var reservedEnvNames = map[string]bool{
+	"APP_AUTH_ID":     true,
+	"APP_AUTH_SECRET": true,
+}
+
 func buildProdEnvironmentVariables(defaultEnvironmentVariables []string, payloadEnvironmentVariables map[string]interface{}) []string {
-	return append(defaultEnvironmentVariables, common.EnvironmentVarsToStringArray((payloadEnvironmentVariables))...)
+	payloadVars := common.EnvironmentVarsToStringArray(payloadEnvironmentVariables)
+	filtered := make([]string, 0, len(payloadVars))
+	for _, envVar := range payloadVars {
+		name := strings.SplitN(envVar, "=", 2)[0]
+		if reservedEnvNames[name] {
+			log.Warn().Str("name", name).Msg("ignoring app-supplied override of a reserved environment variable")
+			continue
+		}
+		filtered = append(filtered, envVar)
+	}
+	return append(defaultEnvironmentVariables, filtered...)
 }
 
 const maxEnvVarSize = 20 * 1024 // 20KB - reasonable maximum for environment variables
 
 func writeEnvironmentVariablesToFiles(appSpecificDirectory string, envVars []string) error {
 	envDir := appSpecificDirectory + "/env"
-	err := os.MkdirAll(envDir, os.ModePerm)
+	// 0700/0600: this directory now carries APP_AUTH_SECRET. Container
+	// isolation is the real boundary (each app has its own /data), but there
+	// is no reason for these to be world-readable on the host.
+	err := os.MkdirAll(envDir, 0700)
 	if err != nil {
 		return err
 	}
@@ -567,10 +589,17 @@ func writeEnvironmentVariablesToFiles(appSpecificDirectory string, envVars []str
 		varValue := parts[1]
 
 		filePath := fmt.Sprintf("%s/%s.txt", envDir, varName)
-		err := os.WriteFile(filePath, []byte(varValue), 0644)
+		err := os.WriteFile(filePath, []byte(varValue), 0600)
 		if err != nil {
 			return fmt.Errorf("failed to write env var %s to file: %w", varName, err)
 		}
+	}
+
+	// A previously injected DEVICE_SECRET file would otherwise linger in the
+	// bind mount forever — the agent no longer writes it, but old installs
+	// still have it, and it is the device's realm1 credential.
+	if err := os.Remove(fmt.Sprintf("%s/DEVICE_SECRET.txt", envDir)); err != nil && !os.IsNotExist(err) {
+		log.Debug().Err(err).Msg("could not remove stale DEVICE_SECRET env file")
 	}
 
 	return nil
@@ -635,7 +664,16 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 	return mounts, nil
 }
 
-func buildDefaultEnvironmentVariables(config *config.Config, payload common.TransitionPayload, environment common.Stage, app *common.App) []string {
+// appCredKey is the per-device HMAC key from which this app's per-app WAMP
+// credential is derived; "" (not fetched yet) simply omits APP_AUTH_* and the
+// SDK falls back to the legacy device-wide credential.
+//
+// NOTE: DEVICE_SECRET is deliberately NOT injected. It is the device's realm1
+// credential, and realm1's swarm_device role is allow-all — so every app
+// container could act as its own device (read any device's app configuration,
+// publish as the device). Nothing in the platform or either SDK ever read it
+// from a container; apps that did must migrate to APP_AUTH_*.
+func buildDefaultEnvironmentVariables(config *config.Config, payload common.TransitionPayload, environment common.Stage, app *common.App, appCredKey string) []string {
 	environmentVariables := []string{
 		fmt.Sprintf("DEVICE_SERIAL_NUMBER=%s", config.ReswarmConfig.SerialNumber),
 		fmt.Sprintf("ENV=%s", environment),
@@ -643,7 +681,6 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 		fmt.Sprintf("SWARM_KEY=%d", config.ReswarmConfig.SwarmKey),
 		fmt.Sprintf("APP_KEY=%d", app.AppKey),
 		fmt.Sprintf("APP_NAME=%s", app.AppName),
-		fmt.Sprintf("DEVICE_SECRET=%s", config.ReswarmConfig.Secret),
 		fmt.Sprintf("DEVICE_NAME=%s", config.ReswarmConfig.Name),
 		// Rewritten for the container's vantage point: a loopback endpoint
 		// (local dev) is unreachable from a bridge network.
@@ -652,6 +689,17 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 		// (getRemoteAccessUrlForPort) compose a port's public URL without
 		// replicating server-side logic.
 		fmt.Sprintf("TUNNEL_DOMAIN=%s", tunnelDomainForApps(config)),
+	}
+
+	// Per-app WAMP identity: lets the platform authorize THIS app rather than
+	// only its device, which is what makes the app-data-access consent switch
+	// binding for co-located apps. Omitted (not blanked) when the key is not
+	// available, so the SDK's legacy fallback keeps the app connected.
+	if authID, secret := appCredential(config, appCredKey, payload); authID != "" && secret != "" {
+		environmentVariables = append(environmentVariables,
+			fmt.Sprintf("APP_AUTH_ID=%s", authID),
+			fmt.Sprintf("APP_AUTH_SECRET=%s", secret),
+		)
 	}
 
 	// Computed at container start: an IP change is reflected on the next app
@@ -710,7 +758,7 @@ func (sm *StateMachine) remotePortEnvVars(config *config.Config, appName string,
 
 func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
 	config := sm.Container.GetConfig()
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app, sm.AppCredKey())
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 

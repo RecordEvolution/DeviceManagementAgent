@@ -107,6 +107,18 @@ func (agent *Agent) OnConnect(reconnect bool) error {
 		return nil
 	}
 
+	// Per-app credential key: the material from which each app container's
+	// APP_AUTH_SECRET is derived, so the platform can authorize the connecting
+	// APP rather than only its device. Fetched here (once per session, cheap,
+	// minted server-side on first call) and kept in agent memory only.
+	// Never fatal: on failure apps keep the legacy device-wide credential,
+	// which still authenticates them on their OWN realm.
+	if appCredKey, credErr := agent.AppManager.AppStore.GetAppCredKey(); credErr != nil {
+		log.Error().Err(credErr).Msg("could not fetch app credential key; apps fall back to the device credential")
+	} else {
+		agent.AppManager.StateMachine.SetAppCredKey(appCredKey)
+	}
+
 	log.Info().Msg("Updating Remote Device Status ...")
 	// Never fatal. A rejected status write is recoverable (the next heartbeat
 	// retries, and a reconnect re-runs the metadata refresh above), but exiting

@@ -66,6 +66,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	newDockerComposeKw := kwargs["new_docker_compose"]
 	dockerCredentialsKw := kwargs["docker_credentials"]
 	instanceKeyKw := kwargs["instance_key"]
+	appCredEpochKw := kwargs["app_cred_epoch"]
 
 	var appKey uint64
 	var releaseKey uint64
@@ -74,6 +75,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 	var requestorAccountKey2 uint64
 	var deviceOwnerAccountKey uint64
 	var instanceKey uint64
+	var appCredEpoch uint64
 	var appName string
 	var stage string
 	var requestedState string
@@ -217,6 +219,17 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 					instanceKey = parsedInstanceKey
 				}
 			}
+		}
+	}
+
+	// app_cred_epoch is the generation of this app's per-app WAMP credential.
+	// Absent (older backend) or unparseable means epoch 1 — never fail the
+	// sync over it, or a backend that predates the column would stop apps.
+	// Coerced rather than type-asserted: which numeric type a value arrives as
+	// depends on the negotiated serializer.
+	if appCredEpochKw != nil {
+		if parsed, parsedOk := common.ToUint64(appCredEpochKw); parsedOk {
+			appCredEpoch = parsed
 		}
 	}
 
@@ -378,6 +391,7 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 
 	payload.DeviceOwnerAccountKey = deviceOwnerAccountKey
 	payload.InstanceKey = instanceKey
+	payload.AppCredEpoch = appCredEpoch
 	payload.RequestUpdate = requestUpdate
 
 	// Version used to publish a release

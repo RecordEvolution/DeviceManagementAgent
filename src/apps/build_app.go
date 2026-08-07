@@ -67,7 +67,7 @@ func filterValidDotEnvLines(envLines []string) (valid []string, skippedKeys []st
 func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload common.TransitionPayload, app *common.App, dockerCompose map[string]interface{}) (string, []string, error) {
 	var envLines []string
 
-	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app)
+	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app, sm.AppCredKey())
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
 	environmentTemplateDefaults := common.EnvironmentTemplateToStringArray(payload.EnvironmentTemplate)
 

@@ -32,6 +32,34 @@ type StateMachine struct {
 	// transition lock, instead of blocking on cmd.Wait() forever.
 	composeTransitionCancels     map[string]context.CancelFunc
 	composeTransitionCancelMutex sync.Mutex
+
+	// Per-device HMAC key for deriving each app's APP_AUTH_SECRET (cross-app
+	// data access). Fetched from the backend on connect and kept in memory
+	// ONLY — writing it into a container would let that app mint its
+	// neighbours' credentials. Empty until the first successful fetch, which
+	// makes appCredential() return empty strings; callers then leave existing
+	// credential files untouched rather than writing blanks, so a backend
+	// outage cannot brick running apps.
+	appCredKey      string
+	appCredKeyMutex sync.RWMutex
+}
+
+// SetAppCredKey stores the per-device app-credential key. Safe to call on
+// every reconnect; a fetch failure must pass "" and is ignored so a transient
+// backend outage does not clear a working key.
+func (sm *StateMachine) SetAppCredKey(key string) {
+	if key == "" {
+		return
+	}
+	sm.appCredKeyMutex.Lock()
+	defer sm.appCredKeyMutex.Unlock()
+	sm.appCredKey = key
+}
+
+func (sm *StateMachine) AppCredKey() string {
+	sm.appCredKeyMutex.RLock()
+	defer sm.appCredKeyMutex.RUnlock()
+	return sm.appCredKey
 }
 
 func NewStateMachine(container container.Container, logManager *logging.LogManager, observer *StateObserver, filesystem *filesystem.Filesystem) StateMachine {

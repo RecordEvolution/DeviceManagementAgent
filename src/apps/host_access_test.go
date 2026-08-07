@@ -85,12 +85,64 @@ func TestBuildDefaultEnvironmentVariablesTunnelRouting(t *testing.T) {
 	cfg := &config.Config{ReswarmConfig: &config.ReswarmConfig{Environment: "production", DeviceKey: 42}}
 	app := &common.App{AppKey: 7, AppName: "myapp"}
 
-	cloudEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{}, common.PROD, app)
+	cloudEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{}, common.PROD, app, "")
 	assert.Contains(t, cloudEnv, "TUNNEL_DOMAIN=app.ironflock.com")
 	for _, env := range cloudEnv {
 		assert.NotContains(t, env, "INSTANCE_KEY=", "cloud devices must not get an instance key")
 	}
 
-	instanceEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{InstanceKey: 5}, common.PROD, app)
+	instanceEnv := buildDefaultEnvironmentVariables(cfg, common.TransitionPayload{InstanceKey: 5}, common.PROD, app, "")
 	assert.Contains(t, instanceEnv, "INSTANCE_KEY=5")
+}
+
+// The device's realm1 credential must never reach an app container: realm1's
+// swarm_device role is allow-all, so an app holding it could act as its own
+// device. Per-app credentials replace it — and are omitted entirely (never
+// blanked) while the per-device key is unavailable, so the SDK's legacy
+// fallback keeps the app connected.
+func TestBuildDefaultEnvironmentVariablesAppCredential(t *testing.T) {
+	cfg := &config.Config{ReswarmConfig: &config.ReswarmConfig{
+		Environment: "production", DeviceKey: 42, SerialNumber: "serial-abc", Secret: "device-secret",
+	}}
+	app := &common.App{AppKey: 7, AppName: "myapp"}
+	payload := common.TransitionPayload{AppKey: 7, Stage: common.PROD, AppCredEpoch: 3}
+
+	noKey := buildDefaultEnvironmentVariables(cfg, payload, common.PROD, app, "")
+	for _, env := range noKey {
+		assert.NotContains(t, env, "DEVICE_SECRET=", "the device credential must not be injected")
+		assert.NotContains(t, env, "APP_AUTH_ID=", "no credential without the per-device key")
+		assert.NotContains(t, env, "APP_AUTH_SECRET=", "no credential without the per-device key")
+	}
+
+	withKey := buildDefaultEnvironmentVariables(cfg, payload, common.PROD, app, "test-cred-key")
+	assert.Contains(t, withKey, "APP_AUTH_ID=app-7-prod-e3@serial-abc")
+	assert.Contains(t, withKey,
+		"APP_AUTH_SECRET="+appCredentialSecret("test-cred-key", "serial-abc", 7, common.PROD, 3))
+	for _, env := range withKey {
+		assert.NotContains(t, env, "DEVICE_SECRET=")
+	}
+
+	// An absent epoch is epoch 1 by definition (backend predating the column).
+	noEpoch := buildDefaultEnvironmentVariables(
+		cfg, common.TransitionPayload{AppKey: 7, Stage: common.PROD}, common.PROD, app, "test-cred-key")
+	assert.Contains(t, noEpoch, "APP_AUTH_ID=app-7-prod-e1@serial-abc")
+}
+
+// An app must not be able to volunteer a foreign identity: Docker takes the
+// last occurrence of a duplicate env var, and payload env is appended after
+// the defaults.
+func TestBuildProdEnvironmentVariablesRejectsReservedOverrides(t *testing.T) {
+	defaults := []string{"APP_AUTH_ID=app-7-prod-e1@serial", "APP_AUTH_SECRET=real"}
+	// payload env arrives as {name: {"value": ...}} from the sync response
+	result := buildProdEnvironmentVariables(defaults, map[string]interface{}{
+		"APP_AUTH_ID":     map[string]interface{}{"value": "app-9-prod-e1@serial"},
+		"APP_AUTH_SECRET": map[string]interface{}{"value": "forged"},
+		"MY_OWN_VAR":      map[string]interface{}{"value": "kept"},
+	})
+
+	assert.Contains(t, result, "MY_OWN_VAR=kept")
+	for _, env := range result {
+		assert.NotEqual(t, "APP_AUTH_ID=app-9-prod-e1@serial", env)
+		assert.NotEqual(t, "APP_AUTH_SECRET=forged", env)
+	}
 }
