@@ -98,18 +98,14 @@ func (ex *External) codeExecutionHandler(ctx context.Context, response messenger
 }
 
 func (ex *External) initDeviceTerm(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	var err error
-
 	callerID := fmt.Sprint(response.Details["caller_authid"])
-	pseudoTerminal := terminal.GetPseudoTerminal(callerID)
 
-	if pseudoTerminal == nil {
+	pseudoTerminal, created, err := terminal.GetOrCreatePseudoTerminal(callerID)
+	if err != nil {
+		return nil, err
+	}
 
-		pseudoTerminal, err = terminal.NewPseudoTerminal(callerID)
-		if err != nil {
-			return nil, err
-		}
-
+	if created {
 		res := pseudoTerminal.Setup(ex.Config, ex.Messenger)
 
 		return &messenger.InvokeResult{Arguments: []interface{}{res}}, nil

@@ -50,11 +50,17 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	// Degrade cleanly when tunnels are unavailable (frpc missing/quarantined,
-	// or the device can't reach the tunnel server): report and no-op, never
+	// or the device can't reach the tunnel server): skip the frpc calls, never
 	// error, so app starts are not blocked by an absent tunnel feature.
-	if !am.tunnelManager.TunnelCapable() {
-		log.Warn().Msg("Tunneling feature is unavailable on this device; skipping port sync")
-		return nil
+	//
+	// Only the tunnel half is skipped. Host ports are assigned at container
+	// launch whether or not tunnels work, and they are how a user on the same
+	// network reaches the app — so they must still be resolved and persisted
+	// upstream, otherwise the UI has no port to show on exactly the devices
+	// where the LAN address is the only way in.
+	tunnelsAvailable := am.tunnelManager.TunnelCapable()
+	if !tunnelsAvailable {
+		log.Warn().Msg("Tunneling feature is unavailable on this device; syncing host ports only")
 	}
 
 	app.StateLock.Lock()
@@ -66,6 +72,12 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("Failed to convert interface to port forward rule")
 		return err
+	}
+
+	if len(portRules) == 0 {
+		// Nothing to reconcile or persist: the rule list this would write back
+		// is the one the cloud just sent us.
+		return nil
 	}
 
 	newPorts := make([]common.PortForwardRule, 0)
@@ -84,7 +96,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 
 		if portRule.Active {
-			if requestedState == common.RUNNING || curAppState == common.RUNNING {
+			if tunnelsAvailable && (requestedState == common.RUNNING || curAppState == common.RUNNING) {
 				if !dialPortKnown {
 					// Fresh app that has not been started under managed ports
 					// yet. The post-transition syncPortState creates the
@@ -134,7 +146,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 				}
 				// continue
 			}
-		} else {
+		} else if tunnelsAvailable {
 			// Remove tunnel when it's not active (regardless of app state)
 			// Build the tunnel config to remove it from the file even if it's not in memory
 			tunnelConfig := tunnel.TunnelConfig{
@@ -186,7 +198,9 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	// 	return err
 	// }
 
-	am.UpdateTunnelState()
+	if tunnelsAvailable {
+		am.UpdateTunnelState()
+	}
 
 	return nil
 }

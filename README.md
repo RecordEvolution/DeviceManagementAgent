@@ -145,8 +145,15 @@ supersedes it.
 Docker note: with Docker Desktop the engine only starts at user sign-in. The
 service tolerates that (it waits patiently and reports the device as
 CONFIGURING), but for unattended devices enable Docker Desktop autostart plus
-Windows auto sign-in. Tunnels and the device terminal remain unsupported on
-Windows.
+Windows auto sign-in.
+
+The device terminal works on Windows 10 1809 (build 17763) and newer: the agent
+opens a Windows pseudoconsole (ConPTY) running PowerShell 7 where it is
+installed and Windows PowerShell otherwise, in place of the bash pty it uses on
+Linux. Because the agent runs as LocalSystem, that terminal is a SYSTEM shell —
+the same posture as the root shell the Linux terminal gives. On older builds the
+terminal reports that the pseudoconsole API is missing rather than failing
+obscurely.
 
 
 ## Development

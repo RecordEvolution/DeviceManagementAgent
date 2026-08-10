@@ -55,45 +55,75 @@ these must be exercised on hardware.
     console → refuses with the single-instance message. FlockFlasher
     "Test Device" on the same machine also refuses (expected, documented).
 13. From Studio: `system_restart_agent` (service restarts), `system_reboot`,
-    `system_shutdown` (machine reboots/shuts down after ~5s), device terminal
-    → clean "not supported on Windows" error.
+    `system_shutdown` (machine reboots/shuts down after ~5s).
+
+## Device terminal (ConPTY)
+
+The host terminal runs PowerShell inside a Windows pseudoconsole, under
+LocalSystem — so it is a SYSTEM shell, gated on the DEVELOP privilege exactly
+like the Linux/bash one. All of this is unreachable from CI (no ConPTY on a
+headless runner, no real console host), so it must be exercised here.
+
+14. Open the device terminal in Studio → a PowerShell prompt appears.
+    `whoami` reports `nt authority\system`. `$PSVersionTable` shows the
+    expected edition (pwsh 7 wins when installed, otherwise Windows
+    PowerShell 5.1). `$env:PATH` contains the machine PATH, and `docker ps`
+    works from inside it.
+15. Encoding: `"äöü ✓ 日本語 🚀"` and `Get-ChildItem C:\` render correctly —
+    no `Ã¤`, no `?`, no `` — both immediately at the prompt and in the
+    output of an external command (`cmd /c echo ä`), which is where a
+    half-applied code page shows up first.
+16. Resize: drag the browser window / toggle the sidebar → the prompt reflows
+    and `$Host.UI.RawUI.WindowSize` matches. `vim`-style full-screen output
+    (`more`, `Get-Help -Full ... | more`) redraws at the new size.
+17. Exit paths: type `exit` → the terminal closes cleanly in the UI (a
+    TERMINAL_EOF arrives, not a hang). Reopen → a fresh session starts.
+    Then check Task Manager: no orphaned `powershell.exe`/`pwsh.exe` and no
+    orphaned `conhost.exe` accumulate across ~5 open/close cycles.
+18. Close the browser tab mid-session, then reopen the terminal → new session
+    works, and the abandoned shell is gone from Task Manager.
+19. Reconnect: block the WAMP endpoint briefly (or `Restart-Service` the
+    router side) with the terminal open → after reconnect, typing and resizing
+    still reach the shell (the per-terminal topics are re-registered).
+20. On a pre-1809 machine, if one is available: the terminal fails with the
+    "requires Windows 10 version 1809" message rather than crashing the agent.
 
 ## Environment
 
-14. Proxy machine: install with `-proxy http://host:port` → OTA download and
+21. Proxy machine: install with `-proxy http://host:port` → OTA download and
     the wss connection both work under LocalSystem; machine-store corporate
     CA is accepted (Go uses the Windows system store).
 
 ## Tunnels (frp) on Windows
 
-15. frpc is downloaded (not embedded) to `<AgentDir>\frpc.exe` from
+22. frpc is downloaded (not embedded) to `<AgentDir>\frpc.exe` from
     `gs://re-agent/frpc/windows/amd64/<ver>/`; confirm it arrives and
     `frpc.exe -version` matches the pinned FRP_VERSION.
-16. A full tunnel lifecycle works: publish an app with an HTTP + a TCP port →
+23. A full tunnel lifecycle works: publish an app with an HTTP + a TCP port →
     tunnel comes up → reachable from the cloud; `frpc.log` is under the agent
     dir (not `C:\var\log`).
-17. Fallback: delete `frpc.exe` at runtime → the agent stays up, apps still
+24. Fallback: delete `frpc.exe` at runtime → the agent stays up, apps still
     start (syncPortState no-ops), the tunnel manager re-acquires it (or, if
     blocked, settles to unavailable), `get_agent_metadata` reports
     `tunnelCapable:false`, the app's Remote Access section shows
     `tunnelFeatureUnavailable`, and the device settings header shows a
     "Tunnel disabled" warning badge next to the architecture badge (hover =
     the explanatory tooltip). A healthy device shows no badge.
-18. Defender exclusion: after install, `Get-MpPreference | Select ExclusionPath`
+25. Defender exclusion: after install, `Get-MpPreference | Select ExclusionPath`
     lists `<AgentDir>\frpc.exe`. On a Tamper-Protection / Intune-managed device
     the `Add-MpPreference` warns and is ignored — verify the graceful-degrade
-    path (item 17) then covers it, and use the WDAC alternative below.
+    path (item 24) then covers it, and use the WDAC alternative below.
 
 ## Code signing
 
-19. After a signed release: `Get-AuthenticodeSignature reagent.exe` (and
+26. After a signed release: `Get-AuthenticodeSignature reagent.exe` (and
     `frpc.exe`) shows a valid signature by the IronFlock leaf; the installer
     imported the root (`certutil -store Root` / `-store TrustedPublisher` list
     it); UAC shows "IronFlock" as a verified publisher.
-20. On-device pinning: a self-update signed by our leaf verifies; a binary
+27. On-device pinning: a self-update signed by our leaf verifies; a binary
     signed by any other cert (even one the machine trusts) is rejected once
     enforcement is on (`codesign.Verify` pins to our embedded root).
-21. Uninstall symmetry: `reagent service uninstall` removes the Defender
+28. Uninstall symmetry: `reagent service uninstall` removes the Defender
     exclusion, deletes the imported certs from both stores, and removes the
     cert file (`certutil -store Root` no longer lists IronFlock).
 

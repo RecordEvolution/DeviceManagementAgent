@@ -254,6 +254,16 @@ func (m *Messenger) GetPublishCount() int {
 	return len(m.PublishCalls)
 }
 
+// GetPublishCalls returns a copy of the recorded publishes. Prefer this over
+// reading PublishCalls directly whenever the code under test is still
+// publishing from its own goroutines — Publish appends under the mutex, so an
+// unsynchronised read of the slice is a data race.
+func (m *Messenger) GetPublishCalls() []PublishCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]PublishCall(nil), m.PublishCalls...)
+}
+
 // GetCallCount returns the number of call invocations.
 func (m *Messenger) GetCallCount() int {
 	m.mu.RLock()

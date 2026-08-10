@@ -214,6 +214,59 @@ func TestSyncPortStateKeepsReservedRemotePort(t *testing.T) {
 	assert.Equal(t, uint64(40001), savedRules[0].HostPort)
 }
 
+// TestSyncPortStatePersistsHostPortWithoutTunnels: a device that cannot tunnel
+// (frpc missing/quarantined, or frps unreachable) still publishes its apps on
+// host ports, and the LAN address is then the only way in — so the assignment
+// must reach the cloud. Only the frpc calls are skipped.
+func TestSyncPortStatePersistsHostPortWithoutTunnels(t *testing.T) {
+	am, _, mockTunnel, appStore, _, _ := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(false).Maybe()
+
+	app := amSeed(t, appStore, 13, "notunnelapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(13, "notunnelapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "web", Port: 8080, Protocol: "http", Active: true})
+
+	// The launch path allocated a managed host port; it does not depend on
+	// tunnels being available.
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 13, Protocol: "tcp", Port: 8080}, 41999)
+	require.NoError(t, err)
+
+	// Get/AddTunnel/RemoveTunnel/GetState are deliberately not expected: any
+	// call would reach an frpc that cannot serve it.
+	var savedPorts []interface{}
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
+		savedPorts = p.Ports
+		return nil
+	}).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	savedRules := spsRules(t, savedPorts)
+	require.Len(t, savedRules, 1)
+	assert.Equal(t, uint64(41999), savedRules[0].HostPort, "host port must be persisted without tunnels")
+	assert.Zero(t, savedRules[0].RemotePort, "no tunnel means no remote port")
+}
+
+// TestSyncPortStateNoRulesIsANoop: an app that exposes nothing must not cost a
+// round trip on every state request.
+func TestSyncPortStateNoRulesIsANoop(t *testing.T) {
+	am, _, mockTunnel, appStore, _, _ := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 14, "portlessapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(14, "portlessapp", common.RUNNING, common.PROD)
+	payload.Ports = nil
+
+	// No SaveRemotePorts/GetState expectations: nothing may be called.
+	require.NoError(t, am.syncPortState(payload, app))
+}
+
 // TestGenerateDotEnvContentsCloudRemotePort: an instance-patched cloud port
 // reaches the compose dotenv as {RemotePortEnvironment}_CLOUD even when no
 // local tunnel object exists (the value is payload-borne).

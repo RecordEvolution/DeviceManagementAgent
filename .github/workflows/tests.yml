@@ -50,10 +50,10 @@ jobs:
           if-no-files-found: warn
 
   # Native Windows check for the Windows-service code paths (svc handler,
-  # installer CLI, self-update swap). Deliberately scoped to the packages that
-  # carry windows build tags plus a full native build — and deliberately in
-  # tests.yml, NOT gate.yml: like integration/coverage it informs PRs but must
-  # never block a release.
+  # installer CLI, self-update swap, ConPTY host terminal). Deliberately scoped
+  # to the packages that carry windows build tags plus a full native build — and
+  # deliberately in tests.yml, NOT gate.yml: like integration/coverage it
+  # informs PRs but must never block a release.
   windows-unit:
     runs-on: windows-latest
     defaults:
@@ -67,5 +67,5 @@ jobs:
           cache-dependency-path: src/go.sum
       - name: native build (all packages, windows tags active)
         run: cd src && touch embedded/frpc_binary && go build ./...
-      - name: unit tests (service, self-update, codesign, tunnel, lifecycle, config, system)
-        run: cd src && go test -count=1 ./selfupdate/... ./codesign/... ./tunnel/... ./lifecycle/... ./config/... ./system/... .
+      - name: unit tests (service, self-update, codesign, tunnel, lifecycle, config, system, terminal)
+        run: cd src && go test -count=1 ./selfupdate/... ./codesign/... ./tunnel/... ./lifecycle/... ./config/... ./system/... ./terminal/... .
