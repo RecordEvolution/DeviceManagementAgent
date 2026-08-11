@@ -11,6 +11,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows"
 )
 
@@ -180,6 +181,27 @@ func startAttachedProcess(commandLine string, console windows.Handle) (windows.H
 	startupInfo.ProcThreadAttributeList = attributes.List()
 	startupInfo.Cb = uint32(unsafe.Sizeof(startupInfo))
 
+	// STARTF_USESTDHANDLES with all three handles left NULL. This looks
+	// pointless and is not in Microsoft's pseudoconsole sample, but without it
+	// the shell is silent and deaf when the agent runs as a service.
+	//
+	// Windows has an old compatibility hack: when the target is a console
+	// application, handle inheritance is off, STARTF_USESTDHANDLES is absent,
+	// and the creation flags name no console disposition, the kernel
+	// *duplicates* the parent's standard handles into the child — not through
+	// inheritance, so bInheritHandles=false does not prevent it. The OS undoes
+	// this for a pseudoconsole child only when the duplicated handles are
+	// console handles (ConsoleCloseIfConsoleHandle). A service has no console:
+	// its handles are NULL or point at a log file, they survive the cleanup,
+	// and the shell then reads and writes those instead of the pseudoconsole.
+	// The terminal comes up showing nothing and swallowing every keystroke.
+	//
+	// Setting the flag with NULL handles is the documented remedy from the
+	// Windows Terminal maintainers (microsoft/terminal#11276): it stops the
+	// duplication, and the pseudoconsole attribute above supplies the child's
+	// real handles.
+	startupInfo.Flags |= windows.STARTF_USESTDHANDLES
+
 	var processInfo windows.ProcessInformation
 
 	// The environment is inherited (env == nil): a terminal that does not see
@@ -204,6 +226,12 @@ func startAttachedProcess(commandLine string, console windows.Handle) (windows.H
 	}
 
 	windows.CloseHandle(processInfo.Thread)
+
+	// The shell being alive is not the same as the shell being reachable, and
+	// the two failure modes look identical from the browser: a cursor and
+	// nothing else. Record what was launched so the next report can be
+	// diagnosed from the agent log instead of from first principles.
+	log.Info().Msgf("terminal: started the device shell (pid %d): %s", processInfo.ProcessId, commandLine)
 
 	return processInfo.Process, nil
 }
