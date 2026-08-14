@@ -473,11 +473,22 @@ func TestTunnelProofMetadataEmission(t *testing.T) {
 		DeviceKey:         2,
 	}
 	builder := NewTunnelConfigBuilder(builderConfig(t, withSecret))
-	if assert.NotNil(t, builder.yamlConfig.Transport.Metadatas) {
-		got := builder.yamlConfig.Transport.Metadatas["tunnel_proof"]
+	if assert.NotNil(t, builder.yamlConfig.Metadatas) {
+		got := builder.yamlConfig.Metadatas["tunnel_proof"]
 		assert.Equal(t, tunnelAuthProof("device-cra-secret", 2), got)
 		assert.NotEmpty(t, got)
 	}
+
+	// Regression guard for the prod outage: `metadatas` is a TOP-LEVEL frp
+	// client field, not a transport field. frpc parses with
+	// DisallowUnknownFields and refuses to start ("json: unknown field
+	// \"metadatas\"") if it is nested under transport. Assert the serialized
+	// YAML has metadatas at column 0 and never indented under transport.
+	out, err := yaml.Marshal(builder.yamlConfig)
+	assert.NoError(t, err)
+	yamlStr := string(out)
+	assert.Contains(t, yamlStr, "\nmetadatas:", "metadatas must be a top-level key")
+	assert.NotContains(t, yamlStr, "  metadatas:", "metadatas must not be nested (would break frpc)")
 
 	// no secret/device_key => no proof metadata
 	without := &config.ReswarmConfig{
@@ -485,7 +496,7 @@ func TestTunnelProofMetadataEmission(t *testing.T) {
 		Environment:       string(common.PRODUCTION),
 	}
 	builder = NewTunnelConfigBuilder(builderConfig(t, without))
-	assert.Nil(t, builder.yamlConfig.Transport.Metadatas)
+	assert.Nil(t, builder.yamlConfig.Metadatas)
 }
 
 func TestConfigBuilderAddAndGetTunnelConfig(t *testing.T) {

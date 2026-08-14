@@ -50,8 +50,17 @@ type FrpcYamlConfig struct {
 	ServerAddr string     `yaml:"serverAddr"`
 	ServerPort int        `yaml:"serverPort"`
 	Transport  *Transport `yaml:"transport,omitempty"`
-	WebServer  *WebServer `yaml:"webServer,omitempty"`
-	Log        *LogConfig `yaml:"log,omitempty"`
+	// Metadatas are client-level key/values frp forwards to the frps server-side
+	// authz plugin (as user.metas on Login/NewProxy). We put a tunnel_proof here
+	// — derived at runtime from the device's own .flock secret (tunnelAuthProof)
+	// — which the plugin forwards to the backend to authorize only this device's
+	// subdomains. Nothing minted, nothing to refresh. This is a TOP-LEVEL frp
+	// client field (ClientCommonConfig.metadatas), NOT a transport field —
+	// frpc parses with DisallowUnknownFields and refuses to start if it is
+	// nested under transport.
+	Metadatas     map[string]string `yaml:"metadatas,omitempty"`
+	WebServer     *WebServer        `yaml:"webServer,omitempty"`
+	Log           *LogConfig        `yaml:"log,omitempty"`
 	// Deliberately not omitempty: the value we want is false, which omitempty
 	// drops — and frp defaults loginFailExit to true, so frpc would exit after
 	// the first failed login instead of retrying. A frps that is briefly
@@ -71,13 +80,7 @@ type Transport struct {
 	// agent resolves HTTPS_PROXY/NO_PROXY (the same environment the WAMP dialer
 	// honors) and passes the result here explicitly.
 	ProxyURL string `yaml:"proxyURL,omitempty"`
-	// Metadatas are client-level key/values frp forwards to the frps server-side
-	// authz plugin (as user.metas on Login/NewProxy). We put a tunnel_proof here
-	// — derived at runtime from the device's own .flock secret (tunnelAuthProof)
-	// — which the plugin forwards to the backend to authorize only this device's
-	// subdomains. Nothing minted, nothing to refresh.
-	Metadatas map[string]string `yaml:"metadatas,omitempty"`
-	TLS       *TLSConfig        `yaml:"tls,omitempty"`
+	TLS      *TLSConfig `yaml:"tls,omitempty"`
 }
 
 type TLSConfig struct {
@@ -282,7 +285,7 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	// with a WAMP-CRA response derived from the same secret.
 	if cfg.ReswarmConfig.Secret != "" && cfg.ReswarmConfig.DeviceKey > 0 {
 		proof := tunnelAuthProof(cfg.ReswarmConfig.Secret, cfg.ReswarmConfig.DeviceKey)
-		frpcConfig.Transport.Metadatas = map[string]string{"tunnel_proof": proof}
+		frpcConfig.Metadatas = map[string]string{"tunnel_proof": proof}
 	}
 
 	if wssMode {
