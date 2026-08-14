@@ -446,6 +446,13 @@ func IsInvalidOfflineTransition(app *common.App, payload common.TransitionPayloa
 	return false
 }
 
+// composeProjectLabel is the label docker compose stamps on every container it
+// creates. Its value is the project name, which — because the agent runs
+// compose without -p — is the normalized compose directory name, i.e.
+// BuildComposeContainerName. It is the ONLY reliable way to tie a container
+// back to a compose app.
+const composeProjectLabel = "com.docker.compose.project"
+
 func (am *AppManager) CleanupOrphanedContainers() error {
 	log.Info().Msg("🧹 Cleaning up orphaned containers not in database...")
 
@@ -463,56 +470,94 @@ func (am *AppManager) CleanupOrphanedContainers() error {
 		return err
 	}
 
-	// Create a map of expected container names
+	// Two keep-sets, because a compose app is not one container. Compose names
+	// its containers "<project>-<service>-<index>", so the project name never
+	// appears as a container name — matching them by name marked EVERY service
+	// container of EVERY compose app as an orphan (ParseContainerName happily
+	// parses "prod_6_app_compose-nginx-1" as app "app_compose-nginx-1"), and
+	// this ran on every WAMP reconnect: the app was force-removed and the state
+	// correction right after it reinstalled the whole project — one full app
+	// restart per reconnect. Compose apps are matched by project label only.
 	expectedContainers := make(map[string]bool)
+	expectedProjects := make(map[string]bool)
 	for _, app := range apps {
-		// Add both single and compose container names
-		singleName := common.BuildContainerName(app.Stage, app.AppKey, app.AppName)
-		composeName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
-		expectedContainers[singleName] = true
-		expectedContainers[composeName] = true
+		expectedContainers[common.BuildContainerName(app.Stage, app.AppKey, app.AppName)] = true
+		expectedProjects[common.NormalizeComposeProjectName(
+			common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName))] = true
 	}
 
 	// Check each container
-	for _, container := range containers {
-		for _, name := range container.Names {
+	for _, cont := range containers {
+		if project := cont.Labels[composeProjectLabel]; project != "" {
+			if expectedProjects[common.NormalizeComposeProjectName(project)] {
+				continue
+			}
+
+			// A project that does not follow the agent's naming scheme belongs
+			// to someone else on this host (the appliance's own stack included)
+			// and must never be touched.
+			if _, _, _, err := common.ParseComposeContainerName(project); err != nil {
+				continue
+			}
+
+			am.removeOrphanedContainer(ctx, cont.ID, project)
+			continue
+		}
+
+		for _, name := range cont.Names {
 			// Clean leading slash from container name
 			cleanName := strings.TrimPrefix(name, "/")
 
-			// Check if it matches our naming convention
-			_, _, _, err := common.ParseContainerName(cleanName)
-			isOurContainer := err == nil
+			// A compose service container that somehow carries no project label
+			// is left alone rather than mistaken for a legacy container: the
+			// name parses, but the app it belongs to is keyed by project.
+			if strings.Contains(cleanName, "_compose-") {
+				continue
+			}
 
-			if !isOurContainer && strings.Contains(cleanName, "_compose") {
-				// Also check compose naming (only if it has _compose in the name)
-				_, _, _, err := common.ParseComposeContainerName(cleanName)
-				isOurContainer = err == nil
+			// Check if it matches our naming convention
+			if _, _, _, err := common.ParseContainerName(cleanName); err != nil {
+				continue
 			}
 
 			// If it's our container but not in database, remove it
-			if isOurContainer && !expectedContainers[cleanName] {
-				log.Warn().
-					Str("container", cleanName).
-					Str("id", container.ID[:12]).
-					Msg("❌ Removing orphaned container not in database")
-
-				removeCtx, cancel := context.WithTimeout(ctx, time.Second*30)
-				err := am.StateMachine.Container.RemoveContainerByID(removeCtx, container.ID, map[string]interface{}{"force": true})
-				cancel()
-
-				if err != nil {
-					log.Error().Stack().Err(err).
-						Str("container", cleanName).
-						Msg("Failed to remove orphaned container")
-				} else {
-					log.Info().Str("container", cleanName).Msg("✅ Successfully removed orphaned container")
-				}
+			if !expectedContainers[cleanName] {
+				am.removeOrphanedContainer(ctx, cont.ID, cleanName)
+				break
 			}
 		}
 	}
 
 	log.Info().Msg("✨ Orphaned container cleanup complete")
 	return nil
+}
+
+// removeOrphanedContainer force-removes one container and reports the outcome.
+// A failure is logged and swallowed so one stuck container cannot abort the
+// rest of the sweep.
+func (am *AppManager) removeOrphanedContainer(ctx context.Context, containerID string, label string) {
+	shortID := containerID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+
+	log.Warn().
+		Str("container", label).
+		Str("id", shortID).
+		Msg("❌ Removing orphaned container not in database")
+
+	removeCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+	err := am.StateMachine.Container.RemoveContainerByID(removeCtx, containerID, map[string]interface{}{"force": true})
+	cancel()
+
+	if err != nil {
+		log.Error().Stack().Err(err).
+			Str("container", label).
+			Msg("Failed to remove orphaned container")
+		return
+	}
+
+	log.Info().Str("container", label).Msg("✅ Successfully removed orphaned container")
 }
 
 func (am *AppManager) CleanupOrphanedAppsFromDatabase(remotePayloads []common.TransitionPayload) error {

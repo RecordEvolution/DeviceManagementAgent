@@ -225,6 +225,92 @@ func TestCleanupOrphanedContainers(t *testing.T) {
 		err := am.CleanupOrphanedContainers()
 		require.NoError(t, err)
 	})
+
+	// Regression: compose names its containers "<project>-<service>-<index>",
+	// which ParseContainerName parses as a legacy container whose name is never
+	// in the keep-set. That force-removed every service container of every
+	// compose app on each WAMP reconnect, and the state correction right after
+	// reinstalled the project — a full app restart per reconnect (seen in the
+	// field on a proxied appliance whose session was capped every 15 minutes).
+	t.Run("keeps every service container of a known compose app", func(t *testing.T) {
+		am, mc, _, st, _, _ := amHarness(t)
+
+		amSeed(t, st, 6, "trumpfqds", common.RUNNING, common.PROD)
+		project := common.BuildComposeContainerName(common.PROD, 6, "trumpfqds")
+
+		// The strict mock proves it: no RemoveContainerByID expectation is set,
+		// so any removal fails the test.
+		mc.EXPECT().
+			GetContainers(mock.Anything).
+			Return([]dockertypes.Container{
+				{
+					ID:     "svc-nginx-id",
+					Names:  []string{"/" + project + "-nginx-1"},
+					Labels: map[string]string{composeProjectLabel: project},
+				},
+				{
+					ID:     "svc-collector-id",
+					Names:  []string{"/" + project + "-collector-1"},
+					Labels: map[string]string{composeProjectLabel: project},
+				},
+			}, nil).
+			Once()
+
+		err := am.CleanupOrphanedContainers()
+		require.NoError(t, err)
+	})
+
+	t.Run("removes service containers of a compose app that is gone from the DB", func(t *testing.T) {
+		am, mc, _, st, _, _ := amHarness(t)
+
+		// A different app is known; the ghost project has no DB row.
+		amSeed(t, st, 6, "trumpfqds", common.RUNNING, common.PROD)
+		ghost := common.BuildComposeContainerName(common.PROD, 42, "ghost")
+
+		mc.EXPECT().
+			GetContainers(mock.Anything).
+			Return([]dockertypes.Container{
+				{
+					ID:     "ghost-svc-id",
+					Names:  []string{"/" + ghost + "-web-1"},
+					Labels: map[string]string{composeProjectLabel: ghost},
+				},
+			}, nil).
+			Once()
+
+		mc.EXPECT().
+			RemoveContainerByID(mock.Anything, "ghost-svc-id", map[string]interface{}{"force": true}).
+			Return(nil).
+			Once()
+
+		err := am.CleanupOrphanedContainers()
+		require.NoError(t, err)
+	})
+
+	t.Run("never touches a foreign compose project", func(t *testing.T) {
+		am, mc, _, _, _, _ := amHarness(t)
+
+		// The appliance's own stack, and a short project name that would have
+		// panicked ParseComposeContainerName's unguarded index.
+		mc.EXPECT().
+			GetContainers(mock.Anything).
+			Return([]dockertypes.Container{
+				{
+					ID:     "appliance-backend-id",
+					Names:  []string{"/ironflock-backend-1"},
+					Labels: map[string]string{composeProjectLabel: "ironflock"},
+				},
+				{
+					ID:     "other-id",
+					Names:  []string{"/x-y-1"},
+					Labels: map[string]string{composeProjectLabel: "x"},
+				},
+			}, nil).
+			Once()
+
+		err := am.CleanupOrphanedContainers()
+		require.NoError(t, err)
+	})
 }
 
 // =============================================================================

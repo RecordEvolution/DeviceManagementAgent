@@ -349,7 +349,10 @@ func ParseComposeContainerName(containerName string) (Stage, uint64, string, err
 	var name string
 
 	containerSplit := strings.Split(containerName, "_")
-	if containerSplit[3] != "compose" {
+	// Bounds check before indexing: this is called with arbitrary names
+	// (foreign compose projects on the same host included), and a short name
+	// would otherwise panic.
+	if len(containerSplit) < 4 || containerSplit[3] != "compose" {
 		return "", 0, "", errors.New("invalid compose container name")
 	}
 
