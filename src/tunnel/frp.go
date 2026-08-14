@@ -58,9 +58,9 @@ type FrpcYamlConfig struct {
 	// client field (ClientCommonConfig.metadatas), NOT a transport field —
 	// frpc parses with DisallowUnknownFields and refuses to start if it is
 	// nested under transport.
-	Metadatas     map[string]string `yaml:"metadatas,omitempty"`
-	WebServer     *WebServer        `yaml:"webServer,omitempty"`
-	Log           *LogConfig        `yaml:"log,omitempty"`
+	Metadatas map[string]string `yaml:"metadatas,omitempty"`
+	WebServer *WebServer        `yaml:"webServer,omitempty"`
+	Log       *LogConfig        `yaml:"log,omitempty"`
 	// Deliberately not omitempty: the value we want is false, which omitempty
 	// drops — and frp defaults loginFailExit to true, so frpc would exit after
 	// the first failed login instead of retrying. A frps that is briefly
@@ -79,7 +79,7 @@ type Transport struct {
 	// frpc does not read proxy environment variables itself, so in wss mode the
 	// agent resolves HTTPS_PROXY/NO_PROXY (the same environment the WAMP dialer
 	// honors) and passes the result here explicitly.
-	ProxyURL string `yaml:"proxyURL,omitempty"`
+	ProxyURL string     `yaml:"proxyURL,omitempty"`
 	TLS      *TLSConfig `yaml:"tls,omitempty"`
 }
 
