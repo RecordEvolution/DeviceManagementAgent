@@ -372,6 +372,122 @@ func TestServerPortResolution(t *testing.T) {
 	assert.Equal(t, 7000, prod.yamlConfig.ServerPort)
 }
 
+// Domain-mode appliances (corporate-cert TLS: appliance_domain set AND a wss://
+// device endpoint) carry the tunnel control connection over the appliance's 443
+// ingress with frp's wss transport. Every other combination — plain-mode
+// appliance (ws:// endpoint), cloud device (wss:// but no appliance_domain) —
+// keeps the classic tcp transport on 7000.
+func TestWSSTunnelTransportGating(t *testing.T) {
+	tests := []struct {
+		name         string
+		reswarm      *config.ReswarmConfig
+		wantPort     int
+		wantProtocol string
+	}{
+		{
+			name: "domain-mode appliance rides 443 with wss",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "tls-sf015.corp.example.com",
+				DeviceEndpointURL: "wss://ws.tls-sf015.corp.example.com/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantPort:     443,
+			wantProtocol: "wss",
+		},
+		{
+			name: "plain-mode appliance stays on tcp 7000",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "appliance.example.com",
+				DeviceEndpointURL: "ws://192.168.0.21:18080/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantPort:     7000,
+			wantProtocol: "",
+		},
+		{
+			name: "cloud device (wss but no appliance_domain) stays on tcp 7000",
+			reswarm: &config.ReswarmConfig{
+				DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantPort:     7000,
+			wantProtocol: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := NewTunnelConfigBuilder(builderConfig(t, tt.reswarm))
+			assert.Equal(t, tt.wantPort, builder.yamlConfig.ServerPort)
+			assert.Equal(t, tt.wantProtocol, builder.yamlConfig.Transport.Protocol)
+		})
+	}
+}
+
+// In wss mode the agent resolves the corporate proxy from the standard
+// HTTPS_PROXY/NO_PROXY environment (frpc does not read it itself) and passes it
+// to frpc as transport.proxyURL. NO_PROXY exemptions and non-wss modes emit no
+// proxyURL.
+func TestWSSTunnelProxyResolution(t *testing.T) {
+	domainMode := &config.ReswarmConfig{
+		ApplianceDomain:   "tls-sf015.corp.example.com",
+		DeviceEndpointURL: "wss://ws.tls-sf015.corp.example.com/ws-re-dev",
+		Environment:       string(common.PRODUCTION),
+	}
+
+	t.Run("HTTPS_PROXY is passed through in wss mode", func(t *testing.T) {
+		t.Setenv("HTTPS_PROXY", "http://user:pass@proxy.corp.example.com:3128")
+		t.Setenv("NO_PROXY", "")
+		builder := NewTunnelConfigBuilder(builderConfig(t, domainMode))
+		assert.Equal(t, "http://user:pass@proxy.corp.example.com:3128", builder.yamlConfig.Transport.ProxyURL)
+	})
+
+	t.Run("NO_PROXY exemption suppresses the proxy", func(t *testing.T) {
+		t.Setenv("HTTPS_PROXY", "http://proxy.corp.example.com:3128")
+		t.Setenv("NO_PROXY", "tls-sf015.corp.example.com")
+		builder := NewTunnelConfigBuilder(builderConfig(t, domainMode))
+		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
+	})
+
+	t.Run("no proxyURL outside wss mode even with HTTPS_PROXY set", func(t *testing.T) {
+		t.Setenv("HTTPS_PROXY", "http://proxy.corp.example.com:3128")
+		plain := &config.ReswarmConfig{
+			ApplianceDomain:   "appliance.example.com",
+			DeviceEndpointURL: "ws://192.168.0.21:18080/ws-re-dev",
+			Environment:       string(common.PRODUCTION),
+		}
+		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
+		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
+	})
+}
+
+// The agent derives a tunnel_proof from its existing .flock secret + device_key
+// and sends it as frp client metadata (transport.metadatas.tunnel_proof) — no
+// minted token, nothing to refresh. With no secret/device_key no metadata is
+// emitted (the plugin then allows all — enforcement is opt-in server-side).
+func TestTunnelProofMetadataEmission(t *testing.T) {
+	withSecret := &config.ReswarmConfig{
+		DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev",
+		Environment:       string(common.PRODUCTION),
+		Secret:            "device-cra-secret",
+		DeviceKey:         2,
+	}
+	builder := NewTunnelConfigBuilder(builderConfig(t, withSecret))
+	if assert.NotNil(t, builder.yamlConfig.Transport.Metadatas) {
+		got := builder.yamlConfig.Transport.Metadatas["tunnel_proof"]
+		assert.Equal(t, tunnelAuthProof("device-cra-secret", 2), got)
+		assert.NotEmpty(t, got)
+	}
+
+	// no secret/device_key => no proof metadata
+	without := &config.ReswarmConfig{
+		DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev",
+		Environment:       string(common.PRODUCTION),
+	}
+	builder = NewTunnelConfigBuilder(builderConfig(t, without))
+	assert.Nil(t, builder.yamlConfig.Transport.Metadatas)
+}
+
 func TestConfigBuilderAddAndGetTunnelConfig(t *testing.T) {
 	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
 	builder := NewTunnelConfigBuilder(cfg)

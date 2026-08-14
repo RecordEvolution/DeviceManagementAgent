@@ -1,6 +1,9 @@
 package tunnel
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
@@ -15,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/http/httpproxy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,7 +61,23 @@ type FrpcYamlConfig struct {
 }
 
 type Transport struct {
-	TLS *TLSConfig `yaml:"tls,omitempty"`
+	// Protocol selects frp's underlying transport. Empty means frp's default
+	// (tcp). "wss" (websocket over TLS) is used against domain-mode appliances,
+	// where the control connection rides the appliance's 443 ingress on frp's
+	// fixed /~!frp path instead of the raw frps port 7000.
+	Protocol string `yaml:"protocol,omitempty"`
+	// ProxyURL routes the control connection through an HTTP CONNECT proxy —
+	// frpc does not read proxy environment variables itself, so in wss mode the
+	// agent resolves HTTPS_PROXY/NO_PROXY (the same environment the WAMP dialer
+	// honors) and passes the result here explicitly.
+	ProxyURL string `yaml:"proxyURL,omitempty"`
+	// Metadatas are client-level key/values frp forwards to the frps server-side
+	// authz plugin (as user.metas on Login/NewProxy). We put a tunnel_proof here
+	// — derived at runtime from the device's own .flock secret (tunnelAuthProof)
+	// — which the plugin forwards to the backend to authorize only this device's
+	// subdomains. Nothing minted, nothing to refresh.
+	Metadatas map[string]string `yaml:"metadatas,omitempty"`
+	TLS       *TLSConfig        `yaml:"tls,omitempty"`
 }
 
 type TLSConfig struct {
@@ -125,6 +145,17 @@ func NewTunnelConfigBuilder(cfg *config.Config) TunnelConfigBuilder {
 
 func CreateTunnelID(subdomain string, protocol string) string {
 	return fmt.Sprintf("%s-%s", subdomain, protocol)
+}
+
+// tunnelAuthProof derives the proof-of-possession the frps authz plugin (and the
+// backend behind it) verifies: base64url(HMAC-SHA256(secret, "tunnel-authz:v1:"
+// + deviceKey)). Keyed by the device's own CRA secret, so no server key and no
+// minted token are needed. MUST stay byte-compatible with the backend verifier
+// (RESWARM devices.ts authorize_tunnel).
+func tunnelAuthProof(secret string, deviceKey int) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("tunnel-authz:v1:" + strconv.Itoa(deviceKey)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func CreateSubdomain(protocol Protocol, deviceKey uint64, appName string, localPort uint64) string {
@@ -210,6 +241,16 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	port := pickAdminPort()
 	log.Debug().Msgf("Using port %d for Frp webserver", port)
 
+	// Domain-mode appliance (corporate-cert TLS): the device endpoint is wss://
+	// and the appliance fronts everything on 443 behind its TLS ingress —
+	// including frp's fixed /~!frp websocket path, which the ingress relays to
+	// frps. Ride that same port with frp's wss transport so a device needs no
+	// firewall or proxy exception beyond outbound 443. Plain-mode appliances
+	// (ws:// endpoint) and cloud devices (no appliance_domain) keep the classic
+	// tcp+TLS control connection on port 7000.
+	wssMode := cfg.ReswarmConfig.ApplianceDomain != "" &&
+		strings.HasPrefix(cfg.ReswarmConfig.DeviceEndpointURL, "wss://")
+
 	// Initialize YAML config structure
 	frpcConfig := &FrpcYamlConfig{
 		ServerAddr: serverAddr,
@@ -230,6 +271,33 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 		},
 		LoginFailExit: false,
 		Proxies:       []ProxyConfig{},
+	}
+
+	// Prove device identity to the frps NewProxy authz plugin using material
+	// already in the .flock — no minted token, nothing to refresh. We send an
+	// HMAC of a fixed context string keyed by the device's own CRA secret; the
+	// plugin forwards it to the backend, which recomputes the HMAC against the
+	// secret it stores for this device_key and authorizes only this device's
+	// subdomains. Domain-separated ("tunnel-authz:v1:") so it can never collide
+	// with a WAMP-CRA response derived from the same secret.
+	if cfg.ReswarmConfig.Secret != "" && cfg.ReswarmConfig.DeviceKey > 0 {
+		proof := tunnelAuthProof(cfg.ReswarmConfig.Secret, cfg.ReswarmConfig.DeviceKey)
+		frpcConfig.Transport.Metadatas = map[string]string{"tunnel_proof": proof}
+	}
+
+	if wssMode {
+		frpcConfig.ServerPort = 443
+		frpcConfig.Transport.Protocol = "wss"
+		// Devices on proxy-only networks reach the appliance's 443 through the
+		// corporate proxy via HTTP CONNECT — same as the WAMP connection. The
+		// httpproxy resolver applies the full HTTPS_PROXY/NO_PROXY semantics (a
+		// NO_PROXY-exempted appliance host correctly yields no proxy) and, unlike
+		// http.ProxyFromEnvironment, re-reads the environment on every call.
+		proxyTarget := &url.URL{Scheme: "https", Host: net.JoinHostPort(serverAddr, "443")}
+		if proxyURL, err := httpproxy.FromEnvironment().ProxyFunc()(proxyTarget); err == nil && proxyURL != nil {
+			frpcConfig.Transport.ProxyURL = proxyURL.String()
+			log.Debug().Msgf("Tunnel control connection will use proxy %s", proxyURL.Redacted())
+		}
 	}
 
 	// For local development, use port 7400 to avoid conflicts with macOS
