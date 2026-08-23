@@ -1098,11 +1098,121 @@ func (lm *LogManager) buildTopic(containerName string) string {
 	return fmt.Sprintf("reswarm.logs.%s.%s", serialNumber, containerName)
 }
 
-// StreamBlocking publishes a stream of string data to a specific subscribable container synchronisly.
+// StreamBlocking consumes THIS reader to EOF, publishing its lines to the
+// container's log topic, and returns the stream's terminal error (a docker
+// jsonmessage {"error": ...} tail, or a scan failure).
+//
+// It deliberately does NOT go through initLogStream/emitStream: those attach a
+// stream to the container's shared follow-entry, and when that entry is still
+// marked Active from a previous stream (its deferred cleanup runs in a
+// goroutine), emitStream returns nil WITHOUT consuming the new stream at all.
+// For build/pull/push streams that silently discarded the one place a failure
+// is reported — a publish whose image push failed with "unauthorized" inside
+// the stream sailed on and produced a release whose images never reached the
+// registry. Blocking semantics require: always read, always report.
 func (lm *LogManager) StreamBlocking(containerName string, logType common.LogType, reader io.ReadCloser) error {
-	if reader != nil {
-		return lm.initLogStream(containerName, logType, reader)
+	if reader == nil {
+		return nil
 	}
+	defer reader.Close()
+
+	topic := lm.buildTopic(containerName)
+
+	// Reuse the container's history entry when one exists; otherwise create
+	// one so these lines replay on a later log subscription, exactly as the
+	// old attach path did.
+	lm.activeLogsMutex.Lock()
+	entry := lm.activeLogs[containerName]
+	lm.activeLogsMutex.Unlock()
+
+	shouldPublish := false
+	if entry != nil {
+		entry.subscriptionStateMutex.Lock()
+		shouldPublish = entry.Publish
+		entry.subscriptionStateMutex.Unlock()
+	}
+	if !shouldPublish {
+		// No live entry (or one created before anyone subscribed): ask the
+		// router whether someone is listening right now.
+		if id, err := lm.getActiveSubscriptionID(containerName); err == nil && id != "" {
+			shouldPublish = true
+			if entry != nil {
+				entry.subscriptionStateMutex.Lock()
+				entry.Publish = true
+				entry.SubscriptionID = id
+				entry.subscriptionStateMutex.Unlock()
+			}
+		}
+	}
+	if entry == nil {
+		newEntry := LogProccess{
+			ContainerName: containerName,
+			logHistory:    make([]*LogEntry, 0),
+			Active:        false,
+			Publish:       shouldPublish,
+		}
+		lm.activeLogsMutex.Lock()
+		if existing := lm.activeLogs[containerName]; existing != nil {
+			entry = existing
+		} else {
+			lm.activeLogs[containerName] = &newEntry
+			entry = &newEntry
+		}
+		lm.activeLogsMutex.Unlock()
+	}
+
+	batcher := newLogBatcher(func(joined string) {
+		if err := lm.Messenger.Publish(topics.Topic(topic), []interface{}{joined}, nil, nil); err != nil {
+			log.Error().Err(err).Msgf("failed to publish to %s in blocking stream", topic)
+		}
+	})
+	defer batcher.close()
+
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineBytes)
+
+	var lastChunk string
+	for scanner.Scan() {
+		chunk := scanner.Text()
+
+		entry.subscriptionStateMutex.Lock()
+		if len(entry.logHistory) == historyStorageLimit {
+			entry.logHistory = entry.logHistory[1:]
+		}
+		// CONTAINER, like every stream the follow path records — the local
+		// LogType only distinguishes container output from agent-written lines.
+		entry.appendLog(LogEntry{entry: chunk, logType: CONTAINER})
+		entry.subscriptionStateMutex.Unlock()
+
+		if shouldPublish {
+			batcher.add(chunk)
+		}
+		lastChunk = chunk
+	}
+
+	// Persist what we streamed, mirroring the follow-path's cleanup.
+	if stage, appKey, appName, err := common.ParseContainerName(containerName); err == nil {
+		entry.subscriptionStateMutex.Lock()
+		history := logEntriesToString(entry.logHistory)
+		entry.subscriptionStateMutex.Unlock()
+		if err := lm.Database.UpsertLogHistory(appName, appKey, common.Stage(stage), history); err != nil {
+			log.Error().Err(err).Msgf("failed to persist log history for %s", containerName)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			return errdefs.DockerStreamCanceled(err)
+		}
+		return err
+	}
+
+	errChunk := &ErrorChunk{}
+	json.Unmarshal([]byte(lastChunk), errChunk)
+	if errChunk.Error != "" {
+		return errors.New(errChunk.Error)
+	}
+
 	return nil
 }
 
