@@ -7,6 +7,8 @@ import (
 	"reagent/errdefs"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/docker/docker/api/types/container"
 )
 
@@ -82,15 +84,28 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	// Image cleanup is BEST-EFFORT: by this point the containers are down and
+	// removed — the app is functionally gone, and nothing here may abort the
+	// uninstall. An app whose images never arrived (interrupted transfer,
+	// incomplete store sync) used to fail right here on docker's "No such
+	// image", flip back to FAILED, and retry forever: the one release you most
+	// need to remove was the one that couldn't be. Absent images are already
+	// what removal wants; any other per-image failure is logged and left for
+	// a later prune rather than bricking the removal.
 	for _, imageName := range images {
 		removeImagesByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-
 		err = sm.Container.RemoveImage(removeImagesByNameContext, imageName, options)
+		cancel()
 		if err != nil {
-			return err
+			if errdefs.IsImageNotFound(err) {
+				continue
+			}
+			writeErr := sm.LogManager.Write(containerName,
+				fmt.Sprintf("Could not remove image %s (continuing removal): %s", imageName, err.Error()))
+			if writeErr != nil {
+				log.Error().Err(writeErr).Msg("failed to write image-removal warning to app console")
+			}
 		}
-
 	}
 
 	err = sm.setState(app, common.REMOVED)

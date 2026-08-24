@@ -1041,6 +1041,10 @@ func (docker *Docker) RemoveImagesByName(ctx context.Context, imageName string, 
 			if repoTag != "" {
 				err := docker.RemoveImage(ctx, repoTag, options)
 				if err != nil {
+					// Listed a moment ago but gone now — that IS the goal.
+					if errdefs.IsImageNotFound(err) {
+						continue
+					}
 					return err
 				}
 			}
@@ -1097,6 +1101,13 @@ func (docker *Docker) RemoveImage(ctx context.Context, imageID string, options m
 
 	_, err := docker.client.ImageRemove(ctx, imageID, rOptions)
 	if err != nil {
+		// Typed so removal flows can treat an already-absent image as done:
+		// an app whose images never arrived (interrupted transfer, incomplete
+		// store sync) must still be removable — its uninstall used to abort
+		// on this 404 and strand the app in a FAILED retry loop.
+		if strings.Contains(err.Error(), "No such image") {
+			return errdefs.ImageNotFound(err)
+		}
 		return err
 	}
 
