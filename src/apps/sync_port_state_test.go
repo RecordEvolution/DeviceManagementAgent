@@ -198,6 +198,8 @@ func TestSyncPortStateKeepsReservedRemotePort(t *testing.T) {
 
 	// Already dialing the current host port -> AddTunnel must not be called.
 	mockTunnel.EXPECT().Get(tunnel.CreateTunnelID(subdomain, "tcp")).Return(&tunnel.Tunnel{Config: existing}).Once()
+	// Skip-add now requires a LIVE frpc proxy, not just bookkeeping.
+	mockTunnel.EXPECT().Status(tunnel.CreateTunnelID(subdomain, "tcp")).Return(tunnel.TunnelStatus{Status: "running"}, nil).Once()
 
 	var savedPorts []interface{}
 	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
@@ -296,4 +298,62 @@ func TestGenerateDotEnvContentsCloudRemotePort(t *testing.T) {
 	// port must not depend on it.
 	assert.NotContains(t, contents, "\nWG_PORT=")
 	assert.NotContains(t, contents, "REMOTE_PORT_FOR_51820=")
+}
+
+// The remove-and-reinstall deadlock: bookkeeping says the tunnel exists (same
+// tunnel id, same host port), but frpc has no live proxy — it was dropped with
+// the previous installation. The old code trusted the bookkeeping, skipped the
+// add on every restart, and nothing ever re-established the tunnel. Skip-add
+// must demand a LIVE proxy; a dead one gets replaced.
+func TestSyncPortStateRebuildsDeadTunnel(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 21, "deadtunnel", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(21, "deadtunnel", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "ui", Port: 9090, Protocol: "http", Active: true})
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 21, Protocol: "tcp", Port: 9090}, 41500)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("http"), uint64(cfg.ReswarmConfig.DeviceKey), "deadtunnel", 9090)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "http")
+	stale := tunnel.TunnelConfig{Subdomain: subdomain, AppName: "deadtunnel", Protocol: tunnel.Protocol("http"), LocalPort: 41500}
+
+	// Bookkeeping claims the tunnel is up on the SAME host port…
+	mockTunnel.EXPECT().Get(tunnelID).Return(&tunnel.Tunnel{Config: stale}).Once()
+	// …but frpc has no such proxy.
+	mockTunnel.EXPECT().Status(tunnelID).Return(tunnel.TunnelStatus{}, errdefs.ErrNotFound).Once()
+
+	// The dead entry must be replaced, not trusted.
+	mockTunnel.EXPECT().RemoveTunnel(stale).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		assert.Equal(t, uint64(41500), conf.LocalPort)
+		return conf, nil
+	}).Once()
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).Return(nil).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+}
+
+// Uninstall must tear down every tunnel the app owns — leaving them standing
+// is what made the later reinstall skip recreating them.
+func TestUninstallRemovesAppTunnels(t *testing.T) {
+	am, _, mockTunnel, _, _, cfg := amHarness(t)
+	_ = cfg
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Once()
+
+	mine := tunnel.TunnelConfig{Subdomain: "sub-a", AppName: "victim", Protocol: tunnel.Protocol("http"), LocalPort: 41000}
+	other := tunnel.TunnelConfig{Subdomain: "sub-b", AppName: "bystander", Protocol: tunnel.Protocol("tcp"), LocalPort: 41001}
+	mockTunnel.EXPECT().GetTunnelConfig().Return([]tunnel.TunnelConfig{mine, other}, nil).Once()
+
+	// Only the uninstalled app's tunnel is removed; the bystander stays.
+	mockTunnel.EXPECT().RemoveTunnel(mine).Return(nil).Once()
+
+	am.RemoveAppTunnels("victim")
 }

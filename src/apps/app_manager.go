@@ -113,7 +113,24 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					}
 
 					tnl := am.tunnelManager.Get(tunnelID)
+
+					// "Already exists" must mean an actual live frpc proxy,
+					// not a bookkeeping entry. The in-memory map survives
+					// remove/reinstall cycles and frps-side drops, and
+					// trusting it deadlocked exactly the tunnels the user
+					// needed back: the device skipped the add on every
+					// restart because it believed the tunnel was up, while
+					// nothing was connected — and nothing else ever took the
+					// initiative to rebuild it.
+					alive := false
 					if tnl != nil && tnl.Config.LocalPort == dialPort {
+						alive = am.tunnelProxyAlive(tunnelID)
+						if !alive {
+							log.Warn().Str("tunnelID", tunnelID).Msg("Tunnel bookkeeping says up but frpc has no live proxy — rebuilding")
+						}
+					}
+
+					if alive {
 						log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists, skipping add")
 						// AddTunnel is skipped here, so take the live tunnel's
 						// config as the result: it holds the remote port frps
@@ -124,10 +141,10 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 						newConfig = tnl.Config
 					} else {
 						if tnl != nil {
-							// The app was republished on a different host
-							// port (e.g. reinstall); frpc must not keep
-							// dialing the stale one.
-							log.Info().Str("tunnelID", tunnelID).Uint64("oldPort", tnl.Config.LocalPort).Uint64("newPort", dialPort).Msg("Host port changed, replacing tunnel")
+							// Either the app was republished on a different
+							// host port (frpc must not keep dialing the stale
+							// one), or the proxy is dead and gets rebuilt.
+							log.Info().Str("tunnelID", tunnelID).Uint64("oldPort", tnl.Config.LocalPort).Uint64("newPort", dialPort).Msg("Replacing tunnel")
 							err := am.tunnelManager.RemoveTunnel(tnl.Config)
 							if err != nil {
 								log.Error().Stack().Err(err).Msg("Failed to remove outdated tunnel")
@@ -147,7 +164,15 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 				// continue
 			}
 		} else if tunnelsAvailable {
-			// Remove tunnel when it's not active (regardless of app state)
+			// Remove tunnel when it's not active (regardless of app state).
+			// Skip entirely when there is nothing to remove — the old code
+			// re-ran RemoveTunnel (a config rewrite + frpc reload) for every
+			// inactive rule on every sync, forever.
+			if am.tunnelManager.Get(tunnelID) == nil && !am.tunnelInConfigFile(tunnelID) {
+				newPorts = append(newPorts, portRule)
+				continue
+			}
+
 			// Build the tunnel config to remove it from the file even if it's not in memory
 			tunnelConfig := tunnel.TunnelConfig{
 				Subdomain:  subdomain,
@@ -203,6 +228,67 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	return nil
+}
+
+// tunnelProxyAlive reports whether frpc actually serves a proxy for this
+// tunnel id right now. The in-memory bookkeeping alone is not evidence — see
+// syncPortState. "wait start" counts as alive (frpc is bringing it up; a
+// rebuild would only flap it).
+func (am *AppManager) tunnelProxyAlive(tunnelID string) bool {
+	status, err := am.tunnelManager.Status(tunnelID)
+	if err != nil {
+		return false
+	}
+	if status.Error != "" {
+		return false
+	}
+	switch status.Status {
+	case "running", "wait start":
+		return true
+	}
+	return false
+}
+
+// tunnelInConfigFile reports whether the frpc config file still carries a
+// proxy for this tunnel id (covers entries left by a previous agent run that
+// the in-memory map never saw).
+func (am *AppManager) tunnelInConfigFile(tunnelID string) bool {
+	configs, err := am.tunnelManager.GetTunnelConfig()
+	if err != nil {
+		// Can't prove absence — let the removal path run.
+		return true
+	}
+	for _, cfg := range configs {
+		if tunnel.CreateTunnelID(cfg.Subdomain, string(cfg.Protocol)) == tunnelID {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveAppTunnels tears down every tunnel belonging to an app — memory,
+// config file and frpc alike. Called on uninstall: without it the app's
+// proxies survived removal, kept dialing freed host ports, and their stale
+// bookkeeping made the next install of the same app skip recreating them.
+// File-driven (GetTunnelConfig) so proxies left over from a previous agent
+// run are removed too.
+func (am *AppManager) RemoveAppTunnels(appName string) {
+	if !am.tunnelManager.TunnelCapable() {
+		return
+	}
+	configs, err := am.tunnelManager.GetTunnelConfig()
+	if err != nil {
+		log.Error().Stack().Err(err).Str("app", appName).Msg("Failed to list tunnel configs for app removal")
+		return
+	}
+	for _, cfg := range configs {
+		if !strings.EqualFold(cfg.AppName, appName) {
+			continue
+		}
+		if err := am.tunnelManager.RemoveTunnel(cfg); err != nil {
+			log.Error().Stack().Err(err).Str("app", appName).Str("subdomain", cfg.Subdomain).Msg("Failed to remove app tunnel on uninstall")
+		}
+	}
 }
 
 func (am *AppManager) UpdateTunnelState() error {

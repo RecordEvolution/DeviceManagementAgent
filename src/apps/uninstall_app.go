@@ -23,6 +23,14 @@ func (sm *StateMachine) uninstallApp(payload common.TransitionPayload, app *comm
 	// Free the app's host ports only now that its containers are gone.
 	// Stop/restart keeps reservations so the app gets the same ports back.
 	if am := sm.StateObserver.AppManager; am != nil {
+		// Tunnels first, while their configs still name the app: leaving them
+		// standing kept frpc dialing the just-freed host ports, and their
+		// bookkeeping made a later reinstall skip recreating them (the
+		// "tunnel already exists" deadlock). PROD only — DEV apps never get
+		// tunnels (syncPortState skips DEV).
+		if payload.Stage == common.PROD {
+			am.RemoveAppTunnels(payload.AppName)
+		}
 		am.hostPorts.ReleaseApp(payload.Stage, payload.AppKey)
 	}
 

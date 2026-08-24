@@ -636,7 +636,11 @@ func TestRequestAppStateDropsKeepGoingTransitionsWhileUpdating(t *testing.T) {
 func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 	for _, requested := range []common.AppState{common.PRESENT, common.REMOVED, common.UNINSTALLED} {
 		t.Run(string(requested), func(t *testing.T) {
-			am, mc, _, st, _, _ := amHarness(t)
+			am, mc, mockTunnel, st, _, _ := amHarness(t)
+
+			// The UNINSTALLED teardown now removes the app's tunnels; not
+			// tunnel-capable keeps this a unit test.
+			mockTunnel.EXPECT().TunnelCapable().Return(false).Maybe()
 
 			// The teardown transitions call removeApp; an unsupported compose
 			// short-circuits it (no docker compose CLI) so the test stays a unit.

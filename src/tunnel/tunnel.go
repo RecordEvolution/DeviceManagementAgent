@@ -1209,44 +1209,66 @@ func (frpTm *FrpTunnelManager) Status(tunnelID string) (TunnelStatus, error) {
 // Tries to reserve an external port for kubernetes, updates the frpc client config and reloads the config file
 func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, error) {
 	log.Debug().Str("subdomain", config.Subdomain).Str("protocol", string(config.Protocol)).Msg("AddTunnel called")
+	tunnelId := CreateTunnelID(config.Subdomain, string(config.Protocol))
+
+	// Claim the tunnel id FIRST, and make a duplicate add an idempotent
+	// SUCCESS. The old shape checked the map last: two concurrent syncs for
+	// the same rule (several apps reconfiguring at once fan out overlapping
+	// port syncs) both reserved a remote port and reloaded, the loser then
+	// errored "tunnel already exists" — AFTER its config upsert had
+	// overwritten the winner's file entry with a different remote port. The
+	// caller recorded a failed add for a tunnel that was actually up, and the
+	// file/memory skew persisted the wrong remote port upstream.
+	frpTm.tunnelsLock.Lock()
+	if existing := frpTm.activeTunnelConfigs[tunnelId]; existing != nil {
+		cfg := existing.Config
+		frpTm.tunnelsLock.Unlock()
+		return cfg, nil
+	}
+	claimed := &Tunnel{Config: config}
+	frpTm.activeTunnelConfigs[tunnelId] = claimed
+	frpTm.tunnelsLock.Unlock()
+
+	// Any failure must release the claim — leaving it would make every later
+	// sync "skip add" against a tunnel that never came up.
+	fail := func(err error) (TunnelConfig, error) {
+		frpTm.tunnelsLock.Lock()
+		if frpTm.activeTunnelConfigs[tunnelId] == claimed {
+			delete(frpTm.activeTunnelConfigs, tunnelId)
+		}
+		frpTm.tunnelsLock.Unlock()
+		return TunnelConfig{}, err
+	}
+
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if config.Protocol != HTTP && config.Protocol != HTTPS {
 		// If no remote port is set, we will allocate one
 		remotePort, err := frpTm.reserveRemotePort(config.RemotePort, config.Protocol)
 		if err != nil {
 			log.Error().Err(err).Msg("Error while reserving remote port")
-			return TunnelConfig{}, err
+			return fail(err)
 		}
 		config.RemotePort = remotePort
+
+		// Publish the reserved port on the claim immediately: a concurrent
+		// sync that hits the idempotent-success path above must see the real
+		// remote port, not a zero that would be persisted upstream.
+		frpTm.tunnelsLock.Lock()
+		claimed.Config = config
+		frpTm.tunnelsLock.Unlock()
 	}
 
 	frpTm.configBuilder.AddTunnelConfig(config)
 
-	err := frpTm.Reload()
-	if err != nil {
+	if err := frpTm.Reload(); err != nil {
 		// Rollback the config change if reload fails
 		frpTm.configBuilder.RemoveTunnelConfig(config)
-		return TunnelConfig{}, err
+		return fail(err)
 	}
 
-	// for update := range frpTm.tunnelUpdateChan {
-	// 	if update.AppName == strings.ToLower(config.AppName) &&
-	// 		update.LocalPort == config.LocalPort &&
-	// 		update.Protocol == config.Protocol &&
-	// 		update.UpdateType == STARTED {
-	// 		break
-	// 	}
-	// }
-
-	tunnelId := CreateTunnelID(config.Subdomain, string(config.Protocol))
 	frpTm.tunnelsLock.Lock()
-	if frpTm.activeTunnelConfigs[tunnelId] == nil {
-		frpTm.activeTunnelConfigs[tunnelId] = &Tunnel{Config: config}
-		frpTm.tunnelsLock.Unlock()
-	} else {
-		frpTm.tunnelsLock.Unlock()
-		return TunnelConfig{}, errors.New("tunnel already exists")
-	}
+	claimed.Config = config
+	frpTm.tunnelsLock.Unlock()
 
 	return config, nil
 }
