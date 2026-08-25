@@ -131,11 +131,18 @@ func (sm *StateMachine) getTransitionFunc(prevState common.AppState, nextState c
 			common.PUBLISHED:   sm.publishApp,
 			common.UNINSTALLED: sm.noActionTransitionFunc,
 		},
+		// UNINSTALLED mirrors REMOVED for the in-flight rows: the cancel settles
+		// at REMOVED, and the post-transition verify re-drives REMOVED ->
+		// UNINSTALLED for the full teardown. Without these rows an UNINSTALLED
+		// request during a build/publish resolved to no transition at all and
+		// was silently dropped.
 		common.PUBLISHING: {
-			common.REMOVED: sm.cancelPush,
+			common.REMOVED:     sm.cancelPush,
+			common.UNINSTALLED: sm.cancelPush,
 		},
 		common.BUILDING: {
-			common.REMOVED: sm.cancelBuild,
+			common.REMOVED:     sm.cancelBuild,
+			common.UNINSTALLED: sm.cancelBuild,
 		},
 		common.STOPPED: {
 			common.REMOVED:     sm.removeApp,

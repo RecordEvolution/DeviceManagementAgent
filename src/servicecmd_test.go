@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"path/filepath"
+	"reagent/config"
 	"strings"
 	"testing"
 
@@ -159,4 +161,79 @@ func TestAgentDirFromImagePath(t *testing.T) {
 
 	// Missing -agentDir.
 	assert.Equal(t, "", agentDirFromImagePath(`C:\x\reagent.exe -config c.flock`))
+}
+
+// Appliance-issued device flocks list only the appliance's *local* registry
+// names; the externally reachable registry comes from docker_registry_url and
+// must be merged in.
+func TestInsecureRegistryEntriesApplianceDeviceFlock(t *testing.T) {
+	entries := insecureRegistryEntries(&config.ReswarmConfig{
+		InsecureRegistries: `["localhost:15001", "appstore-registry:5000"]`,
+		DockerRegistryURL:  "136.230.111.59:15001/",
+	})
+	assert.Equal(t, []string{"localhost:15001", "appstore-registry:5000", "136.230.111.59:15001"}, entries)
+}
+
+// The appliance installer writes the agent's own flock with a bare
+// `host:port/` string (not a JSON array); it duplicates docker_registry_url.
+func TestInsecureRegistryEntriesBareLegacyString(t *testing.T) {
+	entries := insecureRegistryEntries(&config.ReswarmConfig{
+		InsecureRegistries: "136.230.111.59:15001/",
+		DockerRegistryURL:  "136.230.111.59:15001/",
+	})
+	assert.Equal(t, []string{"136.230.111.59:15001"}, entries)
+}
+
+// Cloud and domain-mode registries are HTTPS with no explicit port — nothing
+// must be marked insecure for them.
+func TestInsecureRegistryEntriesHTTPSRegistries(t *testing.T) {
+	assert.Empty(t, insecureRegistryEntries(&config.ReswarmConfig{
+		DockerRegistryURL: "registry.ironflock.com/",
+	}))
+	assert.Empty(t, insecureRegistryEntries(&config.ReswarmConfig{
+		DockerRegistryURL: "registry.customer.example/",
+	}))
+}
+
+func TestMergeInsecureRegistriesCreatesFromEmpty(t *testing.T) {
+	merged, changed, err := mergeInsecureRegistries(nil, []string{"136.230.111.59:15001"})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	var daemonCfg map[string]interface{}
+	require.NoError(t, json.Unmarshal(merged, &daemonCfg))
+	assert.Equal(t, []interface{}{"136.230.111.59:15001"}, daemonCfg["insecure-registries"])
+}
+
+// Docker Desktop machines commonly have a daemon.json already — other keys and
+// existing entries must survive the merge untouched.
+func TestMergeInsecureRegistriesPreservesExisting(t *testing.T) {
+	existing := []byte(`{
+  "builder": {"gc": {"enabled": true}},
+  "insecure-registries": ["hubproxy.docker.internal:5555"]
+}`)
+	merged, changed, err := mergeInsecureRegistries(existing, []string{"136.230.111.59:15001"})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	var daemonCfg map[string]interface{}
+	require.NoError(t, json.Unmarshal(merged, &daemonCfg))
+	assert.Equal(t, []interface{}{"hubproxy.docker.internal:5555", "136.230.111.59:15001"}, daemonCfg["insecure-registries"])
+	assert.Contains(t, daemonCfg, "builder")
+}
+
+// A rerun (or an operator who already added the entry by hand) must be a
+// byte-for-byte no-op.
+func TestMergeInsecureRegistriesIdempotent(t *testing.T) {
+	existing := []byte(`{"insecure-registries": ["136.230.111.59:15001"]}`)
+	merged, changed, err := mergeInsecureRegistries(existing, []string{"136.230.111.59:15001"})
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Equal(t, existing, merged)
+}
+
+// A hand-edited daemon.json that no longer parses must never be clobbered.
+func TestMergeInsecureRegistriesRejectsMalformed(t *testing.T) {
+	_, _, err := mergeInsecureRegistries([]byte(`{"insecure-registries": [`), []string{"x:1"})
+	assert.Error(t, err)
 }

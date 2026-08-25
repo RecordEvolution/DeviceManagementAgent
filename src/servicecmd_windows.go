@@ -3,12 +3,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reagent/codesign"
+	"reagent/config"
 	"reagent/filesystem"
 	"strings"
 	"time"
@@ -239,6 +241,14 @@ func serviceInstall(args []string) error {
 		}
 	}
 
+	// Docker must trust the appliance's plain-HTTP registry or every app
+	// install fails at the image pull. Best-effort: on failure the entry can
+	// be added by hand via Docker Desktop → Settings → Docker Engine.
+	err = ensureDockerInsecureRegistries(installedConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not configure Docker's insecure-registries (app installs will fail until the appliance registry is added via Docker Desktop → Settings → Docker Engine): %v\n", err)
+	}
+
 	// Import our code-signing root so the agent's signed self-updates are
 	// trusted (UAC verified publisher; on-device pinning). No-ops until a real
 	// root is embedded. Non-fatal — an un-imported cert only weakens the
@@ -453,6 +463,86 @@ func findExistingAgentDirs() []string {
 		dirs = append(dirs, filepath.Dir(match))
 	}
 	return dirs
+}
+
+// dockerDaemonJSONPath resolves the daemon config file the Docker on this
+// host actually reads. Docker Desktop (the supported runtime for
+// Linux-container apps on edge PCs) reads the installing user's
+// %USERPROFILE%\.docker\daemon.json — the file behind Settings → Docker
+// Engine; a plain Docker Engine Windows service reads
+// %ProgramData%\docker\config\daemon.json. The engine path is chosen only
+// when Docker Desktop is absent and the engine's data dir exists; otherwise
+// the Desktop path, which is also the right seed when Docker is not yet
+// installed at all.
+func dockerDaemonJSONPath() (string, error) {
+	desktopExe := filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe")
+	_, desktopErr := os.Stat(desktopExe)
+
+	if desktopErr != nil {
+		engineDir := filepath.Join(os.Getenv("ProgramData"), "docker")
+		if _, err := os.Stat(engineDir); err == nil {
+			return filepath.Join(engineDir, "config", "daemon.json"), nil
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not resolve the user profile for .docker\\daemon.json: %w", err)
+	}
+	return filepath.Join(home, ".docker", "daemon.json"), nil
+}
+
+// ensureDockerInsecureRegistries merges the registries from the .flock into
+// the Docker daemon config, so image pulls from the appliance's plain-HTTP
+// registry work. Without this every app install on an edge PC fails: the
+// daemon insists on HTTPS against http://<appliance>:15001 (or, behind a
+// corporate proxy, times out before that). Docker only re-reads the file on
+// restart, so the caller's output must say so when something was added.
+func ensureDockerInsecureRegistries(flockPath string) error {
+	raw, err := os.ReadFile(flockPath)
+	if err != nil {
+		return err
+	}
+	var flockCfg config.ReswarmConfig
+	err = json.Unmarshal(raw, &flockCfg)
+	if err != nil {
+		return fmt.Errorf("could not parse %s: %w", flockPath, err)
+	}
+
+	entries := insecureRegistryEntries(&flockCfg)
+	if len(entries) == 0 {
+		return nil
+	}
+
+	daemonPath, err := dockerDaemonJSONPath()
+	if err != nil {
+		return err
+	}
+	current, err := os.ReadFile(daemonPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	merged, changed, err := mergeInsecureRegistries(current, entries)
+	if err != nil {
+		return fmt.Errorf("%s: %w", daemonPath, err)
+	}
+	if !changed {
+		return nil
+	}
+
+	err = os.MkdirAll(filepath.Dir(daemonPath), 0755)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(daemonPath, merged, 0644)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Added insecure-registries %s to %s — restart Docker (Docker Desktop, or the docker service) to apply.\n",
+		strings.Join(entries, ", "), daemonPath)
+	return nil
 }
 
 // setServiceProxy writes the proxy into the service's Environment registry

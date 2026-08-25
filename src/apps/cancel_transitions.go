@@ -60,22 +60,37 @@ func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common
 	return sm.setState(app, common.REMOVED)
 }
 
-// cancelActiveUpdate interrupts an in-flight update so its transition unwinds and
-// releases the lock. Compose updates run via the docker compose CLI (not a
+// interruptActiveTransition cancels the cancelable work of whatever transition
+// is in flight for this app so it unwinds and releases the transition lock.
+// Compose transitions (pull/up/update) run via the docker compose CLI (not a
 // docker-API stream), so CancelStream can't reach them — they are canceled
-// through the update's context, which kills the CLI. The non-compose path cancels
-// the docker-API pull stream. No-op if nothing is in flight.
-func (sm *StateMachine) cancelActiveUpdate(payload common.TransitionPayload) {
+// through the transition's registered context, which kills the CLI. The
+// non-compose path cancels the docker-API pull stream; DEV apps additionally
+// get their in-flight build canceled. No-op if nothing is in flight, and a
+// best effort otherwise: work outside these cancel points (a registry login, a
+// compose up/down) finishes or times out on its own.
+func (sm *StateMachine) interruptActiveTransition(payload common.TransitionPayload) {
 	if payload.DockerCompose != nil {
 		sm.cancelComposeTransition(payload.Stage, payload.AppKey)
-	} else {
-		pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
-		sm.Container.CancelStream(pullID)
+
+		if payload.Stage == common.DEV {
+			buildID := common.BuildDockerBuildID(payload.AppKey, payload.AppName)
+			sm.Container.Compose().CancelBuild(buildID) // ignore error — no build may be in flight
+		}
+		return
+	}
+
+	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
+	sm.Container.CancelStream(pullID)
+
+	if payload.Stage == common.DEV {
+		buildID := common.BuildDockerBuildID(payload.AppKey, payload.AppName)
+		sm.Container.CancelStream(buildID)
 	}
 }
 
 func (sm *StateMachine) cancelUpdate(payload common.TransitionPayload, app *common.App) error {
-	sm.cancelActiveUpdate(payload)
+	sm.interruptActiveTransition(payload)
 
 	// let the backend know the update has been canceled
 	app.UpdateStatus = common.CANCELED
@@ -84,7 +99,7 @@ func (sm *StateMachine) cancelUpdate(payload common.TransitionPayload, app *comm
 }
 
 func (sm *StateMachine) cancelUpdateAndRemove(payload common.TransitionPayload, app *common.App) error {
-	sm.cancelActiveUpdate(payload)
+	sm.interruptActiveTransition(payload)
 
 	app.UpdateStatus = common.CANCELED
 
@@ -95,7 +110,7 @@ func (sm *StateMachine) cancelUpdateAndRemove(payload common.TransitionPayload, 
 // app. It mirrors cancelUpdateAndRemove for the UPDATING -> UNINSTALLED path, so a
 // teardown requested mid-update aborts the update first.
 func (sm *StateMachine) cancelUpdateAndUninstall(payload common.TransitionPayload, app *common.App) error {
-	sm.cancelActiveUpdate(payload)
+	sm.interruptActiveTransition(payload)
 
 	app.UpdateStatus = common.CANCELED
 

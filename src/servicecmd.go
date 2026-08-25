@@ -6,6 +6,8 @@ package main
 // live in servicecmd_windows.go.
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -86,6 +88,109 @@ func splitCommandLine(s string) []string {
 		fields = append(fields, cur.String())
 	}
 	return fields
+}
+
+// normalizeRegistryHost reduces a registry reference from the .flock to the
+// `host[:port]` form Docker matches insecure-registries against: no scheme,
+// no trailing slash (`136.230.111.59:15001/` → `136.230.111.59:15001`).
+func normalizeRegistryHost(entry string) string {
+	entry = strings.TrimSpace(entry)
+	entry = strings.TrimPrefix(entry, "http://")
+	entry = strings.TrimPrefix(entry, "https://")
+	return strings.TrimRight(entry, "/")
+}
+
+// hostHasPort reports whether a normalized registry reference carries an
+// explicit numeric port.
+func hostHasPort(entry string) bool {
+	entry = normalizeRegistryHost(entry)
+	i := strings.LastIndex(entry, ":")
+	if i < 0 || i == len(entry)-1 {
+		return false
+	}
+	for _, r := range entry[i+1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// insecureRegistryEntries derives the Docker insecure-registries entries this
+// device needs from its .flock. Two sources: the `insecure-registries` field
+// (a JSON-array string on backend-issued device flocks, a bare `host:port/`
+// string on installer-issued appliance flocks) and `docker_registry_url` — the
+// registry the agent actually logs into. The listed field alone is not enough:
+// appliance device flocks carry the appliance's *local* names (localhost), so
+// the reachable registry URL is merged in whenever it names an explicit port.
+// An explicit port is what marks the plain-HTTP LAN registry; HTTPS registries
+// (cloud, domain-mode appliance) have none and need no insecure entry.
+func insecureRegistryEntries(cfg *config.ReswarmConfig) []string {
+	var raw []string
+	if listed := strings.TrimSpace(cfg.InsecureRegistries); listed != "" {
+		var arr []string
+		if json.Unmarshal([]byte(listed), &arr) == nil {
+			raw = arr
+		} else {
+			raw = []string{listed}
+		}
+	}
+	if hostHasPort(cfg.DockerRegistryURL) {
+		raw = append(raw, cfg.DockerRegistryURL)
+	}
+
+	entries := make([]string, 0, len(raw))
+	seen := make(map[string]bool)
+	for _, entry := range raw {
+		entry = normalizeRegistryHost(entry)
+		if entry == "" || seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// mergeInsecureRegistries returns daemonJSON with entries merged into its
+// "insecure-registries" array, preserving every other key and every existing
+// entry. Empty input starts from {}. Malformed JSON is an error — an
+// operator's hand-edited daemon.json must never be clobbered.
+func mergeInsecureRegistries(daemonJSON []byte, entries []string) (merged []byte, changed bool, err error) {
+	daemonCfg := map[string]interface{}{}
+	if len(bytes.TrimSpace(daemonJSON)) > 0 {
+		err = json.Unmarshal(daemonJSON, &daemonCfg)
+		if err != nil {
+			return nil, false, fmt.Errorf("existing daemon.json is not valid JSON: %w", err)
+		}
+	}
+
+	existing, _ := daemonCfg["insecure-registries"].([]interface{})
+	seen := make(map[string]bool)
+	for _, v := range existing {
+		if s, ok := v.(string); ok {
+			seen[normalizeRegistryHost(s)] = true
+		}
+	}
+
+	for _, entry := range entries {
+		if seen[entry] {
+			continue
+		}
+		existing = append(existing, entry)
+		seen[entry] = true
+		changed = true
+	}
+	if !changed {
+		return daemonJSON, false, nil
+	}
+	daemonCfg["insecure-registries"] = existing
+
+	merged, err = json.MarshalIndent(daemonCfg, "", "  ")
+	if err != nil {
+		return nil, false, err
+	}
+	return append(merged, '\n'), true, nil
 }
 
 type serviceInstallOptions struct {

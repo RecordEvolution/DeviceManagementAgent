@@ -62,49 +62,92 @@ func (clm *AppManager) retry(crashTask *CrashLoop) uint {
 	clm.crashLoopLock.Unlock()
 
 	safe.Go(func() {
-
 		sleepTime := calculateLoopSleepTime(retries)
 
 		log.Info().Msgf("CrashLoopBackOff attempt: %d, sleeping for %s for %s (%s)", retries, sleepTime, crashTask.Payload.AppName, crashTask.Payload.Stage)
 
 		time.Sleep(sleepTime)
 
-		// exit the goroutine if the crashloop was canceled in the meantime
-		clm.crashLoopLock.Lock()
-		var foundTask *CrashLoop
-		for task := range clm.crashLoops {
-			if task.Payload.Stage == crashTask.Payload.Stage && task.Payload.AppKey == crashTask.Payload.AppKey {
-				foundTask = task
-				break
-			}
-		}
-
-		if foundTask == nil {
-			log.Debug().Msgf("Crashloop task no longer exists for %d (%s), exiting goroutine...", crashTask.Payload.AppKey, crashTask.Payload.Stage)
-			clm.crashLoopLock.Unlock()
-			return
-		}
-
-		clm.crashLoopLock.Unlock()
-
-		app, err := clm.AppStore.GetApp(crashTask.Payload.AppKey, crashTask.Payload.Stage)
-		if err != nil || app == nil {
-			return
-		}
-
-		app.StateLock.Lock()
-		currentState := app.CurrentState
-		app.StateLock.Unlock()
-
-		if currentState != crashTask.Payload.RequestedState {
-			clm.RequestAppState(crashTask.Payload)
-		} else {
-			clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
-		}
-
+		clm.crashLoopWake(crashTask)
 	})
 
 	return retries
+}
+
+// crashLoopWake is the decision a crashloop goroutine makes after its backoff
+// sleep. Split from retry() so it is testable without sleeping.
+func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
+	// Exit if THIS loop was canceled in the meantime. Looked up by task
+	// identity, not by app key: a loop cleared and re-created for the same app
+	// while this goroutine slept is a different loop with its own goroutine, so
+	// a key match would let this stale goroutine double-drive retries and
+	// inflate the new loop's backoff counter.
+	clm.crashLoopLock.Lock()
+	_, active := clm.crashLoops[crashTask]
+	clm.crashLoopLock.Unlock()
+
+	if !active {
+		log.Debug().Msgf("Crashloop task no longer exists for %d (%s), exiting goroutine...", crashTask.Payload.AppKey, crashTask.Payload.Stage)
+		return
+	}
+
+	app, err := clm.AppStore.GetApp(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+	if err != nil || app == nil {
+		return
+	}
+
+	app.StateLock.Lock()
+	currentState := app.CurrentState
+	requestedState := app.RequestedState
+	app.StateLock.Unlock()
+
+	// The desired state may have changed while this loop slept — say, an
+	// uninstall arrived mid-backoff. The captured payload is then stale: end
+	// this loop and drive the app toward the CURRENT requested state with a
+	// fresh payload, instead of re-driving the old target forever (which kept a
+	// registry-crashlooping app re-trying RUNNING for hours after its uninstall
+	// was requested). The fresh request is not marked Retrying: it is new
+	// intent, so a failure starts its own crashloop from a fast backoff.
+	if requestedState != crashTask.Payload.RequestedState {
+		log.Info().Msgf("crashloop for %s (%s): requested state changed from %s to %s during backoff; dropping the stale retry",
+			crashTask.Payload.AppName, crashTask.Payload.Stage, crashTask.Payload.RequestedState, requestedState)
+		clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+
+		if currentState == requestedState {
+			return
+		}
+
+		freshPayload, err := clm.AppStore.GetRequestedState(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+		if err != nil {
+			log.Error().Err(err).Msgf("crashloop for %s (%s): failed to load the current requested state; leaving the app to the next backend push",
+				crashTask.Payload.AppName, crashTask.Payload.Stage)
+			return
+		}
+
+		clm.RequestAppState(freshPayload)
+		return
+	}
+
+	if currentState == crashTask.Payload.RequestedState {
+		clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+		return
+	}
+
+	// Same target, but re-fetch the payload anyway: config (environment,
+	// compose definition, ports) may have been updated while the loop slept,
+	// and retrying the captured snapshot would keep starting the app with the
+	// old config. Retrying stays set so RequestAppState does not clear this
+	// loop and the backoff keeps growing. Fall back to the captured payload
+	// when the row cannot be read.
+	retryPayload, err := clm.AppStore.GetRequestedState(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+	if err != nil {
+		log.Warn().Err(err).Msgf("crashloop for %s (%s): failed to refresh the requested-state payload; retrying the captured one",
+			crashTask.Payload.AppName, crashTask.Payload.Stage)
+		retryPayload = crashTask.Payload
+	}
+	retryPayload.Retrying = true
+
+	clm.RequestAppState(retryPayload)
 }
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {

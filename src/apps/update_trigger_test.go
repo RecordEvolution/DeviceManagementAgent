@@ -670,10 +670,12 @@ func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 	}
 }
 
-// cancelActiveUpdate is the shared cancellation used by every UPDATING teardown
-// transition. It cancels the compose update's context for a compose app (killing
-// the CLI) and the docker-API pull stream for a plain app.
-func TestCancelActiveUpdateCancelsComposeAndStream(t *testing.T) {
+// interruptActiveTransition is the shared cancellation used by every UPDATING
+// teardown transition and by teardown requests that hit a held transition
+// lock. It cancels the compose transition's context for a compose app (killing
+// the CLI) and the docker-API pull stream for a plain app; DEV apps get their
+// build canceled too.
+func TestInterruptActiveTransitionCancelsComposeAndStream(t *testing.T) {
 	t.Run("compose app cancels the update context", func(t *testing.T) {
 		am, _, _, _, _, _ := amHarness(t)
 
@@ -683,7 +685,7 @@ func TestCancelActiveUpdateCancelsComposeAndStream(t *testing.T) {
 		payload := amPayload(64, "compose", common.PRESENT, common.PROD)
 		payload.DockerCompose = updComposeMap()
 
-		am.StateMachine.cancelActiveUpdate(payload)
+		am.StateMachine.interruptActiveTransition(payload)
 		assert.True(t, canceled, "a compose update is canceled via its context, not CancelStream")
 	})
 
@@ -695,8 +697,37 @@ func TestCancelActiveUpdateCancelsComposeAndStream(t *testing.T) {
 		payload := amPayload(65, "plain", common.PRESENT, common.PROD)
 		payload.DockerCompose = nil // non-compose
 
-		am.StateMachine.cancelActiveUpdate(payload)
+		am.StateMachine.interruptActiveTransition(payload)
 		// mc's strict expectation verifies CancelStream was called exactly once.
+	})
+
+	t.Run("plain DEV app additionally cancels the build stream", func(t *testing.T) {
+		am, mc, _, _, _, _ := amHarness(t)
+
+		mc.EXPECT().CancelStream(mock.Anything).Return(nil).Twice()
+
+		payload := amPayload(66, "plaindev", common.PRESENT, common.DEV)
+		payload.DockerCompose = nil // non-compose
+
+		am.StateMachine.interruptActiveTransition(payload)
+		// pull stream + build stream: exactly two cancels.
+	})
+
+	t.Run("compose DEV app additionally cancels the compose build", func(t *testing.T) {
+		am, mc, _, _, _, _ := amHarness(t)
+
+		canceled := false
+		am.StateMachine.registerComposeTransitionCancel(common.DEV, 67, func() { canceled = true })
+
+		// CancelBuild only consults the compose process registry; a zero-value
+		// Compose simply reports no active build, which interrupt ignores.
+		mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
+
+		payload := amPayload(67, "composedev", common.PRESENT, common.DEV)
+		payload.DockerCompose = updComposeMap()
+
+		am.StateMachine.interruptActiveTransition(payload)
+		assert.True(t, canceled, "the compose transition context must be canceled for DEV too")
 	})
 }
 

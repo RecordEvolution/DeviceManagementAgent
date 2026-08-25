@@ -16,6 +16,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// teardownLockAcquireTimeout bounds how long a REMOVED/UNINSTALLED request
+// waits for an interrupted in-flight transition to unwind and release the
+// transition lock. Generous because the un-cancelable stretches of a
+// transition (a compose up/down, docker-API calls) can legitimately run for
+// minutes; on expiry the teardown is dropped with an error and the operator's
+// next attempt retries. A var, not a const, so tests can shorten it.
+var teardownLockAcquireTimeout = time.Minute * 5
+
 type AppManager struct {
 	AppStore      *store.AppStore
 	StateMachine  *StateMachine
@@ -324,7 +332,12 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	requestedAppState := app.RequestedState
 	app.StateLock.Unlock()
 
-	log.Debug().Str("app", payload.AppName).Str("from", string(curAppState)).Str("to", string(requestedAppState)).Msg("Received Requested State")
+	// "to" is what THIS payload asks for; the store's requested state is logged
+	// separately. Logging the store value as "to" once masked a whole outage
+	// class: crashloop retries of a stale RUNNING payload logged as "to
+	// UNINSTALLED" after an uninstall updated the store, making it look like
+	// the uninstall was being attempted when it never ran.
+	log.Debug().Str("app", payload.AppName).Str("from", string(curAppState)).Str("to", string(payload.RequestedState)).Str("storedRequestedState", string(requestedAppState)).Bool("retrying", payload.Retrying).Msg("Received Requested State")
 
 	// clear crashloop counter if changing state request
 	if !payload.Retrying {
@@ -376,8 +389,30 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	locked := app.SecureTransition() // if the app is not locked, it will lock the app
 	if locked {
-		log.Info().Msgf("App with name %s and stage %s is already transitioning. (CURRENT STATE: %s)", app.AppName, app.Stage, app.CurrentState)
-		return nil
+		isTeardownRequest := payload.RequestedState == common.REMOVED || payload.RequestedState == common.UNINSTALLED
+		if !isTeardownRequest {
+			log.Info().Msgf("App with name %s and stage %s is already transitioning, dropping request to %s. (CURRENT STATE: %s)", app.AppName, app.Stage, payload.RequestedState, curAppState)
+			return nil
+		}
+
+		// A teardown (REMOVED/UNINSTALLED) must never be silently dropped: the
+		// backend does not re-push it, so a drop can leave an app impossible to
+		// uninstall (seen in the field with an app crashlooping on an
+		// unreachable registry — every uninstall push landed inside a retry's
+		// registry-login window and was dropped). Interrupt the in-flight
+		// transition's cancelable work so it unwinds quickly, then take the
+		// lock and run the teardown. Mirrors the UPDATING escape hatch above
+		// for every other in-flight transition.
+		log.Info().Msgf("%s requested while %s (%s) is transitioning; interrupting the transition and waiting for the lock", payload.RequestedState, app.AppName, app.Stage)
+		am.StateMachine.interruptActiveTransition(payload)
+
+		acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), teardownLockAcquireTimeout)
+		err = app.TransitionLock.Acquire(acquireCtx, 1)
+		cancelAcquire()
+		if err != nil {
+			log.Error().Err(err).Msgf("gave up waiting for the in-flight transition of %s (%s); teardown to %s was not executed", app.AppName, app.Stage, payload.RequestedState)
+			return err
+		}
 	}
 
 	// need to call this after we have secured the lock
@@ -795,6 +830,18 @@ func (am *AppManager) VerifyState(app *common.App) error {
 
 	requestedStatePayload, err := am.AppStore.GetRequestedState(app.AppKey, app.Stage)
 	if err != nil {
+		// A completed teardown deletes both database rows (state observer), so
+		// a missing requested-state row right after reaching REMOVED or
+		// UNINSTALLED is the expected end of a successful teardown — not a
+		// verification failure.
+		app.StateLock.Lock()
+		verifyState := app.CurrentState
+		app.StateLock.Unlock()
+		if verifyState == common.REMOVED || verifyState == common.UNINSTALLED {
+			log.Debug().Str("app", app.AppName).Msg("No requested state row after teardown; nothing to verify")
+			return nil
+		}
+
 		log.Error().Stack().Err(err).Msg("Failed to get requested state in VerifyState")
 		return err
 	}
