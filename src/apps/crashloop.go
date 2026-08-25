@@ -98,33 +98,59 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 
 	app.StateLock.Lock()
 	currentState := app.CurrentState
-	requestedState := app.RequestedState
+	memRequestedState := app.RequestedState
 	app.StateLock.Unlock()
 
-	// The desired state may have changed while this loop slept — say, an
-	// uninstall arrived mid-backoff. The captured payload is then stale: end
-	// this loop and drive the app toward the CURRENT requested state with a
-	// fresh payload, instead of re-driving the old target forever (which kept a
-	// registry-crashlooping app re-trying RUNNING for hours after its uninstall
-	// was requested). The fresh request is not marked Retrying: it is new
-	// intent, so a failure starts its own crashloop from a fast backoff.
-	if requestedState != crashTask.Payload.RequestedState {
+	// Re-read the authoritative requested-state row. The captured payload may
+	// be doubly stale: the TARGET may have changed (an uninstall arrived
+	// mid-backoff — re-driving the old target forever kept a
+	// registry-crashlooping app re-trying RUNNING for hours after its
+	// uninstall was requested), and even for an unchanged target the CONFIG
+	// (environment, compose definition, ports) may have been updated.
+	rowPayload, rowErr := clm.AppStore.GetRequestedState(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+
+	if rowErr != nil {
+		if memRequestedState != crashTask.Payload.RequestedState {
+			// The target changed but its row is gone or unreadable — most
+			// likely a completed teardown deleted it. Never resurrect the
+			// captured target: just end this loop.
+			log.Info().Msgf("crashloop for %s (%s): requested state changed and its row is gone; ending the loop",
+				crashTask.Payload.AppName, crashTask.Payload.Stage)
+			clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+			return
+		}
+
+		if currentState == crashTask.Payload.RequestedState {
+			clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
+			return
+		}
+
+		log.Warn().Err(rowErr).Msgf("crashloop for %s (%s): failed to refresh the requested-state payload; retrying the captured one",
+			crashTask.Payload.AppName, crashTask.Payload.Stage)
+		retryPayload := crashTask.Payload
+		retryPayload.Retrying = true
+		clm.RequestAppState(retryPayload)
+		return
+	}
+
+	// Decide "did the target change?" against the ROW, not the in-memory
+	// value: the two diverge when a row write failed (e.g. disk-full), and
+	// treating that divergence as new intent on every wake would clear and
+	// re-create the loop each cycle, resetting the backoff to seconds forever.
+	if rowPayload.RequestedState != crashTask.Payload.RequestedState {
+		// New intent: end this loop and drive the app toward the current
+		// target. Not marked Retrying, so a failure starts its own crashloop
+		// from a fast backoff.
 		log.Info().Msgf("crashloop for %s (%s): requested state changed from %s to %s during backoff; dropping the stale retry",
-			crashTask.Payload.AppName, crashTask.Payload.Stage, crashTask.Payload.RequestedState, requestedState)
+			crashTask.Payload.AppName, crashTask.Payload.Stage, crashTask.Payload.RequestedState, rowPayload.RequestedState)
 		clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 
-		if currentState == requestedState {
+		if currentState == rowPayload.RequestedState {
 			return
 		}
 
-		freshPayload, err := clm.AppStore.GetRequestedState(crashTask.Payload.AppKey, crashTask.Payload.Stage)
-		if err != nil {
-			log.Error().Err(err).Msgf("crashloop for %s (%s): failed to load the current requested state; leaving the app to the next backend push",
-				crashTask.Payload.AppName, crashTask.Payload.Stage)
-			return
-		}
-
-		clm.RequestAppState(freshPayload)
+		carryPushOnlyFields(&rowPayload, crashTask.Payload)
+		clm.RequestAppState(rowPayload)
 		return
 	}
 
@@ -133,21 +159,25 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 		return
 	}
 
-	// Same target, but re-fetch the payload anyway: config (environment,
-	// compose definition, ports) may have been updated while the loop slept,
-	// and retrying the captured snapshot would keep starting the app with the
-	// old config. Retrying stays set so RequestAppState does not clear this
-	// loop and the backoff keeps growing. Fall back to the captured payload
-	// when the row cannot be read.
-	retryPayload, err := clm.AppStore.GetRequestedState(crashTask.Payload.AppKey, crashTask.Payload.Stage)
-	if err != nil {
-		log.Warn().Err(err).Msgf("crashloop for %s (%s): failed to refresh the requested-state payload; retrying the captured one",
-			crashTask.Payload.AppName, crashTask.Payload.Stage)
-		retryPayload = crashTask.Payload
-	}
-	retryPayload.Retrying = true
+	// Same target: retry with the refreshed row payload so config updates are
+	// honored. Retrying stays set so RequestAppState does not clear this loop
+	// and the backoff keeps growing.
+	carryPushOnlyFields(&rowPayload, crashTask.Payload)
+	rowPayload.Retrying = true
+	clm.RequestAppState(rowPayload)
+}
 
-	clm.RequestAppState(retryPayload)
+// carryPushOnlyFields copies the payload fields that exist only on live cloud
+// pushes — the requested-state row does not persist them — from the captured
+// crashloop payload onto a row-built one. Without this a retry would lose the
+// app's third-party registry credentials (docker_credentials), its instance
+// identity (INSTANCE_KEY), and its credential epoch, degrading every restart
+// the crashloop drives.
+func carryPushOnlyFields(rowPayload *common.TransitionPayload, captured common.TransitionPayload) {
+	rowPayload.DockerCredentials = captured.DockerCredentials
+	rowPayload.InstanceKey = captured.InstanceKey
+	rowPayload.AppCredEpoch = captured.AppCredEpoch
+	rowPayload.DeviceToAppKey = captured.DeviceToAppKey
 }
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {

@@ -5,6 +5,21 @@ import (
 	"reagent/common"
 )
 
+// settleCanceledTransition finishes a canceled in-flight transition at the
+// teardown the payload actually asked for: the full uninstall when the request
+// was UNINSTALLED, the plain REMOVED settle otherwise. Merely publishing
+// REMOVED for an UNINSTALLED request never converges — the state observer
+// deletes both database rows the moment REMOVED is reached with an UNINSTALLED
+// requested-state row, so no later re-drive can finish the job and the app's
+// data directory, tunnels and host ports leak. Mirrors what cancelPull's
+// compose branch and the cancelUpdateAnd* handlers already do.
+func (sm *StateMachine) settleCanceledTransition(payload common.TransitionPayload, app *common.App) error {
+	if payload.RequestedState == common.UNINSTALLED {
+		return sm.uninstallApp(payload, app)
+	}
+	return sm.setState(app, common.REMOVED)
+}
+
 func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *common.App) error {
 	if payload.Stage == common.PROD {
 		return errors.New("cannot build prod apps")
@@ -15,12 +30,12 @@ func (sm *StateMachine) cancelBuild(payload common.TransitionPayload, app *commo
 	if payload.DockerCompose != nil {
 		compose := sm.Container.Compose()
 		compose.CancelBuild(buildID) // ignore error — build may have already finished
-		return sm.setState(app, common.REMOVED)
+		return sm.settleCanceledTransition(payload, app)
 	}
 
 	sm.Container.CancelStream(buildID)
 
-	return sm.setState(app, common.REMOVED)
+	return sm.settleCanceledTransition(payload, app)
 }
 
 func (sm *StateMachine) cancelPull(payload common.TransitionPayload, app *common.App) error {
@@ -49,7 +64,7 @@ func (sm *StateMachine) cancelPull(payload common.TransitionPayload, app *common
 
 	sm.Container.CancelStream(pullID)
 
-	return sm.setState(app, common.REMOVED)
+	return sm.settleCanceledTransition(payload, app)
 }
 
 func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common.App) error {
@@ -57,7 +72,7 @@ func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common
 
 	sm.Container.CancelStream(pushID)
 
-	return sm.setState(app, common.REMOVED)
+	return sm.settleCanceledTransition(payload, app)
 }
 
 // interruptActiveTransition cancels the cancelable work of whatever transition
@@ -124,5 +139,5 @@ func (sm *StateMachine) cancelTransfer(payload common.TransitionPayload, app *co
 
 	sm.Filesystem.CancelFileTransfer(payload.ContainerName.Dev)
 
-	return sm.setState(app, common.REMOVED)
+	return sm.settleCanceledTransition(payload, app)
 }

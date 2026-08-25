@@ -236,6 +236,142 @@ func TestTeardownRequestGivesUpWhenTheTransitionNeverUnwinds(t *testing.T) {
 	assert.Equal(t, common.FAILED, state, "the app must be left untouched")
 }
 
+// An uninstall that lands while the app is DOWNLOADING must run the FULL
+// teardown, not stop at the cancel's REMOVED settle. Settling at REMOVED never
+// converges: the observer deletes both DB rows the moment REMOVED is reached
+// with an UNINSTALLED requested-state row, so nothing can re-drive the rest —
+// the data dir, tunnels and host ports would leak silently.
+func TestUninstallDuringDownloadRunsFullTeardown(t *testing.T) {
+	am, mc, mt, st, _, _ := amHarness(t)
+
+	app := amSeed(t, st, 81, "middownload", common.DOWNLOADING, common.PROD)
+
+	uninstall := amPayload(81, "middownload", common.UNINSTALLED, common.PROD)
+	crashSeedTeardownRow(t, am, app, uninstall)
+
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	mt.EXPECT().GetState().Return(nil, nil).Maybe()
+	// cancelPull cancels the in-flight docker pull stream...
+	mc.EXPECT().CancelStream(mock.Anything).Return(nil).Once()
+	// ...and must then run the full non-compose PROD uninstall.
+	mc.EXPECT().
+		GetContainer(mock.Anything, uninstall.ContainerName.Prod).
+		Return(dockertypes.Container{}, notFoundErr()).
+		Once()
+	mc.EXPECT().
+		RemoveImagesByName(mock.Anything, uninstall.RegistryImageName.Prod, mock.Anything).
+		Return(nil).
+		Once()
+	fwdAllowLogs(mc)
+
+	require.NoError(t, am.RequestAppState(uninstall))
+
+	app.StateLock.Lock()
+	state := app.CurrentState
+	app.StateLock.Unlock()
+	assert.Equal(t, common.UNINSTALLED, state,
+		"an uninstall during DOWNLOADING must reach UNINSTALLED, not stall at REMOVED")
+}
+
+// The same guarantee for a DEV app whose build is canceled by an uninstall
+// (BUILDING -> UNINSTALLED is one of the transition-map rows added for this).
+func TestUninstallDuringBuildRunsFullTeardown(t *testing.T) {
+	am, mc, mt, st, _, _ := amHarness(t)
+
+	app := amSeed(t, st, 82, "midbuild", common.BUILDING, common.DEV)
+
+	uninstall := amPayload(82, "midbuild", common.UNINSTALLED, common.DEV)
+	crashSeedTeardownRow(t, am, app, uninstall)
+
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	mt.EXPECT().GetState().Return(nil, nil).Maybe()
+	// cancelBuild cancels the build stream, then the full DEV uninstall runs.
+	mc.EXPECT().CancelStream(mock.Anything).Return(nil).Once()
+	mc.EXPECT().
+		GetContainer(mock.Anything, uninstall.ContainerName.Dev).
+		Return(dockertypes.Container{}, notFoundErr()).
+		Once()
+	mc.EXPECT().
+		RemoveImagesByName(mock.Anything, uninstall.RegistryImageName.Dev, mock.Anything).
+		Return(nil).
+		Once()
+	fwdAllowLogs(mc)
+
+	require.NoError(t, am.RequestAppState(uninstall))
+
+	app.StateLock.Lock()
+	state := app.CurrentState
+	app.StateLock.Unlock()
+	assert.Equal(t, common.UNINSTALLED, state,
+		"an uninstall during BUILDING must reach UNINSTALLED, not stall at REMOVED")
+}
+
+// When the in-memory requested state diverges from the row (a row write failed
+// — e.g. disk-full — after memory was updated), the wake must NOT treat the
+// divergence as new intent: that would clear and re-create the loop every
+// cycle, resetting the quadratic backoff to seconds forever. The row is the
+// deciding authority; a same-target row keeps the loop (and its backoff)
+// alive.
+func TestCrashLoopWakeKeepsBackoffWhenMemoryDivergesFromRow(t *testing.T) {
+	am, _, mt, st, _, _ := amHarness(t)
+
+	app := amSeed(t, st, 83, "diverged", common.BUILT, common.PROD)
+
+	// Row: requested PRESENT (same as the captured payload).
+	rowPayload := amPayload(83, "diverged", common.PRESENT, common.PROD)
+	require.NoError(t, st.UpdateLocalRequestedState(rowPayload))
+
+	// Memory: diverged to RUNNING (its row write "failed").
+	app.StateLock.Lock()
+	app.RequestedState = common.RUNNING
+	app.StateLock.Unlock()
+
+	captured := amPayload(83, "diverged", common.PRESENT, common.PROD)
+	captured.Retrying = true
+	task := &CrashLoop{Payload: captured, Retries: 4}
+	am.crashLoopLock.Lock()
+	am.crashLoops[task] = struct{}{}
+	am.crashLoopLock.Unlock()
+
+	// The same-target retry resolves to the no-action PRESENT transition; no
+	// container work happens (strict mock), and crucially the loop survives.
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	mt.EXPECT().GetState().Return(nil, nil).Maybe()
+
+	am.crashLoopWake(task)
+
+	am.crashLoopLock.Lock()
+	_, alive := am.crashLoops[task]
+	retries := task.Retries
+	am.crashLoopLock.Unlock()
+
+	assert.True(t, alive, "a memory/row divergence must not clear the loop — backoff would reset every wake")
+	assert.Equal(t, uint(4), retries, "the wake itself must not touch the backoff counter")
+}
+
+// The requested-state row never persists push-only fields; a crashloop retry
+// rebuilt from the row must carry them over from the captured payload, or the
+// app loses its third-party registry credentials, instance identity, and
+// credential epoch on every retry.
+func TestCarryPushOnlyFields(t *testing.T) {
+	captured := amPayload(84, "pushfields", common.RUNNING, common.PROD)
+	captured.DockerCredentials = map[string]common.DockerCredential{
+		"registry.example.com": {Username: "u", Password: "p"},
+	}
+	captured.InstanceKey = 42
+	captured.AppCredEpoch = 3
+	captured.DeviceToAppKey = 7
+
+	fromRow := amPayload(84, "pushfields", common.RUNNING, common.PROD)
+
+	carryPushOnlyFields(&fromRow, captured)
+
+	assert.Equal(t, captured.DockerCredentials, fromRow.DockerCredentials)
+	assert.Equal(t, uint64(42), fromRow.InstanceKey)
+	assert.Equal(t, uint64(3), fromRow.AppCredEpoch)
+	assert.Equal(t, uint64(7), fromRow.DeviceToAppKey)
+}
+
 // Non-teardown requests keep the existing drop semantics while a transition is
 // in flight (TestRequestAppStateDropsUpdateWhileTransitioning pins the update
 // flavor of this; here the plain state-change flavor).
