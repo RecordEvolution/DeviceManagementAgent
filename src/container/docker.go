@@ -516,15 +516,26 @@ func (c *Docker) HandleRegistryLogins(credentials map[string]common.DockerCreden
 				return fmt.Errorf("registry login to %s timed out after %s: the registry is not responding (check that the registry is reachable and, on proxied hosts, that NO_PROXY covers it)", registryURL, registryLoginTimeout)
 			}
 
+			// Prefer the CLI's own error line. Match case-insensitively: Docker
+			// 29 lowercased messages that used to start with "Error" (notably
+			// "error saving credentials: ..."), and matching only the capital
+			// form silently degraded such failures to a bare "exit status 1".
 			scanner := bufio.NewScanner(strings.NewReader(string(output)))
 			for scanner.Scan() {
 				line := scanner.Text()
-				if strings.Contains(line, "Error") {
+				if strings.Contains(strings.ToLower(line), "error") {
 					return errors.New(line)
 				}
 			}
 
-			return err
+			// No recognizable error line: never drop the output — an exec
+			// error on its own ("exit status 1") is undiagnosable.
+			trimmedOutput := strings.TrimSpace(string(output))
+			if trimmedOutput != "" {
+				return fmt.Errorf("registry login to %s failed: %w: %s", registryURL, err, trimmedOutput)
+			}
+
+			return fmt.Errorf("registry login to %s failed: %w", registryURL, err)
 		}
 
 		cancelLogin()
