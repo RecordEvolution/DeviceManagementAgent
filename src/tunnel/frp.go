@@ -75,11 +75,19 @@ type Transport struct {
 	// where the control connection rides the appliance's 443 ingress on frp's
 	// fixed /~!frp path instead of the raw frps port 7000.
 	Protocol string `yaml:"protocol,omitempty"`
-	// ProxyURL routes the control connection through an HTTP CONNECT proxy —
-	// frpc does not read proxy environment variables itself, so in wss mode the
-	// agent resolves HTTPS_PROXY/NO_PROXY (the same environment the WAMP dialer
-	// honors) and passes the result here explicitly.
-	ProxyURL string     `yaml:"proxyURL,omitempty"`
+	// ProxyURL routes the control connection through an HTTP CONNECT proxy.
+	// The agent resolves it for EVERY transport (resolveTunnelProxy) out of the
+	// same HTTP(S)_PROXY/NO_PROXY environment the rest of the agent honors, and
+	// writes the decision here explicitly.
+	//
+	// Not omitempty, so the "dial frps directly" decision is visible in the
+	// file a support engineer reads rather than inferred from an absent key.
+	// Be clear about what that does NOT buy, measured against frpc 0.70.0:
+	// an explicit `proxyURL: ""` does not stop frpc falling back to http_proxy
+	// from its own environment — it dials the proxy either way. Only a
+	// non-empty value here overrides the environment. Suppressing an inherited
+	// proxy is frpcEnv()'s job (tunnel.go), and that half is load-bearing.
+	ProxyURL string     `yaml:"proxyURL"`
 	TLS      *TLSConfig `yaml:"tls,omitempty"`
 }
 
@@ -181,7 +189,23 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 		frpcLogPath = filepath.Join(cfg.CommandLineArguments.AgentDir, "frpc.log")
 	}
 
-	// Extract server address. Order of precedence:
+	// Domain-mode appliance (corporate-cert TLS): the device endpoint is wss://
+	// and the appliance fronts everything on 443 behind its TLS ingress —
+	// including frp's fixed /~!frp websocket path, which the ingress relays to
+	// frps. Ride that same port with frp's wss transport so a device needs no
+	// firewall or proxy exception beyond outbound 443. Plain-mode appliances
+	// (ws:// endpoint) and cloud devices (no appliance_domain) keep the classic
+	// tcp+TLS control connection on port 7000.
+	//
+	// Resolved before the server address because a wss control connection must
+	// be addressed by name (SNI + the wildcard certificate) while a plain one
+	// need not be.
+	wssMode := cfg.ReswarmConfig.ApplianceDomain != "" &&
+		strings.HasPrefix(cfg.ReswarmConfig.DeviceEndpointURL, "wss://")
+
+	// Extract the tunnel base address — the vhost domain every tunnel URL is
+	// built under (BaseTunnelURL below), NOT necessarily the address frpc dials
+	// (controlAddr, further down). Order of precedence:
 	//   1. ReswarmConfig.ApplianceDomain (set on appliance installs from
 	//      APPLIANCE_DOMAIN — the operator's tunnel domain, already correct).
 	//   2. device_endpoint_url with the leading subdomain replaced by "app"
@@ -244,19 +268,19 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	port := pickAdminPort()
 	log.Debug().Msgf("Using port %d for Frp webserver", port)
 
-	// Domain-mode appliance (corporate-cert TLS): the device endpoint is wss://
-	// and the appliance fronts everything on 443 behind its TLS ingress —
-	// including frp's fixed /~!frp websocket path, which the ingress relays to
-	// frps. Ride that same port with frp's wss transport so a device needs no
-	// firewall or proxy exception beyond outbound 443. Plain-mode appliances
-	// (ws:// endpoint) and cloud devices (no appliance_domain) keep the classic
-	// tcp+TLS control connection on port 7000.
-	wssMode := cfg.ReswarmConfig.ApplianceDomain != "" &&
-		strings.HasPrefix(cfg.ReswarmConfig.DeviceEndpointURL, "wss://")
+	// Where frpc dials frps, which is not always the name tunnel URLs are built
+	// under: on a plain-mode appliance the control connection goes straight to
+	// the box (see applianceDirectHost) while serverAddr stays the wildcard
+	// domain that vhost routing — and therefore every user-facing URL — needs.
+	controlAddr := serverAddr
+	if directHost := applianceDirectHost(cfg.ReswarmConfig.DeviceEndpointURL, wssMode); directHost != "" {
+		controlAddr = directHost
+		log.Debug().Msgf("Dialing frps directly at the appliance endpoint: %s (tunnel URLs stay on %s)", controlAddr, serverAddr)
+	}
 
 	// Initialize YAML config structure
 	frpcConfig := &FrpcYamlConfig{
-		ServerAddr: serverAddr,
+		ServerAddr: controlAddr,
 		ServerPort: 7000,
 		Transport: &Transport{
 			TLS: &TLSConfig{
@@ -291,24 +315,19 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	if wssMode {
 		frpcConfig.ServerPort = 443
 		frpcConfig.Transport.Protocol = "wss"
-		// Devices on proxy-only networks reach the appliance's 443 through the
-		// corporate proxy via HTTP CONNECT — same as the WAMP connection. The
-		// httpproxy resolver applies the full HTTPS_PROXY/NO_PROXY semantics (a
-		// NO_PROXY-exempted appliance host correctly yields no proxy) and, unlike
-		// http.ProxyFromEnvironment, re-reads the environment on every call.
-		proxyTarget := &url.URL{Scheme: "https", Host: net.JoinHostPort(serverAddr, "443")}
-		if proxyURL, err := httpproxy.FromEnvironment().ProxyFunc()(proxyTarget); err == nil && proxyURL != nil {
-			frpcConfig.Transport.ProxyURL = proxyURL.String()
-			log.Debug().Msgf("Tunnel control connection will use proxy %s", proxyURL.Redacted())
-		}
 	}
 
 	// For local development, use port 7400 to avoid conflicts with macOS
 	// services. host.docker.internal is the same dev stack seen from inside a
 	// containerized agent — the host publishes frps on 7400 there too.
-	if serverAddr == "localhost" || serverAddr == "127.0.0.1" || serverAddr == "host.docker.internal" {
+	if controlAddr == "localhost" || controlAddr == "127.0.0.1" || controlAddr == "host.docker.internal" {
 		frpcConfig.ServerPort = 7400
 	}
+
+	// Resolved last, once the endpoint the control connection actually dials is
+	// final: both the wss branch and the dev-port rewrite above move it, and
+	// NO_PROXY matching is host- and port-sensitive.
+	frpcConfig.Transport.ProxyURL = resolveTunnelProxy(controlAddr, frpcConfig.ServerPort, wssMode)
 
 	configBuilder := TunnelConfigBuilder{
 		yamlConfig:    frpcConfig,
@@ -320,6 +339,125 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	configBuilder.SaveConfig()
 
 	return configBuilder
+}
+
+// applianceDirectHost returns the appliance's own address out of
+// device_endpoint_url when the frps CONTROL connection should be made to it
+// rather than to APPLIANCE_DOMAIN, or "" to keep the domain. It never affects
+// the tunnel base URL: app UIs are routed by Host header and must keep the
+// wildcard domain.
+//
+// frps' 7000 is address-routed: it does no SNI and no vhost matching, so a
+// plain-mode control connection has no reason to be addressed by name. Only the
+// DATA plane does — frps routes app UIs by Host header (subDomainHost), which is
+// why an appliance has a wildcard domain at all, defaulting to the installer's
+// <APPLIANCE_HOST>.nip.io. Dialing frps by that domain drags a public DNS lookup
+// into bringing a tunnel up, and — the reason this exists — makes the tunnel
+// server a different string from the host every other agent connection uses, so
+// a NO_PROXY entry for the appliance exempts the WAMP session while leaving the
+// tunnel proxied. That asymmetry took a site's remote access down while nothing
+// else about the device looked wrong.
+//
+// Deliberately narrow. It substitutes only a bare IP literal, which is the
+// installer's default shape (<ip>.nip.io over APPLIANCE_HOST) and cannot be a
+// name that resolves anywhere the domain would not:
+//   - wss mode keeps the domain: SNI and the wildcard certificate are issued for
+//     it, and the ingress routes on it.
+//   - loopback and the dev aliases keep the domain, so the local dev appliance
+//     stack is not diverted onto the 7400 dev-port rewrite below.
+//   - a hostname endpoint keeps the domain rather than gambling that a short
+//     name resolves as widely.
+func applianceDirectHost(endpointURL string, wssMode bool) string {
+	if wssMode || endpointURL == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(endpointURL)
+	if err != nil {
+		return ""
+	}
+
+	hostname := parsed.Hostname()
+	ip := net.ParseIP(hostname)
+	if ip == nil || ip.IsLoopback() {
+		return ""
+	}
+
+	return hostname
+}
+
+// resolveTunnelProxy returns the HTTP CONNECT proxy frpc should route its
+// control connection through, or "" when it must dial frps directly.
+//
+// frpc cannot be left to work this out. It reads exactly one variable, in one
+// place — frp v0.70.0 pkg/config/v1/client.go:152,
+// `c.ProxyURL = util.EmptyOr(c.ProxyURL, os.Getenv("http_proxy"))` — and applies
+// NO_PROXY to nothing. So on a corporate network it sends the control connection
+// to a proxy that commonly refuses CONNECT to anything but 443, observed in the
+// field as a permanent "DialTcpByHttpProxy error, StatusCode [407]" retry loop
+// on a device whose every other connection to the same appliance went direct.
+//
+// That one os.Getenv is also why the failure was Windows-only: it is case
+// sensitive on Linux and case insensitive on Windows, and both installers write
+// the variable uppercase (install_ironflock.sh, reswarmify's proxy drop-in). A
+// Linux agent's frpc therefore never saw it and dialed direct.
+//
+// Hence the deliberate asymmetry below, which preserves this invariant: the
+// agent may only ever move a connection from proxied to DIRECT, never the
+// reverse.
+//
+//   - plain tcp: mirror frpc's own rule, the lowercase key through os.Getenv,
+//     so the resolution matches frpc's per-OS behaviour exactly — then let
+//     NO_PROXY subtract from it. Reading the uppercase spelling here instead
+//     would newly proxy every Linux device whose service carries an uppercase
+//     HTTP_PROXY, breaking tunnels that work today.
+//   - wss: the full HTTPS_PROXY/NO_PROXY environment. This is the proxy-only
+//     network path, riding 443 where a corporate CONNECT ACL actually permits
+//     it, and it is the behaviour that already shipped.
+//
+// NO_PROXY is honoured in either spelling: accepting more exemptions can only
+// remove proxying. Note it must exempt the address the CONTROL connection uses
+// (see applianceDirectHost), which is not necessarily the tunnel domain.
+func resolveTunnelProxy(controlAddr string, controlPort int, wssMode bool) string {
+	scheme := "http"
+	proxyConfig := &httpproxy.Config{HTTPProxy: os.Getenv("http_proxy")}
+
+	if wssMode {
+		scheme = "https"
+		proxyConfig = httpproxy.FromEnvironment()
+	} else if proxyConfig.NoProxy = os.Getenv("NO_PROXY"); proxyConfig.NoProxy == "" {
+		proxyConfig.NoProxy = os.Getenv("no_proxy")
+	}
+
+	target := &url.URL{Scheme: scheme, Host: net.JoinHostPort(controlAddr, strconv.Itoa(controlPort))}
+
+	proxyURL, err := proxyConfig.ProxyFunc()(target)
+	if err != nil {
+		log.Warn().Err(err).Str("target", target.Host).
+			Msg("Could not resolve a tunnel proxy from the environment, frpc will dial frps directly")
+		return ""
+	}
+	if proxyURL == nil {
+		log.Debug().Str("target", target.Host).
+			Msg("Tunnel control connection will dial frps directly (no proxy applies)")
+		return ""
+	}
+
+	if !wssMode {
+		// Honoured, because frpc would have used this same proxy and silently
+		// dropping it would be its own surprise — but said out loud, because a
+		// corporate CONNECT ACL is routinely 443-only (Squid's stock SSL_ports
+		// refuses the rest), which is exactly why install_ironflock.sh puts the
+		// appliance's own cloud forwarder on wss/443 whenever a proxy is in
+		// play. "A proxy was configured and the tunnel is using it" is the line
+		// that was missing from the logs while a site had no remote access.
+		log.Warn().Str("target", target.Host).Str("proxy", proxyURL.Redacted()).
+			Msg("The plain tcp tunnel control connection is going through a proxy; if tunnels never register, the proxy is likely refusing CONNECT to a non-443 port — exempt the tunnel host in NO_PROXY or put the tunnel on the wss transport")
+	}
+
+	log.Debug().Str("target", target.Host).Str("proxy", proxyURL.Redacted()).
+		Msg("Tunnel control connection will go through a proxy")
+	return proxyURL.String()
 }
 
 func (builder *TunnelConfigBuilder) GetTunnelConfig() ([]TunnelConfig, error) {

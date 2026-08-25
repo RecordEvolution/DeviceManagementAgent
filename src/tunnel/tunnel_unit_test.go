@@ -10,6 +10,8 @@ import (
 	"os"
 	"reagent/common"
 	"reagent/config"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -424,10 +426,24 @@ func TestWSSTunnelTransportGating(t *testing.T) {
 	}
 }
 
-// In wss mode the agent resolves the corporate proxy from the standard
-// HTTPS_PROXY/NO_PROXY environment (frpc does not read it itself) and passes it
-// to frpc as transport.proxyURL. NO_PROXY exemptions and non-wss modes emit no
-// proxyURL.
+// clearProxyEnv makes a test hermetic against the developer's or CI runner's own
+// proxy configuration. httpproxy.FromEnvironment falls through to the lowercase
+// spelling when the uppercase one is empty, so both have to be cleared.
+func clearProxyEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"HTTP_PROXY", "http_proxy",
+		"HTTPS_PROXY", "https_proxy",
+		"ALL_PROXY", "all_proxy",
+		"NO_PROXY", "no_proxy",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+// In wss mode the control connection rides the appliance's 443 ingress, so it is
+// HTTPS_PROXY that governs it. The agent resolves it (frpc applies NO_PROXY to
+// nothing) and passes the result to frpc as transport.proxyURL.
 func TestWSSTunnelProxyResolution(t *testing.T) {
 	domainMode := &config.ReswarmConfig{
 		ApplianceDomain:   "tls-sf015.corp.example.com",
@@ -436,20 +452,24 @@ func TestWSSTunnelProxyResolution(t *testing.T) {
 	}
 
 	t.Run("HTTPS_PROXY is passed through in wss mode", func(t *testing.T) {
+		clearProxyEnv(t)
 		t.Setenv("HTTPS_PROXY", "http://user:pass@proxy.corp.example.com:3128")
-		t.Setenv("NO_PROXY", "")
 		builder := NewTunnelConfigBuilder(builderConfig(t, domainMode))
 		assert.Equal(t, "http://user:pass@proxy.corp.example.com:3128", builder.yamlConfig.Transport.ProxyURL)
 	})
 
 	t.Run("NO_PROXY exemption suppresses the proxy", func(t *testing.T) {
+		clearProxyEnv(t)
 		t.Setenv("HTTPS_PROXY", "http://proxy.corp.example.com:3128")
 		t.Setenv("NO_PROXY", "tls-sf015.corp.example.com")
 		builder := NewTunnelConfigBuilder(builderConfig(t, domainMode))
 		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
 	})
 
-	t.Run("no proxyURL outside wss mode even with HTTPS_PROXY set", func(t *testing.T) {
+	// Scheme selection, not mode, is what picks the variable: a raw tcp control
+	// connection is not an HTTPS_PROXY matter.
+	t.Run("HTTPS_PROXY does not govern a plain-mode connection", func(t *testing.T) {
+		clearProxyEnv(t)
 		t.Setenv("HTTPS_PROXY", "http://proxy.corp.example.com:3128")
 		plain := &config.ReswarmConfig{
 			ApplianceDomain:   "appliance.example.com",
@@ -459,6 +479,181 @@ func TestWSSTunnelProxyResolution(t *testing.T) {
 		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
 		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
 	})
+}
+
+// A plain-mode control connection dials raw tcp 7000, so HTTP_PROXY governs it —
+// the same variable frpc would have picked up on its own, except that frpc
+// applies NO_PROXY to nothing. Resolving it here is what lets a NO_PROXY-exempted
+// appliance be dialed directly; without it a corporate proxy answers the CONNECT
+// with 407 and no tunnel ever registers, while every other agent connection to
+// that same appliance keeps working.
+func TestPlainModeTunnelProxyResolution(t *testing.T) {
+	plain := &config.ReswarmConfig{
+		ApplianceDomain:   "appliance.corp.example.com",
+		DeviceEndpointURL: "ws://192.168.0.21/ws-re-dev",
+		Environment:       string(common.PRODUCTION),
+	}
+
+	t.Run("the lowercase http_proxy frpc reads is passed through", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv("http_proxy", "http://proxy.corp.example.com:3128")
+		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
+		assert.Equal(t, "http://proxy.corp.example.com:3128", builder.yamlConfig.Transport.ProxyURL)
+	})
+
+	// The invariant that keeps this change safe to roll out: frp reads exactly
+	// one variable, os.Getenv("http_proxy"), which is case sensitive on Linux —
+	// so a Linux agent's frpc never saw the uppercase spelling both installers
+	// write, and dialed direct. Resolving the uppercase value here would newly
+	// proxy every such device and break tunnels that work today. Skip on
+	// Windows, where os.Getenv is case insensitive and the two spellings are
+	// the same variable (which is why the field failure was Windows-only).
+	t.Run("an uppercase-only HTTP_PROXY is ignored, exactly as frpc ignores it", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("os.Getenv is case-insensitive on Windows; frpc sees the uppercase spelling too")
+		}
+		clearProxyEnv(t)
+		t.Setenv("HTTP_PROXY", "http://proxy.corp.example.com:3128")
+		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
+		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
+	})
+
+	// The point of dialing the control connection at the appliance itself: the
+	// single NO_PROXY entry an operator writes for the appliance — the host the
+	// WAMP session already uses — now exempts the tunnel too. While frps was
+	// dialed by APPLIANCE_DOMAIN, that entry left the tunnel proxied and only
+	// the tunnel, which is how a site lost remote access with nothing else on
+	// the device looking wrong.
+	t.Run("one NO_PROXY entry covers the WAMP session and the tunnel", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv("http_proxy", "http://proxy.corp.example.com:3128")
+		t.Setenv("NO_PROXY", "192.168.0.21")
+		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
+		assert.Empty(t, builder.yamlConfig.Transport.ProxyURL)
+	})
+
+	// Measured against frpc 0.70.0: an explicit `proxyURL: ""` does NOT stop it
+	// falling back to http_proxy — frpcEnv() is what enforces that. What this
+	// buys is the record: the decision is in the file a support engineer reads
+	// instead of being inferred from an absent key.
+	t.Run("a direct-dial decision is still written to the config", func(t *testing.T) {
+		clearProxyEnv(t)
+		builder := NewTunnelConfigBuilder(builderConfig(t, plain))
+
+		raw, err := os.ReadFile(builder.ConfigPath)
+		require.NoError(t, err)
+
+		assert.Contains(t, string(raw), `proxyURL: ""`)
+	})
+}
+
+// frps' 7000 does no SNI and no vhost matching, so a plain-mode appliance is
+// dialed at its own address rather than at APPLIANCE_DOMAIN — which keeps
+// tunnels off public DNS (the installer's default domain is <ip>.nip.io) and
+// makes the tunnel share the appliance's proxy exemption. The wildcard domain
+// is still what every user-facing tunnel URL is built under, so BaseTunnelURL
+// must NOT follow the control address.
+func TestApplianceControlAddress(t *testing.T) {
+	tests := []struct {
+		name              string
+		reswarm           *config.ReswarmConfig
+		wantControlAddr   string
+		wantBaseTunnelURL string
+		wantPort          int
+	}{
+		{
+			name: "plain-mode appliance dials its own IP, URLs keep the domain",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "192.168.0.21.nip.io",
+				DeviceEndpointURL: "ws://192.168.0.21/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantControlAddr:   "192.168.0.21",
+			wantBaseTunnelURL: "192.168.0.21.nip.io",
+			wantPort:          7000,
+		},
+		{
+			// SNI and the wildcard certificate are issued for the domain, and
+			// the TLS ingress routes on it.
+			name: "wss-mode appliance keeps dialing the domain",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "appliance.corp.example.com",
+				DeviceEndpointURL: "wss://appliance.corp.example.com/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantControlAddr:   "appliance.corp.example.com",
+			wantBaseTunnelURL: "appliance.corp.example.com",
+			wantPort:          443,
+		},
+		{
+			// A short name need not resolve as widely as the domain does.
+			name: "a hostname endpoint keeps the domain",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "appliance.corp.example.com",
+				DeviceEndpointURL: "ws://tls-sf015/ws-re-dev",
+				Environment:       string(common.PRODUCTION),
+			},
+			wantControlAddr:   "appliance.corp.example.com",
+			wantBaseTunnelURL: "appliance.corp.example.com",
+			wantPort:          7000,
+		},
+		{
+			// Loopback stays on the domain so the local dev appliance stack is
+			// not diverted onto the 7400 dev-port rewrite; its frps is on 7000.
+			name: "loopback endpoint keeps the domain and port 7000",
+			reswarm: &config.ReswarmConfig{
+				ApplianceDomain:   "localhost.nip.io",
+				DeviceEndpointURL: "ws://127.0.0.1:18080/ws-re-dev",
+				Environment:       string(common.LOCAL),
+			},
+			wantControlAddr:   "localhost.nip.io",
+			wantBaseTunnelURL: "localhost.nip.io",
+			wantPort:          7000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearProxyEnv(t)
+			builder := NewTunnelConfigBuilder(builderConfig(t, tt.reswarm))
+
+			assert.Equal(t, tt.wantControlAddr, builder.yamlConfig.ServerAddr)
+			assert.Equal(t, tt.wantBaseTunnelURL, builder.BaseTunnelURL)
+			assert.Equal(t, tt.wantPort, builder.yamlConfig.ServerPort)
+		})
+	}
+}
+
+// The half that actually enforces "no proxy". A config carrying `proxyURL: ""`
+// still dials http_proxy from the environment (measured against frpc 0.70.0), so
+// the variables have to be gone. Deleting this in favour of the config field
+// reintroduces the 407 loop.
+func TestFrpcEnvStripsProxyVariables(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://proxy.corp.example.com:3128")
+	t.Setenv("http_proxy", "http://proxy.corp.example.com:3128")
+	t.Setenv("HTTPS_PROXY", "http://proxy.corp.example.com:3128")
+	t.Setenv("ALL_PROXY", "socks5://proxy.corp.example.com:1080")
+	t.Setenv("NO_PROXY", "appliance.corp.example.com")
+	t.Setenv("REAGENT_TEST_SENTINEL", "kept")
+
+	stripped := map[string]bool{
+		"http_proxy":  true,
+		"https_proxy": true,
+		"all_proxy":   true,
+		"no_proxy":    true,
+	}
+
+	sentinelKept := false
+	for _, entry := range frpcEnv() {
+		key, value, _ := strings.Cut(entry, "=")
+		assert.False(t, stripped[strings.ToLower(key)], "proxy variable %s must not reach frpc", key)
+		if key == "REAGENT_TEST_SENTINEL" {
+			sentinelKept = true
+			assert.Equal(t, "kept", value)
+		}
+	}
+
+	assert.True(t, sentinelKept, "frpcEnv must pass the rest of the environment through")
 }
 
 // The agent derives a tunnel_proof from its existing .flock secret + device_key

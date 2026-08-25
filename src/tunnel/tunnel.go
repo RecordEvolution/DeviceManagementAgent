@@ -562,6 +562,42 @@ func (frpTm *FrpTunnelManager) stopClientLocked() {
 	frpTm.clientDone = nil
 }
 
+// frpcEnv is the environment every frpc process is spawned with: the agent's
+// own, minus every proxy variable.
+//
+// The proxy decision belongs to the agent — it is resolved against NO_PROXY and
+// written into transport.proxyURL (resolveTunnelProxy in frp.go). frpc must not
+// be able to override that from an inherited machine-wide http_proxy, which is
+// precisely how a corporate-proxy Windows host ended up routing its frps
+// control connection into a proxy that answered 407 while every other
+// connection it made to the same appliance went direct.
+//
+// This is the half that actually enforces "no proxy": measured against frpc
+// 0.70.0, a config carrying `proxyURL: ""` still dials http_proxy from the
+// environment, and only stops once these variables are gone. A non-empty
+// proxyURL in the config does win over the environment, so a device that
+// genuinely needs a proxy is unaffected by the stripping.
+func frpcEnv() []string {
+	strip := map[string]bool{
+		"http_proxy":  true,
+		"https_proxy": true,
+		"all_proxy":   true,
+		"no_proxy":    true,
+	}
+
+	environ := os.Environ()
+	env := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		key, _, found := strings.Cut(entry, "=")
+		if found && strip[strings.ToLower(key)] {
+			continue
+		}
+		env = append(env, entry)
+	}
+
+	return env
+}
+
 func (frpTm *FrpTunnelManager) Start() error {
 	frpTm.startMu.Lock()
 	defer frpTm.startMu.Unlock()
@@ -604,6 +640,7 @@ func (frpTm *FrpTunnelManager) Start() error {
 	ctx, cancelNotifyContext := signal.NotifyContext(context.Background(), os.Interrupt)
 	frpCommand := exec.CommandContext(ctx, frpcPath, "-c", frpTm.configBuilder.ConfigPath)
 	frpCommand.Dir = filepath.Dir(frpcPath)
+	frpCommand.Env = frpcEnv()
 	setPdeathsig(frpCommand)
 
 	stdout, err := frpCommand.StdoutPipe()
@@ -988,7 +1025,10 @@ func (frpTm *FrpTunnelManager) Reload() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath).CombinedOutput()
+	reloadCommand := exec.CommandContext(ctx, frpcPath, "reload", "-c", frpTm.configBuilder.ConfigPath)
+	reloadCommand.Env = frpcEnv()
+
+	output, err := reloadCommand.CombinedOutput()
 	if err != nil {
 		// frpc service is not properly running
 		log.Error().Err(err).Msgf("Error while reloading frp client config: %s", string(output))
