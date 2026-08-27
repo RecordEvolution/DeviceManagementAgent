@@ -73,9 +73,9 @@ func TestIsWindowsHostPathVolume(t *testing.T) {
 	valid := []string{
 		"/var/lib/data:/data",
 		"./relative:/data",
-		"data:/var/lib/app",       // named volume
-		"d:/x",                    // single-letter named volume
-		"d:/x:ro",                 // named volume with options
+		"data:/var/lib/app", // named volume
+		"d:/x",              // single-letter named volume
+		"d:/x:ro",           // named volume with options
 		"/data/env:/data/env:ro",
 	}
 	for _, volume := range valid {
