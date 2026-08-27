@@ -95,6 +95,22 @@ func NewCompose(config *config.Config) Compose {
 	}
 }
 
+// NewComposeWithBinary builds a Compose that invokes the given binary instead
+// of "docker", bypassing the CLI support probe. Test seam only: it lets other
+// packages drive the full compose lifecycle (pull/down/up plumbing, exit
+// codes, argument order) against a fake CLI script without a docker daemon.
+func NewComposeWithBinary(config *config.Config, binary string) *Compose {
+	// Not built via NewCompose: that probes `docker compose` on the host, and
+	// this seam exists precisely for hosts that have no docker at all.
+	return &Compose{
+		Supported:           true,
+		config:              config,
+		binary:              binary,
+		logStreamMap:        make(map[string]*ComposeLog),
+		composeProcessesMap: make(map[string]context.CancelFunc),
+	}
+}
+
 func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, error) {
 	services, ok := (dockerCompose["services"]).(map[string]interface{})
 	if !ok {

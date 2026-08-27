@@ -509,10 +509,9 @@ func TestUpdateApp(t *testing.T) {
 		payload.NewestVersion = "2.0.0"
 
 		boom := errors.New("registry unreachable")
-		mc.EXPECT().
-			GetContainer(mock.Anything, payload.ContainerName.Prod).
-			Return(dockertypes.Container{}, notFoundErr()).
-			Once()
+		// No GetContainer/RemoveContainerByID expectations: the pull runs
+		// BEFORE the teardown, so a failed download must abort without the old
+		// container ever being looked up — the strict mock enforces it.
 		mc.EXPECT().HandleRegistryLogins(mock.Anything).Return(nil).Once()
 		mc.EXPECT().
 			Pull(mock.Anything, mock.Anything, mock.Anything).

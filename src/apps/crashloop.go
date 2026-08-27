@@ -145,7 +145,7 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 			crashTask.Payload.AppName, crashTask.Payload.Stage, crashTask.Payload.RequestedState, rowPayload.RequestedState)
 		clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 
-		if currentState == rowPayload.RequestedState {
+		if currentState == rowPayload.RequestedState && !hasPendingUpdate(rowPayload) {
 			return
 		}
 
@@ -154,7 +154,13 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 		return
 	}
 
-	if currentState == crashTask.Payload.RequestedState {
+	// Being AT the target state only ends the loop when nothing is pending.
+	// Since updates pull the new release BEFORE tearing the old one down, a
+	// failed update leaves the old version running and the observer corrects
+	// the FAILED blip back to RUNNING — the very state the update was requested
+	// from. Treating that as "converged" would silently drop the pending update
+	// forever; the row's request_update flag says whether the work is done.
+	if currentState == crashTask.Payload.RequestedState && !hasPendingUpdate(rowPayload) {
 		clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 		return
 	}
@@ -178,6 +184,22 @@ func carryPushOnlyFields(rowPayload *common.TransitionPayload, captured common.T
 	rowPayload.InstanceKey = captured.InstanceKey
 	rowPayload.AppCredEpoch = captured.AppCredEpoch
 	rowPayload.DeviceToAppKey = captured.DeviceToAppKey
+}
+
+// hasActiveCrashLoop reports whether a crashloop (a scheduled backoff retry) is
+// currently registered for the app. The state observers consult it before
+// re-driving a pending update so their immediate reconcile does not bypass —
+// and, via RequestAppState's clearCrashLoop, reset — the growing backoff.
+func (clm *AppManager) hasActiveCrashLoop(appKey uint64, stage common.Stage) bool {
+	clm.crashLoopLock.Lock()
+	defer clm.crashLoopLock.Unlock()
+
+	for crashTask := range clm.crashLoops {
+		if crashTask.Payload.Stage == stage && crashTask.Payload.AppKey == appKey {
+			return true
+		}
+	}
+	return false
 }
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {

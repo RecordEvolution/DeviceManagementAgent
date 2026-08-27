@@ -34,30 +34,6 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
-	if err == nil {
-
-		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
-		if err != nil {
-			return err
-		}
-
-		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-
-		// should return 'container not found' error, this way we know it's removed successfully
-		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
-		err := <-errC
-		if !errdefs.IsContainerNotFound(err) {
-			return err
-		}
-	}
-
 	config := sm.Container.GetConfig()
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
 	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
@@ -70,7 +46,11 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	// Need to authenticate to private registry to determine proper privileges to pull the app
+	// Login + pull run BEFORE the old container is touched: an unreachable
+	// registry (proxy outage, appliance down) must refuse the update while the
+	// old version keeps running, not strand the device with no app for as long
+	// as the outage lasts. The old container keeps running (and logging into
+	// the same topic as the pull progress) until the new image is fully local.
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
 		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
@@ -112,6 +92,33 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		}
 
 		return streamErr
+	}
+
+	// The new image is local; only now is the old container removed. From here
+	// on a failure is retried against a completed download, so the app's
+	// downtime is limited to this teardown plus the restart VerifyState drives.
+	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
+	if err == nil {
+
+		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
+		if err != nil {
+			return err
+		}
+
+		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		// should return 'container not found' error, this way we know it's removed successfully
+		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
+		err := <-errC
+		if !errdefs.IsContainerNotFound(err) {
+			return err
+		}
 	}
 
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
@@ -226,18 +233,14 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		cancel()
 	}()
 
+	// This renders the NEW compose definition (and its .env / env-file mirror)
+	// while the old version is still running: `docker compose pull` below needs
+	// the new file, and pulling does not disturb running containers. Should the
+	// pull fail, the on-disk files are ahead of the running app until the next
+	// transition — harmless, every transition re-renders them from its payload.
 	dockerComposePath, err := sm.SetupComposeFiles(payload, app, true)
 	if err != nil {
 		return err
-	}
-
-	// Tear down the whole project (services in the new file + any orphan
-	// containers tagged with the same project name). Stop+Remove against the
-	// new file alone would leave behind containers for services that were
-	// renamed or dropped in the new compose. Volumes are preserved (no `-v`).
-	err = compose.DownRemoveOrphansContext(ctx, dockerComposePath)
-	if err != nil {
-		return composeTransitionErr(ctx, err)
 	}
 
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
@@ -246,6 +249,11 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	// Login + pull run BEFORE the running project is torn down: an unreachable
+	// registry (proxy outage, appliance down) must refuse the update while the
+	// old version keeps running, not strand the device with no app for as long
+	// as the outage lasts. The old containers keep running (and logging into
+	// the same topic as the pull progress) until every new image is local.
 	err = sm.HandleRegistryLoginsWithDefault(payload)
 	if err != nil {
 		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, err.Error())
@@ -260,17 +268,17 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
-	pullOutput, pullCmd, err := compose.PullContext(ctx, dockerComposePath)
+	err = sm.pullComposeImages(ctx, payload, dockerComposePath, nil)
 	if err != nil {
-		return composeTransitionErr(ctx, err)
+		return err
 	}
 
-	_, err = sm.LogManager.StreamLogsChannel(pullOutput, payload.ContainerName.Prod)
-	if err != nil {
-		return composeTransitionErr(ctx, err)
-	}
-
-	err = pullCmd.Wait()
+	// Every image is local; only now is the old version torn down. Tear down
+	// the whole project (services in the new file + any orphan containers
+	// tagged with the same project name). Stop+Remove against the new file
+	// alone would leave behind containers for services that were renamed or
+	// dropped in the new compose. Volumes are preserved (no `-v`).
+	err = compose.DownRemoveOrphansContext(ctx, dockerComposePath)
 	if err != nil {
 		return composeTransitionErr(ctx, err)
 	}

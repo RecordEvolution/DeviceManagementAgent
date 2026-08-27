@@ -692,6 +692,12 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 						}
 
 						return
+					} else if hasPendingUpdate(payload) && so.AppManager.hasActiveCrashLoop(app.AppKey, app.Stage) {
+						// Mirrors the compose observer: a failed update leaves the
+						// old container RUNNING (pull-before-teardown); its
+						// crashloop owns the retry cadence, so only the state was
+						// corrected above.
+						log.Debug().Msgf("app (%s, %s) has a pending update with an active crashloop; leaving the retry to its backoff", appName, stage)
 					} else {
 						so.AppManager.RequestAppState(payload)
 					}
@@ -858,6 +864,15 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 						}
 
 						return
+					} else if hasPendingUpdate(payload) && so.AppManager.hasActiveCrashLoop(app.AppKey, app.Stage) {
+						// A failed update leaves the old version RUNNING (the pull
+						// runs before the teardown) with a FAILED blip just
+						// corrected above. The crashloop scheduled by that failure
+						// owns the retry cadence; re-driving here every poll tick
+						// would hammer an unreachable registry ~1s apart and, via
+						// RequestAppState's clearCrashLoop, reset the backoff each
+						// time. Correct the state, leave the retry to the loop.
+						log.Debug().Msgf("app (%s, %s) has a pending update with an active crashloop; leaving the retry to its backoff", appName, stage)
 					} else {
 						so.AppManager.RequestAppState(payload)
 					}

@@ -855,6 +855,19 @@ func (am *AppManager) EnsureLocalRequestedStates() error {
 	return nil
 }
 
+// hasPendingUpdate reports whether a requested-state row still carries an
+// update that has not completed: the cloud requested one and the row's versions
+// have not been collapsed by persistPostUpdateRequestedState yet. Mirrors the
+// InitTransition update gate (which compares against the in-memory app.Version
+// instead). Shared by VerifyState's re-drive, crashLoopWake's convergence check
+// and the state observers' re-drive guard — reaching the target STATE does not
+// finish an update, only the completed download does.
+func hasPendingUpdate(payload common.TransitionPayload) bool {
+	return payload.RequestUpdate &&
+		payload.NewestVersion != payload.PresentVersion &&
+		payload.RequestedState != common.UNINSTALLED
+}
+
 func (am *AppManager) VerifyState(app *common.App) error {
 	log.Debug().Str("app", app.AppName).Msg("Verifying app state")
 	log.Printf("Verifying if app (%s, %s) is in latest state...", app.AppName, app.Stage)
@@ -893,12 +906,10 @@ func (am *AppManager) VerifyState(app *common.App) error {
 	// an update requested while the app is RUNNING) would otherwise be missed:
 	// the state-equality check below never re-drives it, so a request dropped
 	// mid-transition (SecureTransition) is stranded until the next cloud push.
-	// Re-drive it here. The condition mirrors the InitTransition update gate, and
-	// it is self-terminating: a successful update collapses present==newest (so
-	// this is false next time), and a failed one lands in FAILED (returned above).
-	pendingUpdate := requestedStatePayload.RequestUpdate &&
-		requestedStatePayload.NewestVersion != requestedStatePayload.PresentVersion &&
-		requestedStatePayload.RequestedState != common.UNINSTALLED
+	// Re-drive it here. It is self-terminating: a successful update collapses
+	// present==newest (so this is false next time), and a failed one lands in
+	// FAILED (returned above).
+	pendingUpdate := hasPendingUpdate(requestedStatePayload)
 
 	if curAppState != requestedState || pendingUpdate {
 		if pendingUpdate && curAppState == requestedState {

@@ -63,8 +63,10 @@ func updRequest(name string, requested common.AppState, present, newest string) 
 }
 
 // updExpectPull wires the container calls updateApp makes on its happy path:
-// no existing container to tear down, a registry login, the pull itself, and
-// the best-effort removal of the superseded image.
+// a registry login, the pull itself, then the teardown probe (finding no
+// existing container to remove) and the best-effort removal of the superseded
+// image. The pull runs BEFORE the teardown — TestUpdateAppPullsBeforeTeardown
+// asserts that order explicitly.
 func updExpectPull(mc *mocks.Container, payload common.TransitionPayload, supersededVersion string) {
 	mc.EXPECT().
 		GetContainer(mock.Anything, payload.ContainerName.Prod).
