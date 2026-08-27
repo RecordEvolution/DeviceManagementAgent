@@ -47,6 +47,12 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
+	// Fail a definition this device can never run before pulling anything.
+	err = sm.validateComposeForDevice(payload.DockerCompose, topicForLogStream)
+	if err != nil {
+		return err
+	}
+
 	// Register the cancelable pull context before publishing DOWNLOADING; see
 	// pullComposeImages.
 	ctx, cancel := context.WithCancel(context.Background())

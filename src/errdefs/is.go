@@ -69,3 +69,8 @@ func IsInsufficientPrivileges(err error) bool {
 	_, ok := err.(ErrInsufficientPrivileges)
 	return ok
 }
+
+func IsConfigValidation(err error) bool {
+	_, ok := err.(ErrConfigValidation)
+	return ok
+}

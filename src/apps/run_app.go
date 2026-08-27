@@ -182,6 +182,11 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	err = sm.validateComposeForDevice(payload.DockerCompose, payload.ContainerName.Dev)
+	if err != nil {
+		return err
+	}
+
 	compose := sm.Container.Compose()
 
 	// Mark STARTING before SetupComposeFiles: that step reads the previous
@@ -283,6 +288,14 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		}
 
 		return errdefs.DockerComposeNotSupported(errors.New("docker compose is not supported"))
+	}
+
+	// Refuse a definition this device can never run before tearing down or
+	// starting anything; the engine's own rejection would come one service at a
+	// time, mid-`up`, with the project already half-created.
+	err = sm.validateComposeForDevice(payload.DockerCompose, payload.ContainerName.Prod)
+	if err != nil {
+		return err
 	}
 
 	err = sm.HandleRegistryLoginsWithDefault(payload)

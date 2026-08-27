@@ -300,3 +300,30 @@ func DockerComposeNotSupported(err error) error {
 
 	return ErrDockerComposeNotSupported{err}
 }
+
+/*-----------*/
+
+// ErrConfigValidation marks a deterministic configuration error: the app's
+// definition (compose file, mounts, ports, environment) cannot be deployed on
+// this device as-is, and retrying the same transition reproduces the failure
+// exactly. Callers treat it as terminal — no crashloop — until the app's
+// configuration changes.
+type ErrConfigValidation struct {
+	error
+}
+
+func (e ErrConfigValidation) Cause() error {
+	return e.error
+}
+
+func (e ErrConfigValidation) Unwrap() error {
+	return e.error
+}
+
+func ConfigValidation(err error) error {
+	if err == nil || IsConfigValidation(err) {
+		return err
+	}
+
+	return ErrConfigValidation{err}
+}

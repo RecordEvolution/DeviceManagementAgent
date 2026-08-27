@@ -189,7 +189,16 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return errors.New("the app is already equal to the newest version")
 	}
 
-	err := sm.setState(app, common.UPDATING)
+	// Validate the NEW definition before touching the running app. The engine
+	// would reject a broken bind mount only at container-create time — after
+	// the teardown below has already destroyed the working old version. A
+	// refused update leaves the old version running.
+	err := sm.validateComposeForDevice(payload.NewDockerCompose, payload.ContainerName.Prod)
+	if err != nil {
+		return err
+	}
+
+	err = sm.setState(app, common.UPDATING)
 	if err != nil {
 		return err
 	}

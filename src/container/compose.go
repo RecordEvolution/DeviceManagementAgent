@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reagent/common"
 	"reagent/config"
 	"reagent/safe"
@@ -245,9 +246,33 @@ func (c *Compose) run(ctx context.Context, dockerComposePath string, providedArg
 	return cmd.Wait()
 }
 
+// DotEnvFileName is the env file SetupComposeFiles writes next to an app's
+// docker-compose.json. It plays a double role: each service's env_file (the
+// container environment) and, below, the --env-file interpolation source.
+const DotEnvFileName = ".env-compose"
+
+// composeFileArgs selects the compose file and its env file. Passing
+// .env-compose as --env-file makes ${VAR} interpolation inside the compose
+// file resolve against the same device-level app parameters the containers
+// receive — which is what lets authors parameterize non-env fields (volume
+// driver_opts, ports) per device. Compose gives the agent's own process env
+// precedence over --env-file on name collisions. The file is missing only for
+// states predating it (or hand-run paths); the flag is dropped rather than
+// pointing compose at a nonexistent file, which it rejects.
+func composeFileArgs(dockerComposePath string) []string {
+	args := []string{"-f", dockerComposePath}
+
+	envFilePath := filepath.Join(filepath.Dir(dockerComposePath), DotEnvFileName)
+	if _, err := os.Stat(envFilePath); err == nil {
+		args = append(args, "--env-file", envFilePath)
+	}
+
+	return args
+}
+
 func (c *Compose) startComposeCommand(ctx context.Context, dockerComposePath string, streamed bool, providedArgs ...string) (chan string, *ComposeCmd, error) {
-	finalArgs := []string{}
-	finalArgs = append(finalArgs, "compose", "-f", dockerComposePath)
+	finalArgs := []string{"compose"}
+	finalArgs = append(finalArgs, composeFileArgs(dockerComposePath)...)
 	finalArgs = append(finalArgs, providedArgs...)
 
 	binary := c.binary
@@ -706,7 +731,9 @@ func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
 		return []ComposeStatus{}, nil
 	}
 
-	cmd := exec.Command("docker", "compose", "-f", dockerComposePath, "ps", "-a", "--format", "json")
+	psArgs := append([]string{"compose"}, composeFileArgs(dockerComposePath)...)
+	psArgs = append(psArgs, "ps", "-a", "--format", "json")
+	cmd := exec.Command("docker", psArgs...)
 	output, err := cmd.Output()
 	if err != nil {
 		// A failing compose command (e.g. the project does not exist yet) must

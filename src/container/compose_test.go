@@ -416,6 +416,54 @@ func TestComposeUnconsumedStreamDoesNotStall(t *testing.T) {
 	}
 }
 
+// The app's .env-compose must be passed as --env-file whenever it exists next
+// to the compose file: it is what makes ${VAR} interpolation in the compose
+// file (volume driver_opts, ports) resolve to device-level app parameters.
+// Without the file the flag must be dropped entirely — compose rejects an
+// --env-file that does not exist.
+func TestComposeFileArgsPassesEnvFileWhenPresent(t *testing.T) {
+	appDir := t.TempDir()
+	composePath := filepath.Join(appDir, "docker-compose.json")
+
+	t.Run("no .env-compose: only -f", func(t *testing.T) {
+		assert.Equal(t, []string{"-f", composePath}, composeFileArgs(composePath))
+	})
+
+	t.Run(".env-compose next to the compose file: --env-file follows -f", func(t *testing.T) {
+		envPath := filepath.Join(appDir, DotEnvFileName)
+		require.NoError(t, os.WriteFile(envPath, []byte("SHARE_HOST=nas.local\n"), 0o644))
+
+		assert.Equal(t, []string{"-f", composePath, "--env-file", envPath}, composeFileArgs(composePath))
+	})
+}
+
+// End-to-end over the argv actually handed to the CLI: the env file rides
+// along on every subcommand (interpolation happens on file load for all of
+// them), placed before the subcommand where compose expects root flags.
+func TestComposeCommandArgvIncludesEnvFile(t *testing.T) {
+	c := newFakeComposeCompose(t, `printf '%s\n' "$*"`)
+
+	appDir := t.TempDir()
+	composePath := filepath.Join(appDir, "docker-compose.json")
+	envPath := filepath.Join(appDir, DotEnvFileName)
+	require.NoError(t, os.WriteFile(envPath, []byte("SHARE_HOST=nas.local\n"), 0o644))
+
+	outputChan, cmd, err := c.composeCommandContext(context.Background(), composePath, "up", "-d")
+	require.NoError(t, err)
+
+	var argv []string
+	for line := range outputChan {
+		argv = append(argv, line)
+	}
+	require.NoError(t, cmd.Wait())
+
+	require.Len(t, argv, 1)
+	assert.Equal(t,
+		strings.Join([]string{"compose", "-f", composePath, "--env-file", envPath, "up", "-d"}, " "),
+		argv[0],
+	)
+}
+
 // A single line longer than bufio.Scanner's 64 KB default must not end the
 // scan: that would stop the pipe being drained and hang the command.
 func TestComposeLongOutputLineDoesNotStall(t *testing.T) {

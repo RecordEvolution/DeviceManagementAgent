@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reagent/common"
 	"reagent/config"
+	"reagent/container"
 	"reagent/errdefs"
 	"reagent/filesystem"
 	"reagent/release"
@@ -108,7 +109,10 @@ func (sm *StateMachine) generateDotEnvContents(config *config.Config, payload co
 }
 
 const DockerFileName = "docker-compose.json"
-const DotEnvFileName = ".env-compose"
+
+// DotEnvFileName lives in the container package: compose invocations locate
+// the file next to the compose file to pass it as --env-file.
+const DotEnvFileName = container.DotEnvFileName
 
 // deepCopyCompose clones a compose definition through a JSON round trip (the
 // maps only ever hold JSON-decoded values).

@@ -91,18 +91,12 @@ func TestSyncPortStateDefersFreshApp(t *testing.T) {
 	mockContainer.EXPECT().GetContainerPortBindings(mock.Anything, payload.ContainerName.Prod).
 		Return(nil, errdefs.ContainerNotFound(errors.New("not found"))).Once()
 
-	var savedPorts []interface{}
-	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
-		savedPorts = p.Ports
-		return nil
-	}).Once()
+	// SaveRemotePorts is deliberately not expected: nothing changed against the
+	// rules the cloud just sent, so there is nothing to persist upstream (a
+	// strict mock fails the test on any call).
 	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
 
 	require.NoError(t, am.syncPortState(payload, app))
-
-	savedRules := spsRules(t, savedPorts)
-	require.Len(t, savedRules, 1)
-	assert.Zero(t, savedRules[0].HostPort, "no host port must be invented before launch")
 }
 
 // TestSyncPortStateLegacyHostNetworking: a pre-migration container running

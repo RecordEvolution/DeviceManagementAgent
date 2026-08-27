@@ -9,6 +9,7 @@ import (
 	"reagent/safe"
 	"reagent/store"
 	"reagent/tunnel"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -220,7 +221,15 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 	}
 
 	payload.Ports = np
-	am.tunnelManager.SaveRemotePorts(payload)
+
+	// Persist upstream only when reconciliation actually changed a rule. The
+	// incoming rules ARE the cloud's current state, so an unchanged result has
+	// nothing to say — and this runs on every transition request, including
+	// every crashloop retry, where an unconditional write logged "Remote port
+	// saved successfully" for an app that never started.
+	if !reflect.DeepEqual(newPorts, portRules) {
+		am.tunnelManager.SaveRemotePorts(payload)
+	}
 
 	// Live-update the bind-mounted env files ({NAME}.txt / {NAME}_CLOUD.txt)
 	// so running containers see fresh tunnel ports without a restart.
@@ -441,6 +450,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 
 	payload.RegisteryToken = token
 
+	// Snapshot the state the transition actually starts from. The error path
+	// below has already mutated app.CurrentState to FAILED by the time it logs,
+	// so reading the live value there reported every failure as "from FAILED"
+	// regardless of the transition that ran.
+	app.StateLock.Lock()
+	fromState := app.CurrentState
+	app.StateLock.Unlock()
+
 	errC := am.StateMachine.InitTransition(app, payload)
 	if errC == nil {
 		// not yet implemented or nullified state transition
@@ -502,12 +519,26 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 			}
 		}
 
-		log.Error().Msgf("An error occured during transition from %s to %s for %s (%s)", app.CurrentState, payload.RequestedState, app.AppName, app.Stage)
+		log.Error().Msgf("An error occured during transition from %s to %s for %s (%s)", fromState, payload.RequestedState, app.AppName, app.Stage)
 		log.Error().Stack().Err(err).Msgf("The app state for %s (%s) has been set to FAILED", app.AppName, app.Stage)
 
-		// enter the crashloop when we encounter a FAILED state
-		if payload.Stage == common.PROD {
+		// Retry (crashloop) only failures that can heal on their own. A
+		// deterministic configuration error reproduces identically on every
+		// attempt — the observed field failure was 18+ retries over hours
+		// against an invalid volume spec — so it ends here: the app stays
+		// FAILED until a config change arrives as a fresh cloud push, which
+		// re-drives it anyway.
+		if shouldEnterCrashLoop(payload.Stage, err) {
 			am.incrementCrashLoop(payload)
+		} else if payload.Stage == common.PROD {
+			am.clearCrashLoop(app.AppKey, app.Stage)
+			log.Warn().Msgf("Transition failure for %s (%s) is a configuration error; not retrying", app.AppName, app.Stage)
+
+			writeErr := am.StateMachine.LogManager.Write(payload.ContainerName.Prod,
+				"This failure is caused by the app's configuration and will not be retried automatically. Update the app's configuration or release to recover.")
+			if writeErr != nil {
+				log.Debug().Err(writeErr).Msg("failed to write the configuration-error notice to the app log")
+			}
 		}
 	}
 
