@@ -478,4 +478,3 @@ func TestHasPendingUpdate(t *testing.T) {
 	uninstalling.RequestedState = common.UNINSTALLED
 	assert.False(t, hasPendingUpdate(uninstalling), "an uninstall wins over a pending update")
 }
-
