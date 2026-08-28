@@ -120,7 +120,9 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 			return
 		}
 
-		if currentState == crashTask.Payload.RequestedState {
+		// The row is unreadable here, so the pending-update check (see below)
+		// must use the CAPTURED payload — it carries the update's versions.
+		if currentState == crashTask.Payload.RequestedState && !hasPendingUpdate(crashTask.Payload) {
 			clm.clearCrashLoop(crashTask.Payload.AppKey, crashTask.Payload.Stage)
 			return
 		}
@@ -184,22 +186,6 @@ func carryPushOnlyFields(rowPayload *common.TransitionPayload, captured common.T
 	rowPayload.InstanceKey = captured.InstanceKey
 	rowPayload.AppCredEpoch = captured.AppCredEpoch
 	rowPayload.DeviceToAppKey = captured.DeviceToAppKey
-}
-
-// hasActiveCrashLoop reports whether a crashloop (a scheduled backoff retry) is
-// currently registered for the app. The state observers consult it before
-// re-driving a pending update so their immediate reconcile does not bypass —
-// and, via RequestAppState's clearCrashLoop, reset — the growing backoff.
-func (clm *AppManager) hasActiveCrashLoop(appKey uint64, stage common.Stage) bool {
-	clm.crashLoopLock.Lock()
-	defer clm.crashLoopLock.Unlock()
-
-	for crashTask := range clm.crashLoops {
-		if crashTask.Payload.Stage == stage && crashTask.Payload.AppKey == appKey {
-			return true
-		}
-	}
-	return false
 }
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {

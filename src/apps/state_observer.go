@@ -612,16 +612,6 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 				return
 			}
 
-			// status change detected
-			// always executed the state check on init
-			if lastKnownStatus == state.Status {
-				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
-				if !sleepCtx(observerCtx, pollingRate) {
-					return
-				}
-				continue
-			}
-
 			// check if correct and update database if needed
 			latestAppState, err := common.ContainerStateToAppState(state.Status, state.ExitCode)
 			if err != nil {
@@ -646,6 +636,21 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 			app.StateLock.Lock()
 			curAppState := app.CurrentState
 			app.StateLock.Unlock()
+
+			// Idle only while BOTH the container status is unchanged AND the app
+			// state agrees with it (mirrors the compose observer's three-way
+			// check). Gating on the status string alone left an app-state
+			// divergence uncorrected for as long as the container's status did
+			// not change: a refused pull-first update leaves the old container
+			// steadily "running" while the app was just marked FAILED — that
+			// blip must be corrected below, not skipped.
+			if lastKnownStatus == state.Status && latestAppState == curAppState {
+				// log.Debug().Msgf("app (%s, %s) container status remains unchanged: %s", stage, appName, lastKnownStatus)
+				if !sleepCtx(observerCtx, pollingRate) {
+					return
+				}
+				continue
+			}
 
 			alreadyTransitioning := app.SecureTransition()
 			if alreadyTransitioning {
@@ -692,12 +697,13 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 						}
 
 						return
-					} else if hasPendingUpdate(payload) && so.AppManager.hasActiveCrashLoop(app.AppKey, app.Stage) {
+					} else if hasPendingUpdate(payload) {
 						// Mirrors the compose observer: a failed update leaves the
-						// old container RUNNING (pull-before-teardown); its
-						// crashloop owns the retry cadence, so only the state was
-						// corrected above.
-						log.Debug().Msgf("app (%s, %s) has a pending update with an active crashloop; leaving the retry to its backoff", appName, stage)
+						// old container RUNNING (pull-before-teardown), and the
+						// observer must never re-drive a pending update — the
+						// crashloop/verify machinery owns that. See the compose
+						// observer's branch for the full rationale.
+						log.Debug().Msgf("app (%s, %s) has a pending update; leaving the retry to the crashloop/verify machinery", appName, stage)
 					} else {
 						so.AppManager.RequestAppState(payload)
 					}
@@ -864,15 +870,20 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 						}
 
 						return
-					} else if hasPendingUpdate(payload) && so.AppManager.hasActiveCrashLoop(app.AppKey, app.Stage) {
+					} else if hasPendingUpdate(payload) {
 						// A failed update leaves the old version RUNNING (the pull
 						// runs before the teardown) with a FAILED blip just
-						// corrected above. The crashloop scheduled by that failure
-						// owns the retry cadence; re-driving here every poll tick
-						// would hammer an unreachable registry ~1s apart and, via
-						// RequestAppState's clearCrashLoop, reset the backoff each
-						// time. Correct the state, leave the retry to the loop.
-						log.Debug().Msgf("app (%s, %s) has a pending update with an active crashloop; leaving the retry to its backoff", appName, stage)
+						// corrected above. The observer must never re-drive a
+						// pending update: re-driving here every poll tick would
+						// hammer an unreachable registry ~1s apart and, via
+						// RequestAppState's clearCrashLoop, reset the transient
+						// backoff each time — and a PERMANENT failure (which by
+						// design has no crashloop) would re-drive forever. Updates
+						// are driven by the crashloop wake, VerifyState, fresh
+						// cloud pushes and the reconnect reconcile
+						// (EnsureRemoteRequestedStates); the observer only
+						// corrects state.
+						log.Debug().Msgf("app (%s, %s) has a pending update; leaving the retry to the crashloop/verify machinery", appName, stage)
 					} else {
 						so.AppManager.RequestAppState(payload)
 					}

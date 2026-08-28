@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reagent/common"
+	"reagent/config"
 	containerpkg "reagent/container"
 	"reagent/store"
 	"reagent/testutil/builders"
@@ -137,10 +138,24 @@ func TestUpdateAppRegistryFailureLeavesOldContainerUntouched(t *testing.T) {
 // Compose update lifecycle against a fake docker CLI
 // =============================================================================
 
+// updOrdHasLoop reports whether a crashloop task is registered for the app.
+func updOrdHasLoop(am *AppManager, appKey uint64, stage common.Stage) bool {
+	am.crashLoopLock.Lock()
+	defer am.crashLoopLock.Unlock()
+	for task := range am.crashLoops {
+		if task.Payload.Stage == stage && task.Payload.AppKey == appKey {
+			return true
+		}
+	}
+	return false
+}
+
 // updOrdComposeHarness builds the fake CLI + an amHarness-backed StateMachine
 // ready to run updateComposeApp. pullExit is the exit code the fake CLI uses
-// for `pull` invocations (0 = success).
-func updOrdComposeHarness(t *testing.T, pullExit int) (*StateMachine, *mocks.Container, *store.AppStore, string) {
+// for `pull` invocations (0 = success). The fake matches the `pull` subcommand
+// by EXACT argument equality (never substring — a temp path containing "pull"
+// must not trigger it) and records one line of argv per invocation.
+func updOrdComposeHarness(t *testing.T, pullExit int) (*StateMachine, *mocks.Container, *store.AppStore, *config.Config, string) {
 	t.Helper()
 
 	am, mc, mockTunnel, st, _, cfg := amHarness(t)
@@ -150,8 +165,13 @@ func updOrdComposeHarness(t *testing.T, pullExit int) (*StateMachine, *mocks.Con
 
 	dir := t.TempDir()
 	callsFile := filepath.Join(dir, "calls.log")
-	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\ncase \"$*\" in *pull*) [ %d -ne 0 ] && { echo \"pull failed\"; exit %d; };; esac\nexit 0\n",
-		callsFile, pullExit, pullExit)
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+for a in "$@"; do
+  if [ "$a" = "pull" ] && [ %d -ne 0 ]; then echo "pull failed"; exit %d; fi
+done
+exit 0
+`, callsFile, pullExit, pullExit)
 	binPath := filepath.Join(dir, "fake-docker")
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 
@@ -161,7 +181,34 @@ func updOrdComposeHarness(t *testing.T, pullExit int) (*StateMachine, *mocks.Con
 	mc.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
 	fwdAllowLogs(mc)
 
-	return sm, mc, st, callsFile
+	return sm, mc, st, cfg, callsFile
+}
+
+// updOrdSubcommand extracts the compose subcommand from a recorded argv line by
+// exact field match, so path components never alias a subcommand.
+func updOrdSubcommand(line string) string {
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		// Skip the flags that take a value; the first bare word after them is
+		// the subcommand ("compose -f <file> --env-file <file> <subcommand> ...").
+		if f == "compose" || f == "--remove-orphans" || f == "-d" {
+			continue
+		}
+		if f == "-f" || f == "--env-file" {
+			continue
+		}
+		if i > 0 && (fields[i-1] == "-f" || fields[i-1] == "--env-file") {
+			continue
+		}
+		return f
+	}
+	return ""
+}
+
+// updOrdEnvMirrorDir is where SetupComposeFiles' env-file mirror lands — the
+// dir the RUNNING containers bind-mount at /data/env.
+func updOrdEnvMirrorDir(cfg *config.Config, appName string) string {
+	return filepath.Join(cfg.CommandLineArguments.AppsDirectory, "prod", strings.ToLower(appName), "env")
 }
 
 // updOrdComposeApp seeds a compose app + returns the update payload moving it
@@ -207,7 +254,7 @@ func updOrdCalls(t *testing.T, callsFile string) []string {
 }
 
 func TestUpdateComposeAppPullsBeforeTeardown(t *testing.T) {
-	sm, _, st, callsFile := updOrdComposeHarness(t, 0)
+	sm, _, st, cfg, callsFile := updOrdComposeHarness(t, 0)
 
 	mcc := sm.Container.(*mocks.Container)
 	mcc.EXPECT().HandleRegistryLogins(mock.Anything).Return(nil).Once()
@@ -218,10 +265,16 @@ func TestUpdateComposeAppPullsBeforeTeardown(t *testing.T) {
 
 	calls := updOrdCalls(t, callsFile)
 	require.Len(t, calls, 2, "exactly one pull and one down expected, got: %v", calls)
-	assert.Contains(t, calls[0], "pull", "the download must run first")
-	assert.Contains(t, calls[1], "down", "teardown only after every image is local")
-	assert.Contains(t, calls[1], "--remove-orphans",
+	assert.Equal(t, "pull", updOrdSubcommand(calls[0]), "the download must run first")
+	assert.Equal(t, "down", updOrdSubcommand(calls[1]), "teardown only after every image is local")
+	assert.Contains(t, strings.Fields(calls[1]), "--remove-orphans",
 		"the teardown must remove containers of services dropped in the new compose")
+
+	// The env-file mirror the running containers bind-mount must NOT have been
+	// written by the update (it would inject the new release's values into the
+	// old containers mid-download); the next start renders it instead.
+	assert.NoDirExists(t, updOrdEnvMirrorDir(cfg, "cpullfirst"),
+		"the update must not touch the /data/env mirror of the running app")
 
 	// The successful update's bookkeeping (mirrors the non-compose test).
 	app.StateLock.Lock()
@@ -237,7 +290,7 @@ func TestUpdateComposeAppPullsBeforeTeardown(t *testing.T) {
 
 func TestUpdateComposeAppRegistryFailureLeavesProjectUntouched(t *testing.T) {
 	t.Run("login failure: the CLI is never invoked", func(t *testing.T) {
-		sm, _, st, callsFile := updOrdComposeHarness(t, 0)
+		sm, _, st, cfg, callsFile := updOrdComposeHarness(t, 0)
 
 		mcc := sm.Container.(*mocks.Container)
 		mcc.EXPECT().HandleRegistryLogins(mock.Anything).
@@ -250,6 +303,8 @@ func TestUpdateComposeAppRegistryFailureLeavesProjectUntouched(t *testing.T) {
 
 		assert.Empty(t, updOrdCalls(t, callsFile),
 			"an unreachable registry must abort the update before any compose command — the old project keeps running")
+		assert.NoDirExists(t, updOrdEnvMirrorDir(cfg, "cloginfail"),
+			"a refused update must not have injected the new release's env values into the running app's /data/env mirror")
 
 		app.StateLock.Lock()
 		version := app.Version
@@ -258,7 +313,7 @@ func TestUpdateComposeAppRegistryFailureLeavesProjectUntouched(t *testing.T) {
 	})
 
 	t.Run("pull failure: no teardown happens", func(t *testing.T) {
-		sm, _, st, callsFile := updOrdComposeHarness(t, 1)
+		sm, _, st, cfg, callsFile := updOrdComposeHarness(t, 1)
 
 		mcc := sm.Container.(*mocks.Container)
 		mcc.EXPECT().HandleRegistryLogins(mock.Anything).Return(nil).Once()
@@ -271,9 +326,11 @@ func TestUpdateComposeAppRegistryFailureLeavesProjectUntouched(t *testing.T) {
 		calls := updOrdCalls(t, callsFile)
 		require.NotEmpty(t, calls, "the pull must have been attempted")
 		for _, call := range calls {
-			assert.NotContains(t, call, "down",
+			assert.NotEqual(t, "down", updOrdSubcommand(call),
 				"a failed download must never tear the running project down")
 		}
+		assert.NoDirExists(t, updOrdEnvMirrorDir(cfg, "cpullfail"),
+			"a refused update must not have injected the new release's env values into the running app's /data/env mirror")
 
 		app.StateLock.Lock()
 		version := app.Version
@@ -294,7 +351,13 @@ func TestUpdateComposeAppRegistryFailureLeavesProjectUntouched(t *testing.T) {
 
 func TestCrashLoopWakeKeepsRetryingAPendingUpdateAtItsTargetState(t *testing.T) {
 	am, _, mockTunnel, st, _, _ := amHarness(t)
-	mockTunnel.EXPECT().TunnelCapable().Return(false).Maybe()
+
+	// RequestAppState reaches syncPortState — and with it this probe — BEFORE
+	// the transition-lock check, so counting it observes that the wake actually
+	// DISPATCHED a retry (a kept-but-inert loop would count zero).
+	dispatched := 0
+	mockTunnel.EXPECT().TunnelCapable().
+		RunAndReturn(func() bool { dispatched++; return false }).Maybe()
 
 	app := amSeed(t, st, 71, "pendingupd", common.RUNNING, common.PROD)
 
@@ -319,13 +382,18 @@ func TestCrashLoopWakeKeepsRetryingAPendingUpdateAtItsTargetState(t *testing.T) 
 
 	am.crashLoopWake(task)
 
-	assert.True(t, am.hasActiveCrashLoop(71, common.PROD),
+	assert.True(t, updOrdHasLoop(am, 71, common.PROD),
 		"reaching the target STATE must not end the loop while the row still carries the update")
+	assert.GreaterOrEqual(t, dispatched, 1,
+		"the wake must actually dispatch the retry, not merely keep the loop registered")
 }
 
 func TestCrashLoopWakeClearsALoopAtItsTargetStateWithNoPendingUpdate(t *testing.T) {
 	am, _, mockTunnel, st, _, _ := amHarness(t)
-	mockTunnel.EXPECT().TunnelCapable().Return(false).Maybe()
+
+	dispatched := 0
+	mockTunnel.EXPECT().TunnelCapable().
+		RunAndReturn(func() bool { dispatched++; return false }).Maybe()
 
 	amSeed(t, st, 72, "settled", common.RUNNING, common.PROD)
 
@@ -341,8 +409,48 @@ func TestCrashLoopWakeClearsALoopAtItsTargetStateWithNoPendingUpdate(t *testing.
 
 	am.crashLoopWake(task)
 
-	assert.False(t, am.hasActiveCrashLoop(72, common.PROD),
+	assert.False(t, updOrdHasLoop(am, 72, common.PROD),
 		"at the target state with nothing pending the loop must end (existing behavior)")
+	assert.Zero(t, dispatched, "a converged loop must not dispatch another transition")
+}
+
+// The row-read-failure branch must make the same distinction, using the
+// CAPTURED payload (the row is unreadable there): at the target state with a
+// pending captured update it must fall through to the captured-payload retry
+// instead of clearing the loop.
+func TestCrashLoopWakeRowReadFailureKeepsAPendingUpdate(t *testing.T) {
+	am, _, mockTunnel, st, _, _ := amHarness(t)
+
+	dispatched := 0
+	mockTunnel.EXPECT().TunnelCapable().
+		RunAndReturn(func() bool { dispatched++; return false }).Maybe()
+
+	app := amSeed(t, st, 73, "rowless", common.RUNNING, common.PROD)
+	// No requested-state row is written for app 73: GetRequestedState fails,
+	// exercising the rowErr branch. (amSeed's AddApp writes the app row only.)
+	// Align the in-memory target with the captured payload — amSeed defaults it
+	// to PRESENT, which would take the branch's "target changed" exit instead.
+	app.StateLock.Lock()
+	app.RequestedState = common.RUNNING
+	app.StateLock.Unlock()
+
+	captured := amPayload(73, "rowless", common.RUNNING, common.PROD)
+	captured.RequestUpdate = true
+	captured.PresentVersion = "1.0.0"
+	captured.NewestVersion = "2.0.0"
+	captured.Retrying = true
+	task := &CrashLoop{Payload: captured}
+	am.crashLoopLock.Lock()
+	am.crashLoops[task] = struct{}{}
+	am.crashLoopLock.Unlock()
+
+	require.False(t, app.SecureTransition())
+
+	am.crashLoopWake(task)
+
+	assert.True(t, updOrdHasLoop(am, 73, common.PROD),
+		"an unreadable row must not let a pending captured update be dropped at its target state")
+	assert.GreaterOrEqual(t, dispatched, 1, "the captured-payload retry must be dispatched")
 }
 
 // =============================================================================
@@ -371,20 +479,3 @@ func TestHasPendingUpdate(t *testing.T) {
 	assert.False(t, hasPendingUpdate(uninstalling), "an uninstall wins over a pending update")
 }
 
-func TestHasActiveCrashLoop(t *testing.T) {
-	am, _, _, _, _, _ := amHarness(t)
-
-	assert.False(t, am.hasActiveCrashLoop(90, common.PROD))
-
-	task := &CrashLoop{Payload: amPayload(90, "loop", common.RUNNING, common.PROD)}
-	am.crashLoopLock.Lock()
-	am.crashLoops[task] = struct{}{}
-	am.crashLoopLock.Unlock()
-
-	assert.True(t, am.hasActiveCrashLoop(90, common.PROD))
-	assert.False(t, am.hasActiveCrashLoop(90, common.DEV), "stage is part of the identity")
-	assert.False(t, am.hasActiveCrashLoop(91, common.PROD))
-
-	am.clearCrashLoop(90, common.PROD)
-	assert.False(t, am.hasActiveCrashLoop(90, common.PROD))
-}

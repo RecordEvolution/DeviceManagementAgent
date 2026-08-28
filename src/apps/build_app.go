@@ -223,9 +223,21 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 	// Mirror the env vars as files in the /data/env mount injected above, like
 	// single-container apps get: the start-time snapshot the live refresh
 	// (refreshRemotePortEnvFiles) later updates in place.
-	err = writeEnvironmentVariablesToFiles(filepath.Dir(envFilesHostDir), strings.Split(dotEnvFileContents, "\n"))
-	if err != nil {
-		return "", fmt.Errorf("failed to write environment variables to files: %w", err)
+	//
+	// NOT during an update: the update renders the NEW release's files while
+	// the OLD containers are still running (pull-before-teardown), and this
+	// mirror is a live bind mount those containers read file-first — writing it
+	// here would inject the new release's env values into the old app, and a
+	// refused update would leave them there for the whole outage. The mirror is
+	// (re)written from the promoted definition when the app next starts
+	// (runApp -> SetupComposeFiles with updatingApp=false); only the
+	// .env-compose file above, which no container mounts, is needed for the
+	// update's `compose pull` interpolation.
+	if !updatingApp {
+		err = writeEnvironmentVariablesToFiles(filepath.Dir(envFilesHostDir), strings.Split(dotEnvFileContents, "\n"))
+		if err != nil {
+			return "", fmt.Errorf("failed to write environment variables to files: %w", err)
+		}
 	}
 
 	err = os.WriteFile(dockerComposeFilePath, dockerComposeJSONString, os.ModePerm)
