@@ -233,11 +233,12 @@ build-all-docker: clean
     docker run --name agent_builder -v {{ROOT_DIR}}/build:/app/reagent/build -v {{ROOT_DIR}}/.cache/frp:/app/reagent/.cache/frp agent-builder
 
 # Follow with `just release` to tag + trigger the build/publish CI.
-# Bump the patch version in src/release/version.txt and commit it.
+# Formats src with gofmt, then bumps the patch version in src/release/version.txt.
 bump-patch:
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ROOT_DIR}}
+    gofmt -w src
     current=$(tr -d '[:space:]' < src/release/version.txt)
     if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$current'" >&2
