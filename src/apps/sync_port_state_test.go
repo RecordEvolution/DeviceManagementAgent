@@ -351,3 +351,73 @@ func TestUninstallRemovesAppTunnels(t *testing.T) {
 
 	am.RemoveAppTunnels("victim")
 }
+
+// A tunnel frps keeps refusing must be retried, but PACED. The refusal is
+// invisible to AddTunnel (it returns success once frpc reloads its config), so
+// without a backoff every sync rebuilds the same dead proxy — rewriting
+// frpc.yaml and re-driving NewProxy several times a second, hardest exactly
+// when the appliance-side cause ("authorization check failed") is least able to
+// clear. Observed on tls-sf012, 2026-08-28.
+func TestSyncPortStatePacesRepeatedDeadTunnelRebuilds(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 22, "flappy", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(22, "flappy", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "ui", Port: 9091, Protocol: "http", Active: true})
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 22, Protocol: "tcp", Port: 9091}, 41501)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("http"), uint64(cfg.ReswarmConfig.DeviceKey), "flappy", 9091)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "http")
+	stale := tunnel.TunnelConfig{Subdomain: subdomain, AppName: "flappy", Protocol: tunnel.Protocol("http"), LocalPort: 41501, RemotePort: 30222}
+
+	mockTunnel.EXPECT().Get(tunnelID).Return(&tunnel.Tunnel{Config: stale})
+	// frps refused this proxy; frpc records the reason on the status. The
+	// closure lets the test flip the proxy to healthy later on.
+	proxyUp := false
+	mockTunnel.EXPECT().Status(tunnelID).RunAndReturn(func(string) (tunnel.TunnelStatus, error) {
+		if proxyUp {
+			return tunnel.TunnelStatus{Name: tunnelID, Status: "running"}, nil
+		}
+		return tunnel.TunnelStatus{Name: tunnelID, Status: "start error", Error: "authorization check failed"}, nil
+	})
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil)
+
+	// Every pass persists; keep the last rules so the deferred passes can be
+	// checked for the reserved remote port.
+	var saved []interface{}
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).RunAndReturn(func(p common.TransitionPayload) error {
+		saved = p.Ports
+		return nil
+	})
+
+	// Exactly ONE rebuild across three back-to-back syncs.
+	mockTunnel.EXPECT().RemoveTunnel(stale).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		return conf, nil
+	}).Once()
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, am.syncPortState(payload, app))
+	}
+	mockTunnel.AssertExpectations(t)
+
+	// Backing off must not clobber the reserved remote port with a zero — that
+	// both hides the address upstream and makes the next start reserve another.
+	rules := spsRules(t, saved)
+	require.Len(t, rules, 1)
+	assert.Equal(t, uint64(30222), rules[0].RemotePort, "a deferred rebuild must keep the reserved remote port")
+
+	// Once the proxy comes up the backoff is cleared, so the NEXT failure
+	// retries immediately rather than inheriting a stale delay.
+	proxyUp = true
+	require.NoError(t, am.syncPortState(payload, app))
+
+	ok, _ := am.mayRebuildTunnel(tunnelID)
+	assert.True(t, ok, "a healthy proxy must reset the rebuild backoff")
+}

@@ -33,16 +33,44 @@ type AppManager struct {
 	hostPorts     *HostPortRegistry
 	crashLoops    map[*CrashLoop]struct{}
 	crashLoopLock sync.Mutex
+
+	// tunnelRebuilds paces the rebuild of a tunnel frps keeps refusing. See
+	// mayRebuildTunnel.
+	tunnelRebuilds    map[string]*tunnelRebuildState
+	tunnelRebuildLock sync.Mutex
+}
+
+// Rebuild pacing for a tunnel whose proxy frps will not accept.
+//
+// A refusal is invisible to AddTunnel (it returns success on a successful frpc
+// config reload), so the next sync finds the proxy dead and rebuilds it, which
+// produces another refusal — an unbounded loop. When the refusal is
+// appliance-side ("authorization check failed" while the tunnel container's
+// WAMP session is down) the loop hammers hardest exactly when the appliance can
+// least serve it, and rewrites frpc.yaml several times a second.
+//
+// Retrying is still right — the condition usually clears on its own — so this
+// paces rather than stops: exponential backoff from rebuildBackoffBase to
+// rebuildBackoffMax, reset the moment the proxy comes up.
+const (
+	rebuildBackoffBase = 10 * time.Second
+	rebuildBackoffMax  = 5 * time.Minute
+)
+
+type tunnelRebuildState struct {
+	attempts int
+	last     time.Time
 }
 
 func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.TunnelManager) *AppManager {
 	am := AppManager{
-		StateMachine:  sm,
-		StateObserver: so,
-		AppStore:      as,
-		tunnelManager: tm,
-		hostPorts:     NewHostPortRegistry(),
-		crashLoops:    make(map[*CrashLoop]struct{}),
+		StateMachine:   sm,
+		StateObserver:  so,
+		AppStore:       as,
+		tunnelManager:  tm,
+		hostPorts:      NewHostPortRegistry(),
+		crashLoops:     make(map[*CrashLoop]struct{}),
+		tunnelRebuilds: make(map[string]*tunnelRebuildState),
 	}
 
 	am.StateObserver.AppManager = &am
@@ -131,22 +159,35 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					// restart because it believed the tunnel was up, while
 					// nothing was connected — and nothing else ever took the
 					// initiative to rebuild it.
-					alive := false
+					//
+					// A dead proxy under matching bookkeeping is the only case
+					// worth pacing: a brand-new tunnel, and one whose local port
+					// genuinely changed, are real work and rebuild immediately.
+					// deferRebuild holds this pass off without touching the
+					// stored config — see mayRebuildTunnel.
+					alive, deferRebuild := false, false
 					if tnl != nil && tnl.Config.LocalPort == dialPort {
-						alive = am.tunnelProxyAlive(tunnelID)
-						if !alive {
-							log.Warn().Str("tunnelID", tunnelID).Msg("Tunnel bookkeeping says up but frpc has no live proxy — rebuilding")
+						var reason string
+						alive, reason = am.tunnelProxyAlive(tunnelID)
+						if alive {
+							am.noteTunnelHealthy(tunnelID)
+						} else {
+							ok, retryIn := am.mayRebuildTunnel(tunnelID)
+							deferRebuild = !ok
+							log.Warn().Str("tunnelID", tunnelID).Str("reason", reason).
+								Bool("rebuilding", ok).Dur("retryIn", retryIn).
+								Msg("Tunnel bookkeeping says up but frpc has no live proxy")
 						}
 					}
 
-					if alive {
-						log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists, skipping add")
-						// AddTunnel is skipped here, so take the live tunnel's
-						// config as the result: it holds the remote port frps
-						// reserved for this tcp/udp tunnel. Leaving it zeroed
-						// persists remote_port 0 over the reserved one, which
-						// both hides the address upstream and makes the next
-						// agent start reserve a different port.
+					// Deferring takes the same result as the alive path: the
+					// stored config carries the remote port frps reserved, and
+					// persisting the zero config of a skipped add would both
+					// hide the address upstream and make the next agent start
+					// reserve a different port.
+					if alive || deferRebuild {
+						log.Debug().Str("tunnelID", tunnelID).Bool("deferred", deferRebuild).
+							Msg("Skipping tunnel add")
 						newConfig = tnl.Config
 					} else {
 						if tnl != nil {
@@ -248,22 +289,64 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 }
 
 // tunnelProxyAlive reports whether frpc actually serves a proxy for this
-// tunnel id right now. The in-memory bookkeeping alone is not evidence — see
-// syncPortState. "wait start" counts as alive (frpc is bringing it up; a
-// rebuild would only flap it).
-func (am *AppManager) tunnelProxyAlive(tunnelID string) bool {
+// tunnel id right now, and — when it does not — WHY. The in-memory bookkeeping
+// alone is not evidence: see syncPortState. "wait start" counts as alive (frpc
+// is bringing it up; a rebuild would only flap it).
+//
+// The reason is frps' verbatim refusal, which frpc keeps in the proxy's Err
+// field ("authorization check failed", "port already used", …). That string is
+// the only record of the refusal anywhere on the device — AddTunnel reports
+// success as soon as the config reload succeeds, so nothing else on this side
+// ever learns that frps said no. Discarding it turned every refusal into an
+// unexplained rebuild loop.
+func (am *AppManager) tunnelProxyAlive(tunnelID string) (bool, string) {
 	status, err := am.tunnelManager.Status(tunnelID)
 	if err != nil {
-		return false
+		return false, fmt.Sprintf("frpc status unavailable: %s", err)
 	}
 	if status.Error != "" {
-		return false
+		return false, status.Error
 	}
 	switch status.Status {
 	case "running", "wait start":
-		return true
+		return true, ""
 	}
-	return false
+	return false, fmt.Sprintf("frpc proxy status %q", status.Status)
+}
+
+// mayRebuildTunnel reports whether a dead tunnel is due for another rebuild
+// attempt, recording the attempt when it says yes. Applies ONLY to the
+// rebuild-a-dead-proxy path: a brand-new tunnel and a tunnel whose local port
+// actually changed are real work and are never paced.
+func (am *AppManager) mayRebuildTunnel(tunnelID string) (bool, time.Duration) {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	st := am.tunnelRebuilds[tunnelID]
+	if st == nil {
+		am.tunnelRebuilds[tunnelID] = &tunnelRebuildState{attempts: 1, last: time.Now()}
+		return true, 0
+	}
+
+	backoff := rebuildBackoffBase << (st.attempts - 1)
+	if backoff > rebuildBackoffMax || backoff <= 0 { // <= 0 guards the shift overflowing
+		backoff = rebuildBackoffMax
+	}
+	if waited := time.Since(st.last); waited < backoff {
+		return false, backoff - waited
+	}
+
+	st.attempts++
+	st.last = time.Now()
+	return true, 0
+}
+
+// noteTunnelHealthy clears the backoff for a tunnel that is serving again, so
+// the next genuine failure starts from the base delay rather than a stale one.
+func (am *AppManager) noteTunnelHealthy(tunnelID string) {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+	delete(am.tunnelRebuilds, tunnelID)
 }
 
 // tunnelInConfigFile reports whether the frpc config file still carries a
