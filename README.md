@@ -185,9 +185,12 @@ Building and publishing is done by **CI** (GitHub Actions). The pipeline is deli
 
 ### Release via CI (tag push)
 
-1. `just bump-patch` — bumps the patch in [`src/release/version.txt`](src/release/version.txt) and commits it (or edit the file yourself and commit; see [Versioning](#versioning)).
-2. `just release` — tags the current commit `vX.Y.Z` (read from `version.txt`) and pushes it. Requires a clean working tree.
-3. [`.github/workflows/release.yml`](.github/workflows/release.yml) then, for every entry in the [`targets`](targets) file: builds the binary, generates a CycloneDX SBOM, records a sigstore-signed **SBOM attestation** bound to the binary's digest, publishes the binary to `gs://re-agent/<os>/<arch>/<version>/`, and pushes the multi-arch agent images to Artifact Registry. It can also be run manually from the Actions tab (`workflow_dispatch`).
+1. `just release-patch` (or `release-minor` / `release-major`) — the whole local side in one command: refuses a dirty tree, bumps [`src/release/version.txt`](src/release/version.txt) + `availableVersions.json`, commits just those two files as `release reagent vX.Y.Z`, runs the lint gate, then tags `vX.Y.Z` and pushes.
+
+   Commit your own work first, with your own message — the release commit carries the version bump alone. This is the shared IronFlock release contract; see [`REDeployments/docs/RELEASE.md`](../REDeployments/docs/RELEASE.md).
+
+   For a hand-managed version, `just bump-patch` (or editing `version.txt` yourself; see [Versioning](#versioning)) + your own commit + `just release` still works — `release` tags and pushes an already-committed version and requires a clean working tree.
+2. [`.github/workflows/release.yml`](.github/workflows/release.yml) then, for every entry in the [`targets`](targets) file: builds the binary, generates a CycloneDX SBOM, records a sigstore-signed **SBOM attestation** bound to the binary's digest, publishes the binary to `gs://re-agent/<os>/<arch>/<version>/`, and pushes the multi-arch agent images to Artifact Registry. It can also be run manually from the Actions tab (`workflow_dispatch`).
 
 This **stages** the version — the binaries and images now exist, but **agents will not update to it yet**. The agent decides what to install from `availableVersions.json` (see the next step).
 

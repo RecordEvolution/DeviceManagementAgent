@@ -16,6 +16,15 @@ FRP_CACHED_BINARY := FRP_CACHE_DIR / ("frpc_" + FRP_VERSION + "_" + FRP_OS + "_"
 AGENT_IMAGE_NAME := "europe-docker.pkg.dev/record-1283/eu.gcr.io/ironflock-agent"
 AGENT_IMAGE_VERSION := "v" + `cat src/release/version.txt`
 
+# Release contract — see REDeployments/docs/RELEASE.md. Sole project in this
+# repo, so the tag is plain `v<version>` — which is also what release.yml
+# matches (`on: push: tags: ["v*"]`), so the shape is a CI contract here, not
+# just a convention.
+VERSION := `tr -d '[:space:]' < src/release/version.txt`
+RELEASE_NAME := "reagent"
+VERSION_FILES := "src/release/version.txt availableVersions.json"
+RELEASE_TAG := "v" + VERSION
+
 default:
     @just --list
 
@@ -232,7 +241,8 @@ build-all-docker: clean
     docker build --platform linux/amd64 . -t agent-builder
     docker run --name agent_builder -v {{ROOT_DIR}}/build:/app/reagent/build -v {{ROOT_DIR}}/.cache/frp:/app/reagent/.cache/frp agent-builder
 
-# Follow with `just release` to tag + trigger the build/publish CI.
+# Used on its own only for a manual release; `just release-patch` and friends
+# call this for you. Follow with `just release` to tag + trigger the CI build.
 # Formats src with gofmt, then bumps the patch version in src/release/version.txt.
 bump-patch:
     #!/usr/bin/env bash
@@ -248,9 +258,10 @@ bump-patch:
     next="${major}.${minor}.$((patch + 1))"
     printf '%s' "$next" > src/release/version.txt
     jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
-    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Commit it and run: just release"
 
-# Follow with `just release` to tag + trigger the build/publish CI.
+# Used on its own only for a manual release; `just release-patch` and friends
+# call this for you. Follow with `just release` to tag + trigger the CI build.
 # Bump the minor version in src/release/version.txt (resets patch) and commit it.
 bump-minor:
     #!/usr/bin/env bash
@@ -265,9 +276,10 @@ bump-minor:
     next="${major}.$((minor + 1)).0"
     printf '%s' "$next" > src/release/version.txt
     jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
-    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Commit it and run: just release"
 
-# Follow with `just release` to tag + trigger the build/publish CI.
+# Used on its own only for a manual release; `just release-patch` and friends
+# call this for you. Follow with `just release` to tag + trigger the CI build.
 # Bump the major version in src/release/version.txt (resets minor and patch) and commit it.
 bump-major:
     #!/usr/bin/env bash
@@ -282,21 +294,75 @@ bump-major:
     next="$((major + 1)).0.0"
     printf '%s' "$next" > src/release/version.txt
     jq --arg v "$next" 'map_values($v)' availableVersions.json > availableVersions.json.tmp && mv availableVersions.json.tmp availableVersions.json
-    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Now commit everything and run: just release"
+    echo "Bumped $current -> $next (all channels in availableVersions.json set to $next). Commit it and run: just release"
+
+# ------------------------------------------------------------------ release --
+# Release contract — see REDeployments/docs/RELEASE.md
+#
+#   just release-patch = _require-clean -> bump-patch -> _release-commit -> release
+#
+# This repo does not build its image locally: pushing the `v*` tag is what
+# triggers release.yml, which builds and publishes. That is also why commit and
+# tag are SPLIT here, unlike every other project — the tag must not be created
+# until the local lint gate in `release` has passed (see its comment below).
+#
+# The steps run as sub-`just` processes, never as Just dependencies: just
+# evaluates variables once at parse time, so VERSION would still hold the
+# PRE-bump value if these ran as deps.
+
+# Releases come off a clean tree: the release commit must carry the version
+# bump and nothing else, and a tag whose content is unprovable is worse than
+# no tag at all. Commit your work first, with a message that describes it.
+_require-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    dirty=$(git status --porcelain 2>/dev/null || true)
+    if [ -n "$dirty" ]; then
+        echo "release: uncommitted changes here — commit them first, with a" >&2
+        echo "         message describing the work. The release commit that" >&2
+        echo "         follows carries the version bump alone." >&2
+        echo >&2
+        printf '%s\n' "$dirty" >&2
+        exit 1
+    fi
+
+# Commit the version bump alone — explicit file list, never `git add -A`.
+# Does NOT tag: `release` runs next and tags after its lint gate passes.
+_release-commit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    git add -- {{VERSION_FILES}}
+    git commit -m "release {{RELEASE_NAME}} v{{VERSION}}"
+
+release-patch:
+    just _require-clean
+    just bump-patch
+    just _release-commit
+    just release
+
+release-minor:
+    just _require-clean
+    just bump-minor
+    just _release-commit
+    just release
+
+release-major:
+    just _require-clean
+    just bump-major
+    just _release-commit
+    just release
 
 # Requires a clean working tree; promote afterwards with `just promote`.
 # Tag the current commit as v<version.txt> and push (triggers build/publish CI).
 # Runs the lint gate locally FIRST: release.yml requires gate.yml to pass before
 # publishing, but the tag is already pushed by then — a lint failure would leave a
 # broken v<version> tag on origin to clean up. Catch it here, before the push.
-release:
+release: _require-clean
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ROOT_DIR}}
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "working tree is not clean — commit everything first (e.g. just bump-patch)" >&2
-        exit 1
-    fi
     version=$(tr -d '[:space:]' < src/release/version.txt)
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "src/release/version.txt is not MAJOR.MINOR.PATCH: '$version'" >&2
