@@ -280,7 +280,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	}
 
 	compose := sm.Container.Compose()
-	if !compose.Supported {
+	if !compose.Supported() {
 		message := "Docker Compose is not supported for this device"
 		writeErr := sm.LogManager.Write(payload.ContainerName.Prod, message)
 		if writeErr != nil {

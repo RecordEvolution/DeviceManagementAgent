@@ -246,6 +246,7 @@ type MockNexusClient struct {
 
 	// Call tracking
 	callCount      int
+	lastCallArgs   wamp.List
 	publishCount   int
 	registerCount  int
 	subscribeCount int
@@ -335,6 +336,14 @@ func (m *MockNexusClient) SetCallLimit(limit int) {
 // =============================================================================
 
 // CallCount returns the number of Call operations made.
+// LastCallArgs returns the args of the most recent Call, for payload-shape
+// assertions (the onCall handler only sees the procedure name).
+func (m *MockNexusClient) LastCallArgs() wamp.List {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastCallArgs
+}
+
 func (m *MockNexusClient) CallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -422,6 +431,7 @@ func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wa
 	defer m.mu.Unlock()
 
 	m.callCount++
+	m.lastCallArgs = args
 
 	// Check call limit
 	if m.callLimit > 0 && m.callCount > m.callLimit {

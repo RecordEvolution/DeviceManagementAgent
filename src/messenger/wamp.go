@@ -66,16 +66,35 @@ type WampSession struct {
 	// agent so the heartbeat can carry it to the UI without a dedicated RPC.
 	// Nil until wired (the field is then omitted from the payload).
 	tunnelCapableFn func() bool
+	// dockerAvailableFn reports whether the Docker daemon currently answers;
+	// injected by the agent (same pattern as tunnelCapableFn) so the heartbeat
+	// carries live daemon health to the UI. Nil until wired (the field is then
+	// omitted from the payload).
+	dockerAvailableFn func() bool
 
 	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// statusUpdateMu serializes UpdateRemoteDeviceStatus end to end (probe +
+	// send). The heartbeat, OnConnect and the daemon-recovery transition
+	// pushes all call it concurrently; without the lock a push whose
+	// docker_available probe hung across a daemon recovery could send its
+	// stale payload AFTER a fresher push, and the backend persists in arrival
+	// order — leaving a wrong badge for up to a heartbeat.
+	statusUpdateMu sync.Mutex
 }
 
 // SetTunnelCapableFunc wires the per-device tunnel-capability getter into the
 // heartbeat payload. Called once by the agent after construction.
 func (s *WampSession) SetTunnelCapableFunc(fn func() bool) {
 	s.tunnelCapableFn = fn
+}
+
+// SetDockerAvailableFunc wires the Docker daemon health getter into the
+// heartbeat payload. Called once by the agent after construction.
+func (s *WampSession) SetDockerAvailableFunc(fn func() bool) {
+	s.dockerAvailableFn = fn
 }
 
 type DeviceStatus string
@@ -750,6 +769,12 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 }
 
 func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
+	// Serialized: with probe and send under one lock, payloads reach the
+	// backend in probe order, so a stale health reading can never overwrite a
+	// fresher one (see statusUpdateMu).
+	s.statusUpdateMu.Lock()
+	defer s.statusUpdateMu.Unlock()
+
 	cfg := s.GetConfig()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -762,25 +787,38 @@ func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 
 	stats := common.GetStats()
 
+	statsDict := common.Dict{
+		"cpu_count":           stats.CPUCount,
+		"cpu_usage":           stats.CPUUsagePercent,
+		"memory_total":        stats.MemoryTotal,
+		"memory_used":         stats.MemoryUsed,
+		"memory_available":    stats.MemoryAvailable,
+		"storage_total":       stats.StorageTotal,
+		"storage_used":        stats.StorageUsed,
+		"storage_free":        stats.StorageFree,
+		"docker_apps_total":   stats.DockerAppsTotal,
+		"docker_apps_used":    stats.DockerAppsUsed,
+		"docker_apps_free":    stats.DockerAppsFree,
+		"docker_apps_mounted": stats.DockerAppsMounted,
+	}
+
+	// Docker daemon health, probed live at send time so the payload is
+	// truthful even for outages nothing else has noticed yet (a hung daemon,
+	// a stopped Docker Desktop). It rides INSIDE stats deliberately: the
+	// backend persists the stats dict verbatim to the device row on every
+	// heartbeat and read_device returns it, so the UI badge survives a page
+	// reload without a dedicated DB column or migration. The daemon-recovery
+	// supervisor's status-transition pushes reuse this exact payload path.
+	if s.dockerAvailableFn != nil {
+		statsDict["docker_available"] = s.dockerAvailableFn()
+	}
+
 	payload := common.Dict{
 		"swarm_key":       cfg.ReswarmConfig.SwarmKey,
 		"device_key":      cfg.ReswarmConfig.DeviceKey,
 		"status":          string(status),
 		"wamp_session_id": s.GetSessionID(),
-		"stats": common.Dict{
-			"cpu_count":           stats.CPUCount,
-			"cpu_usage":           stats.CPUUsagePercent,
-			"memory_total":        stats.MemoryTotal,
-			"memory_used":         stats.MemoryUsed,
-			"memory_available":    stats.MemoryAvailable,
-			"storage_total":       stats.StorageTotal,
-			"storage_used":        stats.StorageUsed,
-			"storage_free":        stats.StorageFree,
-			"docker_apps_total":   stats.DockerAppsTotal,
-			"docker_apps_used":    stats.DockerAppsUsed,
-			"docker_apps_free":    stats.DockerAppsFree,
-			"docker_apps_mounted": stats.DockerAppsMounted,
-		},
+		"stats":           statsDict,
 	}
 
 	// Carry per-device tunnel capability on the heartbeat so the UI reflects it

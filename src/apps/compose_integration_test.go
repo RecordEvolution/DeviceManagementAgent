@@ -73,7 +73,7 @@ func composeITDocker(t *testing.T) *container.Docker {
 		t.Skipf("skipping: docker daemon not available: %v", err)
 	}
 
-	if !docker.Compose().Supported {
+	if !docker.Compose().Supported() {
 		t.Skip("skipping: `docker compose` is not available on this host")
 	}
 

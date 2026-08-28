@@ -24,10 +24,9 @@ import (
 // shells out to `docker compose` via IsComposeSupported(). Tests that exercise
 // pure parse/format helpers set Supported explicitly and never touch a daemon.
 func newTestCompose(cfg *config.Config, supported bool) *Compose {
-	return &Compose{
-		Supported: supported,
-		config:    cfg,
-	}
+	c := &Compose{config: cfg}
+	c.SetSupported(supported)
+	return c
 }
 
 func TestComposeListImages(t *testing.T) {

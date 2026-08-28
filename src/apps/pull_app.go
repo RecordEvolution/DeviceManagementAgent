@@ -75,7 +75,7 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
-	if !compose.Supported {
+	if !compose.Supported() {
 		message := "Docker Compose is not supported for this device"
 		writeErr := sm.LogManager.Write(topicForLogStream, message)
 		if writeErr != nil {

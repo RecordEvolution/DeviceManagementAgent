@@ -3,11 +3,14 @@ package logging
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
 
 	"reagent/common"
+	containerpkg "reagent/container"
+	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/messenger/topics"
 	"reagent/persistence"
@@ -17,6 +20,7 @@ import (
 	"reagent/testutil/mocks"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -470,3 +474,31 @@ func TestSetMessenger(t *testing.T) {
 // Compile-time assertion: the fake messenger satisfies the messenger interface
 // the LogManager depends on.
 var _ messenger.Messenger = (*fakes.Messenger)(nil)
+
+// ReviveDeadLogs must survive a failed (or empty) subscription lookup: the
+// sweep runs in one goroutine for all apps, and indexing result.Arguments[0]
+// on an errored call used to panic there — killing the revive for every app
+// after the first. This is the path the daemon-outage recovery drives.
+func TestReviveDeadLogsSurvivesSubscriptionLookupFailure(t *testing.T) {
+	lm, cont, msg, db := newTestManager(t)
+
+	// Two apps: the sweep must get PAST the first failed lookup to the second.
+	addApp(t, db, 1, "appone", common.PROD)
+	addApp(t, db, 2, "apptwo", common.PROD)
+
+	msg.SetCallError(string(topics.MetaProcMatchSubscription), errors.New("wamp session down"))
+
+	// Compose unsupported -> List() returns empty without touching the CLI.
+	cont.EXPECT().Compose().Return(&containerpkg.Compose{})
+	cont.EXPECT().Logs(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errdefs.ContainerNotFound(errors.New("no such container")))
+
+	require.NoError(t, lm.ReviveDeadLogs())
+
+	require.Eventually(t, func() bool {
+		lm.activeLogsMutex.Lock()
+		defer lm.activeLogsMutex.Unlock()
+		return len(lm.activeLogs) == 2
+	}, 2*time.Second, 10*time.Millisecond,
+		"every app must get its log entry revived despite the failed subscription lookups")
+}

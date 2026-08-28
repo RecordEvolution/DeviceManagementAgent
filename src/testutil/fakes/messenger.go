@@ -264,6 +264,16 @@ func (m *Messenger) GetPublishCalls() []PublishCall {
 	return append([]PublishCall(nil), m.PublishCalls...)
 }
 
+// GetCallCalls returns a copy of the recorded calls. Prefer this over reading
+// CallCalls directly whenever the code under test is still calling from its
+// own goroutines — Call appends under the mutex, so an unsynchronised read of
+// the slice is a data race.
+func (m *Messenger) GetCallCalls() []CallCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]CallCall(nil), m.CallCalls...)
+}
+
 // GetCallCount returns the number of call invocations.
 func (m *Messenger) GetCallCount() int {
 	m.mu.RLock()

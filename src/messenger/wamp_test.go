@@ -2,6 +2,7 @@ package messenger
 
 import (
 	"context"
+	"reagent/common"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -501,5 +502,77 @@ func TestWampSession_Reconnection(t *testing.T) {
 			t.Fatal("Close blocked while dial loop was active")
 		}
 		assert.False(t, session.Connected())
+	})
+}
+
+// =============================================================================
+// UpdateRemoteDeviceStatus — heartbeat payload shape
+//
+// docker_available rides INSIDE the stats dict (persisted verbatim to the
+// device row by the backend, returned on cold load), tunnel_capable rides at
+// the top level (dedicated column). Both are omitted entirely until wired, so
+// a fleet of older agents never blanks the stored values.
+// =============================================================================
+
+func TestUpdateRemoteDeviceStatusPayload(t *testing.T) {
+	newSession := func(t *testing.T) (*WampSession, *MockClient) {
+		t.Helper()
+		cfg := testConfig()
+		socketConfig := &SocketConfig{ConnectionTimeout: time.Millisecond * 100}
+		mockClient := NewMockClient()
+
+		session, err := NewWampSession(cfg, socketConfig, nil, mockClient.ConnectNet)
+		require.NoError(t, err)
+		t.Cleanup(session.Close)
+		return session, mockClient
+	}
+
+	payloadOf := func(t *testing.T, mockClient *MockClient) map[string]interface{} {
+		t.Helper()
+		require.NotNil(t, mockClient.LastClient())
+		args := mockClient.LastClient().LastCallArgs()
+		require.NotEmpty(t, args)
+		payload, ok := args[0].(common.Dict)
+		require.True(t, ok, "status payload must be a dict")
+		return payload
+	}
+
+	t.Run("carries docker_available inside stats when wired", func(t *testing.T) {
+		session, mockClient := newSession(t)
+		session.SetDockerAvailableFunc(func() bool { return false })
+
+		require.NoError(t, session.UpdateRemoteDeviceStatus(CONNECTED))
+
+		stats, ok := payloadOf(t, mockClient)["stats"].(common.Dict)
+		require.True(t, ok, "payload must carry a stats dict")
+		assert.Equal(t, false, stats["docker_available"])
+	})
+
+	t.Run("omits docker_available when not wired", func(t *testing.T) {
+		session, mockClient := newSession(t)
+
+		require.NoError(t, session.UpdateRemoteDeviceStatus(CONNECTED))
+
+		stats, ok := payloadOf(t, mockClient)["stats"].(common.Dict)
+		require.True(t, ok)
+		_, present := stats["docker_available"]
+		assert.False(t, present, "unwired agents must not send the field at all")
+	})
+
+	t.Run("keeps tunnel_capable at the top level", func(t *testing.T) {
+		session, mockClient := newSession(t)
+		session.SetTunnelCapableFunc(func() bool { return true })
+		session.SetDockerAvailableFunc(func() bool { return true })
+
+		require.NoError(t, session.UpdateRemoteDeviceStatus(CONNECTED))
+
+		payload := payloadOf(t, mockClient)
+		assert.Equal(t, true, payload["tunnel_capable"])
+		_, topLevel := payload["docker_available"]
+		assert.False(t, topLevel, "docker_available must live in stats, not top level")
+
+		stats, ok := payload["stats"].(common.Dict)
+		require.True(t, ok)
+		assert.Equal(t, true, stats["docker_available"])
 	})
 }

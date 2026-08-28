@@ -17,13 +17,17 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
 type Compose struct {
-	Supported bool
+	// supported records whether the docker compose CLI is available. Atomic:
+	// RefreshSupport can run from the daemon-recovery supervisor while app
+	// transitions read the flag concurrently. Read via Supported().
+	supported atomic.Bool
 	config    *config.Config
 	// binary is the CLI to invoke; empty means "docker". Swappable so tests can
 	// exercise the output/exit-code plumbing without a daemon.
@@ -82,17 +86,16 @@ type Service struct {
 	Environment []string `json:"environment"`
 }
 
-func NewCompose(config *config.Config) Compose {
-	supported := IsComposeSupported()
-
-	return Compose{
-		Supported:             supported,
+func NewCompose(config *config.Config) *Compose {
+	compose := &Compose{
 		config:                config,
 		logStreamMap:          make(map[string]*ComposeLog),
 		composeProcessesMap:   make(map[string]context.CancelFunc),
 		composeProcessesMutex: sync.Mutex{},
 		logStreamMapMutex:     sync.Mutex{},
 	}
+	compose.supported.Store(IsComposeSupported())
+	return compose
 }
 
 // NewComposeWithBinary builds a Compose that invokes the given binary instead
@@ -102,13 +105,14 @@ func NewCompose(config *config.Config) Compose {
 func NewComposeWithBinary(config *config.Config, binary string) *Compose {
 	// Not built via NewCompose: that probes `docker compose` on the host, and
 	// this seam exists precisely for hosts that have no docker at all.
-	return &Compose{
-		Supported:           true,
+	compose := &Compose{
 		config:              config,
 		binary:              binary,
 		logStreamMap:        make(map[string]*ComposeLog),
 		composeProcessesMap: make(map[string]context.CancelFunc),
 	}
+	compose.supported.Store(true)
+	return compose
 }
 
 func (c *Compose) ListImages(dockerCompose map[string]interface{}) ([]string, error) {
@@ -512,12 +516,23 @@ func IsComposeSupported() bool {
 	return true
 }
 
-// RefreshSupport re-evaluates compose support. Supported is latched at
+// Supported reports whether the docker compose CLI is available.
+func (c *Compose) Supported() bool {
+	return c.supported.Load()
+}
+
+// SetSupported records whether the compose CLI is available. Exported for
+// tests that bypass the CLI probe.
+func (c *Compose) SetSupported(supported bool) {
+	c.supported.Store(supported)
+}
+
+// RefreshSupport re-evaluates compose support. Support is latched at
 // construction, which can predate a late-starting daemon (Docker Desktop only
-// starts at user login on Windows), so the daemon-wait path re-checks once
+// starts at user login on Windows), so the daemon-wait paths re-check once
 // Docker becomes available.
 func (c *Compose) RefreshSupport() {
-	c.Supported = IsComposeSupported()
+	c.supported.Store(IsComposeSupported())
 }
 
 func (c *Compose) Stop(dockerComposePath string) error {
@@ -742,7 +757,7 @@ func parseComposePSOutput(output []byte) ([]ComposeStatus, error) {
 }
 
 func (c *Compose) Status(dockerComposePath string) ([]ComposeStatus, error) {
-	if !c.Supported {
+	if !c.Supported() {
 		log.Error().Err(errors.New("compose is not supported for this device")).Msg("Error while calling status")
 		return []ComposeStatus{}, nil
 	}
@@ -815,7 +830,7 @@ func (c *Compose) HasComposeDir(appName string, stage common.Stage) bool {
 }
 
 func (c *Compose) List() ([]ComposeListEntry, error) {
-	if !c.Supported {
+	if !c.Supported() {
 		log.Error().Err(errors.New("compose is not supported for this device")).Msg("Error while calling list")
 		return []ComposeListEntry{}, nil
 	}

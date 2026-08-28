@@ -295,7 +295,7 @@ func (sm *StateMachine) buildDevComposeApp(payload common.TransitionPayload, app
 	}
 
 	compose := sm.Container.Compose()
-	if !compose.Supported {
+	if !compose.Supported() {
 		message := "Docker Compose is not supported for this device"
 		writeErr := sm.LogManager.Write(topicForLogStream, message)
 		if writeErr != nil {

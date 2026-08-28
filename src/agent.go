@@ -535,6 +535,26 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	// Report per-device tunnel capability on the heartbeat, so the UI reflects
 	// it live without a dedicated get_agent_metadata call.
 	mainSession.SetTunnelCapableFunc(tunnelManager.TunnelCapable)
+	// Report live Docker daemon health on the heartbeat the same way, so the
+	// UI can badge a device whose Docker is down. Probed at send time with a
+	// short timeout: a hung daemon reads as unavailable, not only a stopped
+	// one.
+	mainSession.SetDockerAvailableFunc(func() bool {
+		pingCtx, cancelPing := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancelPing()
+		_, pingErr := container.Ping(pingCtx)
+		return pingErr == nil
+	})
+	// On daemon-availability transitions (event stream lost / daemon back) the
+	// recovery supervisor pokes an immediate status push so the badge flips
+	// right away instead of on the next heartbeat.
+	stateObserver.SetDaemonTransitionFunc(func() {
+		safe.Go(func() {
+			if err := mainSession.UpdateRemoteDeviceStatus(messenger.CONNECTED); err != nil {
+				log.Debug().Err(err).Msg("failed to push device status on a docker daemon transition")
+			}
+		})
+	})
 	privilege := privilege.NewPrivilege(mainSession, generalConfig)
 
 	external := api.External{

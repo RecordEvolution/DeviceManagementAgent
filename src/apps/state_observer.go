@@ -52,13 +52,28 @@ func (so *StateObserver) removeOwnObserver(mapKey string, ownerCtx context.Conte
 }
 
 type StateObserver struct {
-	AppStore         *store.AppStore
-	LogManager       *logging.LogManager
-	AppManager       *AppManager
-	Container        container.Container
-	activeObservers  map[string]*AppStateObserver
-	spawnerActive    bool
-	observerMapMutex sync.Mutex
+	AppStore        *store.AppStore
+	LogManager      *logging.LogManager
+	AppManager      *AppManager
+	Container       container.Container
+	activeObservers map[string]*AppStateObserver
+	// spawnerSupervised latches once the container-event spawner has been
+	// handed to its supervisor (superviseObserverSpawner), which owns
+	// restarting it across Docker daemon outages for the rest of the agent's
+	// lifetime.
+	spawnerSupervised bool
+	observerMapMutex  sync.Mutex
+	// pollingRate is the cadence of the per-app container status polls. A
+	// field (defaulted by NewObserver), not a const, so tests can shorten it.
+	pollingRate time.Duration
+	// daemonTransitionFn, when set, is poked by the spawner supervisor on a
+	// presumed Docker daemon transition (event stream lost, daemon returned)
+	// so the device status — which probes daemon health live at send time —
+	// is re-published immediately instead of waiting for the next heartbeat.
+	// Guarded by daemonTransitionMu: the supervisor can start (and even lose
+	// its stream) before the agent has wired the callback.
+	daemonTransitionFn func()
+	daemonTransitionMu sync.Mutex
 }
 
 func NewObserver(container container.Container, appStore *store.AppStore, logManager *logging.LogManager) StateObserver {
@@ -67,6 +82,7 @@ func NewObserver(container container.Container, appStore *store.AppStore, logMan
 		AppStore:        appStore,
 		LogManager:      logManager,
 		activeObservers: make(map[string]*AppStateObserver),
+		pollingRate:     time.Second,
 	}
 }
 
@@ -555,6 +571,13 @@ func (so *StateObserver) CorrectAppStates(updateRemote bool) error {
 	return nil
 }
 
+// transientFailureLogInterval dampens the observers' per-tick error logging
+// while the Docker daemon is unreachable: the first failure is logged, then
+// one in every transientFailureLogInterval (once a minute at the 1s polling
+// cadence). Without it a daemon outage produces one error line per app per
+// second for the whole outage.
+const transientFailureLogInterval = 60
+
 // sleepCtx sleeps for d or until ctx is cancelled; it reports whether the
 // caller should continue (false = cancelled, stop observing).
 func sleepCtx(ctx context.Context, d time.Duration) bool {
@@ -568,10 +591,11 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 
 func (so *StateObserver) observeAppState(observerCtx context.Context, stage common.Stage, appKey uint64, appName string) chan error {
 	errorC := make(chan error, 1)
-	pollingRate := time.Second * 1
+	pollingRate := so.pollingRate
 
 	safe.Go(func() {
 		lastKnownStatus := "UKNOWN"
+		transientFailures := 0
 
 		defer func() {
 			so.removeOwnObserver(common.BuildContainerName(stage, appKey, appName), observerCtx)
@@ -588,8 +612,21 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 			state, err := so.Container.GetContainerState(ctx, containerName)
 			if err != nil {
 				if !errdefs.IsContainerNotFound(err) {
-					errorC <- err
-					return
+					// Not a statement about the container but about the
+					// daemon: the poll itself failed (daemon restart/outage,
+					// transient API error). Exiting here used to tear the
+					// observer down for the rest of a daemon outage, so a
+					// container that came back stopped kept being reported
+					// RUNNING. Keep polling instead, like the compose
+					// observer does.
+					transientFailures++
+					if transientFailures == 1 || transientFailures%transientFailureLogInterval == 0 {
+						log.Error().Err(err).Msgf("failed to poll container state for %s (%d consecutive failures); keeping the observer alive", containerName, transientFailures)
+					}
+					if !sleepCtx(observerCtx, pollingRate) {
+						return
+					}
+					continue
 				}
 
 				// if the container doesn't exist anymore, need to make sure app is in the stopped state
@@ -610,6 +647,11 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 
 				log.Debug().Msgf("No container was found for %s, removing observer..", containerName)
 				return
+			}
+
+			if transientFailures > 0 {
+				log.Info().Msgf("container state polling for %s recovered after %d failed attempts", containerName, transientFailures)
+				transientFailures = 0
 			}
 
 			// check if correct and update database if needed
@@ -764,10 +806,11 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 	// `docker compose ls` + `docker compose ps` per tick — four OS processes
 	// per app per second, which pinned dockerd on small devices; never poll
 	// via the compose CLI here again.)
-	pollingRate := time.Second * 1
+	pollingRate := so.pollingRate
 
 	safe.Go(func() {
 		var lastKnownStatus common.AppState
+		transientFailures := 0
 		composeAppName := common.BuildComposeContainerName(stage, appKey, appName)
 
 		defer func() {
@@ -788,12 +831,22 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 				}
 
 				// Transient daemon errors must not hot-loop: the old CLI
-				// variant re-spawned processes back-to-back on this path.
-				log.Error().Err(err).Msgf("Failed to list containers for compose app %s", composeAppName)
+				// variant re-spawned processes back-to-back on this path. And
+				// during a daemon outage this fails on every tick, so log the
+				// first failure and dampen the rest.
+				transientFailures++
+				if transientFailures == 1 || transientFailures%transientFailureLogInterval == 0 {
+					log.Error().Err(err).Msgf("Failed to list containers for compose app %s (%d consecutive failures); keeping the observer alive", composeAppName, transientFailures)
+				}
 				if !sleepCtx(observerCtx, pollingRate) {
 					return
 				}
 				continue
+			}
+
+			if transientFailures > 0 {
+				log.Info().Msgf("compose container polling for %s recovered after %d failed attempts", composeAppName, transientFailures)
+				transientFailures = 0
 			}
 
 			if len(containers) == 0 {
@@ -952,17 +1005,18 @@ func (so *StateObserver) initObserverSpawner() chan error {
 
 				}
 			case err := <-errC:
+				// The docker client delivers exactly one error per Events
+				// stream and never reopens it on its own. Reopening — and
+				// reconciling whatever happened while the stream was down —
+				// is the supervisor's job; see superviseObserverSpawner.
 				errChan <- err
 				log.Error().Err(err).Msg("Error during observer spawner")
 				close(errChan)
-
-				so.spawnerActive = false
 				break loop
 			}
 		}
 	})
 
-	so.spawnerActive = true
 	return errChan
 }
 
@@ -1001,8 +1055,13 @@ func (so *StateObserver) ObserveAppStates() error {
 
 	}
 
-	if !so.spawnerActive {
-		so.initObserverSpawner()
+	so.observerMapMutex.Lock()
+	startSupervisor := !so.spawnerSupervised
+	so.spawnerSupervised = true
+	so.observerMapMutex.Unlock()
+
+	if startSupervisor {
+		so.superviseObserverSpawner()
 	}
 
 	return err

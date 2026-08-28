@@ -554,13 +554,19 @@ func (lm *LogManager) ReviveDeadLogs() error {
 				existingEntry.subscriptionStateMutex.Unlock()
 			}
 
+			// A failed or empty subscription lookup must not kill the whole
+			// revive sweep (indexing result.Arguments[0] on an errored call
+			// panicked, and this loop covers every app): treat it as "no
+			// remote subscriber" and still reattach the stream so log history
+			// keeps accumulating.
+			var id interface{}
 			ctx := context.Background()
 			result, err := lm.Messenger.Call(ctx, topics.MetaProcMatchSubscription, []interface{}{topic}, nil, nil, nil)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to lookup subscription")
+			} else if len(result.Arguments) > 0 {
+				id = result.Arguments[0]
 			}
-
-			id := result.Arguments[0]
 
 			composeAppName := common.BuildComposeContainerName(app.Stage, app.AppKey, app.AppName)
 			var composeApp *container.ComposeListEntry

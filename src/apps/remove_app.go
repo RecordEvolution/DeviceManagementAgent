@@ -58,7 +58,7 @@ func (sm *StateMachine) removeComposeApp(payload common.TransitionPayload, app *
 	compose := sm.Container.Compose()
 	// Need to remove it anyway even if it's not supported
 
-	if !compose.Supported {
+	if !compose.Supported() {
 		err = sm.setState(app, common.REMOVED)
 		if err != nil {
 			return err

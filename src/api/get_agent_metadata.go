@@ -8,6 +8,7 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger"
 	"reagent/release"
+	"time"
 )
 
 func (ex *External) getAgentMetadataHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
@@ -40,6 +41,14 @@ func (ex *External) getAgentMetadataHandler(ctx context.Context, response messen
 	// never matched "windows" — it carries the detailed OS name).
 	if ex.TunnelManager != nil {
 		dict["tunnelCapable"] = ex.TunnelManager.TunnelCapable()
+	}
+
+	// Live Docker daemon health, matching the heartbeat's docker_available.
+	if ex.Container != nil {
+		pingCtx, cancelPing := context.WithTimeout(ctx, time.Second*3)
+		_, pingErr := ex.Container.Ping(pingCtx)
+		cancelPing()
+		dict["dockerAvailable"] = pingErr == nil
 	}
 
 	// frpc is now embedded in the binary
