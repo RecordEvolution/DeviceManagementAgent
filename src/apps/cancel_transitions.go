@@ -80,26 +80,29 @@ func (sm *StateMachine) cancelPush(payload common.TransitionPayload, app *common
 // Compose transitions (pull/up/update) run via the docker compose CLI (not a
 // docker-API stream), so CancelStream can't reach them — they are canceled
 // through the transition's registered context, which kills the CLI. The
-// non-compose path cancels the docker-API pull stream; DEV apps additionally
-// get their in-flight build canceled. No-op if nothing is in flight, and a
-// best effort otherwise: work outside these cancel points (a registry login, a
-// compose up/down) finishes or times out on its own.
+// single-container flow cancels the docker-API pull stream; DEV apps
+// additionally get their in-flight build canceled. No-op if nothing is in
+// flight, and a best effort otherwise: work outside these cancel points (a
+// registry login, a compose up/down) finishes or times out on its own.
+//
+// BOTH mechanisms are fired rather than picking one by payload.DockerCompose.
+// That marker describes the INSTALLED release, and an update that migrates the
+// app between the flows runs the other flow's cancelable work: a legacy install
+// updating to a compose release is inside `docker compose pull`, and a compose
+// install updating to a single-container release is inside a docker-API pull.
+// Choosing by the marker addressed the wrong one in exactly those two cases and
+// the cancel was silently lost — the user's stop did nothing and the transition
+// ran to completion. Each cancel is a no-op when its side has nothing
+// registered, so firing both costs nothing.
 func (sm *StateMachine) interruptActiveTransition(payload common.TransitionPayload) {
-	if payload.DockerCompose != nil {
-		sm.cancelComposeTransition(payload.Stage, payload.AppKey)
-
-		if payload.Stage == common.DEV {
-			buildID := common.BuildDockerBuildID(payload.AppKey, payload.AppName)
-			sm.Container.Compose().CancelBuild(buildID) // ignore error — no build may be in flight
-		}
-		return
-	}
+	sm.cancelComposeTransition(payload.Stage, payload.AppKey)
 
 	pullID := common.BuildDockerPullID(payload.AppKey, payload.AppName)
 	sm.Container.CancelStream(pullID)
 
 	if payload.Stage == common.DEV {
 		buildID := common.BuildDockerBuildID(payload.AppKey, payload.AppName)
+		sm.Container.Compose().CancelBuild(buildID) // ignore error — no build may be in flight
 		sm.Container.CancelStream(buildID)
 	}
 }

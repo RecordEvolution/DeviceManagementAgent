@@ -650,6 +650,9 @@ func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 			// SetupComposeFiles now recovers published ports via the Docker API
 			// (not `docker compose ps`); the teardown path reaches it.
 			mc.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
+			// interruptActiveTransition fires both cancel mechanisms; the
+			// docker-API side has no active stream here and reports so.
+			mc.EXPECT().CancelStream(mock.Anything).Return(nil).Maybe()
 
 			amSeed(t, st, 62, "cancelme", common.UPDATING, common.PROD)
 
@@ -674,21 +677,44 @@ func TestRequestAppStateCancelsUpdateForTeardownStates(t *testing.T) {
 
 // interruptActiveTransition is the shared cancellation used by every UPDATING
 // teardown transition and by teardown requests that hit a held transition
-// lock. It cancels the compose transition's context for a compose app (killing
-// the CLI) and the docker-API pull stream for a plain app; DEV apps get their
-// build canceled too.
+// lock. It fires BOTH cancel mechanisms — the compose transition's context
+// (killing the CLI) and the docker-API pull stream — because payload
+// .DockerCompose describes the INSTALLED release while an update that migrates
+// the app between the flows runs the other flow's cancelable work. Each is a
+// no-op when its side has nothing in flight.
 func TestInterruptActiveTransitionCancelsComposeAndStream(t *testing.T) {
 	t.Run("compose app cancels the update context", func(t *testing.T) {
-		am, _, _, _, _, _ := amHarness(t)
+		am, mc, _, _, _, _ := amHarness(t)
 
 		canceled := false
 		am.StateMachine.registerComposeTransitionCancel(common.PROD, 64, func() { canceled = true })
+
+		mc.EXPECT().CancelStream(mock.Anything).Return(nil).Once()
 
 		payload := amPayload(64, "compose", common.PRESENT, common.PROD)
 		payload.DockerCompose = updComposeMap()
 
 		am.StateMachine.interruptActiveTransition(payload)
-		assert.True(t, canceled, "a compose update is canceled via its context, not CancelStream")
+		assert.True(t, canceled, "a compose update is canceled via its context")
+	})
+
+	t.Run("a legacy install updating to a compose release cancels the compose CLI", func(t *testing.T) {
+		am, mc, _, _, _, _ := amHarness(t)
+
+		// The marker says legacy (that IS the installed release), but the work
+		// in flight is `docker compose pull` for the target. Picking the
+		// mechanism by the marker lost this cancel entirely.
+		canceled := false
+		am.StateMachine.registerComposeTransitionCancel(common.PROD, 68, func() { canceled = true })
+
+		mc.EXPECT().CancelStream(mock.Anything).Return(nil).Once()
+
+		payload := amPayload(68, "tocompose", common.PRESENT, common.PROD)
+		payload.DockerCompose = nil
+		payload.NewDockerCompose = updComposeMap()
+
+		am.StateMachine.interruptActiveTransition(payload)
+		assert.True(t, canceled, "the in-flight compose pull must be cancelable")
 	})
 
 	t.Run("plain app cancels the docker-API pull stream", func(t *testing.T) {
@@ -707,6 +733,9 @@ func TestInterruptActiveTransitionCancelsComposeAndStream(t *testing.T) {
 		am, mc, _, _, _, _ := amHarness(t)
 
 		mc.EXPECT().CancelStream(mock.Anything).Return(nil).Twice()
+		// CancelBuild only consults the compose process registry; a zero-value
+		// Compose simply reports no active build.
+		mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
 
 		payload := amPayload(66, "plaindev", common.PRESENT, common.DEV)
 		payload.DockerCompose = nil // non-compose
@@ -724,6 +753,8 @@ func TestInterruptActiveTransitionCancelsComposeAndStream(t *testing.T) {
 		// CancelBuild only consults the compose process registry; a zero-value
 		// Compose simply reports no active build, which interrupt ignores.
 		mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
+		// The docker-API side (pull + build stream) has nothing in flight.
+		mc.EXPECT().CancelStream(mock.Anything).Return(nil).Twice()
 
 		payload := amPayload(67, "composedev", common.PRESENT, common.DEV)
 		payload.DockerCompose = updComposeMap()
@@ -742,14 +773,17 @@ func TestInterruptActiveTransitionCancelsComposeAndStream(t *testing.T) {
 // =============================================================================
 
 func TestUpdateComposeAppGuards(t *testing.T) {
+	// The stage and version guards live on updateApp, the single entry point
+	// both flows are routed from, so they are exercised through it.
 	t.Run("rejects dev apps", func(t *testing.T) {
 		sm, _, _, _, _ := wiredRunBuildSM(t)
 
 		app := updSeedAt(t, sm, "compose-dev", common.PRESENT, "1.0.0")
 		payload := updRequest("compose-dev", common.PRESENT, "1.0.0", "2.0.0")
 		payload.Stage = common.DEV
+		payload.NewDockerCompose = updComposeMap()
 
-		err := sm.updateComposeApp(payload, app)
+		err := sm.updateApp(payload, app)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot update dev app")
 	})
@@ -759,10 +793,24 @@ func TestUpdateComposeAppGuards(t *testing.T) {
 
 		app := updSeedAt(t, sm, "compose-same", common.PRESENT, "2.0.0")
 		payload := updRequest("compose-same", common.PRESENT, "2.0.0", "2.0.0")
+		payload.NewDockerCompose = updComposeMap()
 
-		err := sm.updateComposeApp(payload, app)
+		err := sm.updateApp(payload, app)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already equal to the newest version")
+	})
+
+	t.Run("rejects an update with no target release", func(t *testing.T) {
+		sm, _, _, _, _ := wiredRunBuildSM(t)
+
+		app := updSeedAt(t, sm, "compose-no-target", common.PRESENT, "1.0.0")
+		payload := updRequest("compose-no-target", common.PRESENT, "1.0.0", "")
+		payload.DockerCompose = updComposeMap()
+
+		// The strict mock proves nothing was pulled or torn down.
+		err := sm.updateApp(payload, app)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no release available to update to")
 	})
 
 	t.Run("reports compose being unsupported instead of downloading", func(t *testing.T) {
@@ -778,4 +826,92 @@ func TestUpdateComposeAppGuards(t *testing.T) {
 		assert.True(t, errdefs.IsDockerComposeNotSupported(err),
 			"expected a compose-unsupported error, got %v", err)
 	})
+}
+
+// =============================================================================
+// updateApp — flow routing
+//
+// A release decides which flow its app runs under: a docker-compose.yml makes
+// it a compose project, a bare Dockerfile makes it a single container. An
+// update can therefore change the flow, and it is the TARGET release
+// (NewDockerCompose) that says which one to install — not the installed one
+// (DockerCompose), which describes the version being replaced.
+// =============================================================================
+
+func TestUpdateAppRoutesOnTheTargetRelease(t *testing.T) {
+	t.Run("compose install updating to a single-container release pulls the image", func(t *testing.T) {
+		sm, mc, _, _, _ := wiredRunBuildSM(t)
+
+		app := updSeedAt(t, sm, "to-legacy", common.PRESENT, "1.0.0")
+		payload := updRequest("to-legacy", common.PRESENT, "1.0.0", "2.0.0")
+		payload.DockerCompose = updComposeMap() // installed: compose
+		payload.NewDockerCompose = nil          // target: single container
+
+		mc.EXPECT().HandleRegistryLogins(mock.Anything).Return(nil).Once()
+		mc.EXPECT().
+			Pull(mock.Anything, mock.Anything, mock.Anything).
+			Return(fwdDockerStream(), nil).
+			Once()
+		// The predecessor is a compose project: torn down through the compose
+		// CLI, not through GetContainer/RemoveContainerByID. A zero-value
+		// Compose reports itself unsupported, which short-circuits the teardown
+		// without shelling out.
+		mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
+		fwdAllowLogs(mc)
+
+		require.NoError(t, sm.updateApp(payload, app))
+
+		app.StateLock.Lock()
+		version := app.Version
+		app.StateLock.Unlock()
+		assert.Equal(t, "2.0.0", version, "the new version must be recorded as installed")
+	})
+
+	t.Run("single-container install updating to a compose release routes compose", func(t *testing.T) {
+		sm, mc, _, _, _ := wiredRunBuildSM(t)
+
+		app := updSeedAt(t, sm, "to-compose", common.PRESENT, "1.0.0")
+		payload := updRequest("to-compose", common.PRESENT, "1.0.0", "2.0.0")
+		payload.DockerCompose = nil                // installed: single container
+		payload.NewDockerCompose = updComposeMap() // target: compose
+
+		// Reaching the compose-unsupported guard IS the assertion: the compose
+		// path was taken. The strict mock proves no image was pulled through
+		// the single-container path, which is what used to 404 here.
+		mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
+
+		err := sm.updateApp(payload, app)
+		require.Error(t, err)
+		assert.True(t, errdefs.IsDockerComposeNotSupported(err),
+			"expected the compose path to be taken, got %v", err)
+	})
+}
+
+// A completed update promotes the target definition to the active one in the
+// persisted requested state — including promoting it to nil. That row is what
+// every later transition (and the offline re-drive in
+// EnsureLocalRequestedStates) routes on, so a migrated app that kept the old
+// marker would go on managing a flow it no longer runs under.
+func TestUpdateAppPromotesTheInstalledFlowMarker(t *testing.T) {
+	sm, mc, st, _, _ := wiredRunBuildSM(t)
+
+	app := updSeedAt(t, sm, "promote", common.PRESENT, "1.0.0")
+	payload := updRequest("promote", common.PRESENT, "1.0.0", "2.0.0")
+	payload.DockerCompose = updComposeMap()
+	payload.NewDockerCompose = nil
+
+	mc.EXPECT().HandleRegistryLogins(mock.Anything).Return(nil).Once()
+	mc.EXPECT().
+		Pull(mock.Anything, mock.Anything, mock.Anything).
+		Return(fwdDockerStream(), nil).
+		Once()
+	mc.EXPECT().Compose().Return(&containerpkg.Compose{}).Once()
+	fwdAllowLogs(mc)
+
+	require.NoError(t, sm.updateApp(payload, app))
+
+	persisted, err := st.GetRequestedState(payload.AppKey, payload.Stage)
+	require.NoError(t, err)
+	assert.Nil(t, persisted.DockerCompose,
+		"the app now runs as a single container; the compose marker must be gone")
 }

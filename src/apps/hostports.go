@@ -160,6 +160,28 @@ func (r *HostPortRegistry) ReassignFresh(key hostPortKey) (uint64, error) {
 	return r.reserveFreeLocked(key)
 }
 
+// ReleaseAppFlow frees the ports an app holds under ONE of the two flows:
+// compose reservations (service-qualified keys) or single-container ones
+// (Service ""). An update that migrates an app between the flows must drop the
+// reservations of the flow it is leaving — nothing will ever look those keys up
+// again, so they would hold their pool ports until the agent restarts — without
+// touching the ones the incoming flow has already made for itself.
+func (r *HostPortRegistry) ReleaseAppFlow(stage common.Stage, appKey uint64, composeFlow bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for key, port := range r.assigned {
+		if key.Stage != stage || key.AppKey != appKey {
+			continue
+		}
+		if (key.Service != "") != composeFlow {
+			continue
+		}
+		delete(r.assigned, key)
+		delete(r.inUse, port)
+	}
+}
+
 // ReleaseApp frees every port held by an app. Called on uninstall/remove
 // only — stopped apps keep their reservations so restarts get the same port.
 func (r *HostPortRegistry) ReleaseApp(stage common.Stage, appKey uint64) {

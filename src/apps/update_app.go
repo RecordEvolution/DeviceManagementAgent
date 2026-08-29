@@ -16,19 +16,51 @@ func (sm *StateMachine) getUpdateTransition(payload common.TransitionPayload, ap
 	return sm.updateApp
 }
 
+// updateApp installs the newest release, migrating the app between the
+// single-container (legacy) and compose flows when the release it installs
+// changes which one the app runs under.
+//
+// Routing is by the release this update INSTALLS (NewDockerCompose), not by the
+// one currently installed (DockerCompose). Routing by the installed release
+// made a flow change unreachable in both directions:
+//
+//   - legacy install -> compose release took the legacy path and pulled
+//     "<stage>_<arch>_<appkey>_<name>:<version>", an image no compose release
+//     ever pushed. The update 404'd until the user uninstalled and reinstalled.
+//   - compose install -> legacy release took the compose path, where
+//     SetupComposeFiles falls back to the OLD definition when there is no new
+//     one: the app was "updated" by re-pulling the version it already ran,
+//     while the cloud was told it now had the new one.
 func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.App) error {
-	if payload.DockerCompose != nil {
-		return sm.updateComposeApp(payload, app)
-	}
-
 	if payload.Stage == common.DEV {
 		return errors.New("cannot update dev app")
+	}
+
+	// Routing by the target is only meaningful with a target. An empty
+	// NewestVersion means the sync carried no installable release (none exists
+	// for this architecture, or the app was deleted from the store); the legacy
+	// path would pull "<image>:" and the compose path would re-render the
+	// running definition, both then reporting a version that was never
+	// installed.
+	if payload.NewestVersion == "" {
+		return errors.New("no release available to update to")
 	}
 
 	if payload.NewestVersion == app.Version {
 		return errors.New("the app is already equal to the newest version")
 	}
 
+	if payload.NewDockerCompose != nil {
+		return sm.updateComposeApp(payload, app)
+	}
+
+	return sm.updateLegacyApp(payload, app)
+}
+
+// updateLegacyApp installs a single-container release. The app it replaces may
+// itself be a compose project (a release that dropped its docker-compose.yml
+// for a plain Dockerfile) — that whole project is torn down below.
+func (sm *StateMachine) updateLegacyApp(payload common.TransitionPayload, app *common.App) error {
 	err := sm.setState(app, common.UPDATING)
 	if err != nil {
 		return err
@@ -94,29 +126,23 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return streamErr
 	}
 
-	// The new image is local; only now is the old container removed. From here
+	// The new image is local; only now is the old version removed. From here
 	// on a failure is retried against a completed download, so the app's
 	// downtime is limited to this teardown plus the restart VerifyState drives.
-	getContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	cont, err := sm.Container.GetContainer(getContainerContext, payload.ContainerName.Prod)
-	if err == nil {
-
-		removeContainerByIdContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-		err = sm.Container.RemoveContainerByID(removeContainerByIdContext, cont.ID, map[string]interface{}{"force": true})
+	if payload.DockerCompose != nil {
+		// compose -> legacy: the predecessor is a whole compose project, not a
+		// container under payload.ContainerName.Prod. Leaving it standing would
+		// keep the old services running (and holding their host ports) forever
+		// while the cloud reports the new single-container version as installed.
+		err = sm.tearDownComposeInstall(payload, app)
 		if err != nil {
 			return err
 		}
 
-		pollContainerStateContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-
-		// should return 'container not found' error, this way we know it's removed successfully
-		_, errC := sm.Container.PollContainerState(pollContainerStateContext, cont.ID, time.Second)
-		err := <-errC
-		if !errdefs.IsContainerNotFound(err) {
+		sm.releaseSupersededHostPorts(payload, true)
+	} else {
+		err = sm.removeLegacyProdContainer(payload)
+		if err != nil {
 			return err
 		}
 	}
@@ -139,11 +165,16 @@ func (sm *StateMachine) updateApp(payload common.TransitionPayload, app *common.
 		return err
 	}
 
-	removeImageByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
+	// The superseded image. Only for a legacy predecessor: a compose one has no
+	// image under this name, and tearDownComposeInstall already reclaimed its
+	// service images.
+	if payload.DockerCompose == nil {
+		removeImageByNameContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
 
-	log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
-	sm.Container.RemoveImageByName(removeImageByNameContext, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
+		log.Debug().Msgf("Removing Old Image %s:%s", payload.RegistryImageName.Prod, payload.PresentVersion)
+		sm.Container.RemoveImageByName(removeImageByNameContext, payload.RegistryImageName.Prod, payload.PresentVersion, map[string]interface{}{"force": true})
+	}
 
 	// The state validation will ensure it will reach it's requestedState again
 	return sm.persistPostUpdateRequestedState(payload, app)
@@ -168,6 +199,14 @@ func (sm *StateMachine) persistPostUpdateRequestedState(payload common.Transitio
 	payload.PresentVersion = app.Version
 	payload.Version = app.Version
 
+	// Promote the installed release's definition to the active one. This is the
+	// flow marker every later transition routes on (run/stop/remove, and the
+	// offline re-drive out of EnsureLocalRequestedStates, which reads exactly
+	// this row) — so it has to be promoted on BOTH update paths, nil included:
+	// a compose app that updated to a single-container release must come back
+	// as a legacy app, not keep managing a project that no longer exists.
+	payload.DockerCompose = payload.NewDockerCompose
+
 	app.StateLock.Lock()
 	payload.RequestedState = app.RequestedState
 	app.StateLock.Unlock()
@@ -187,15 +226,10 @@ func composeTransitionErr(ctx context.Context, err error) error {
 	return err
 }
 
+// updateComposeApp installs a compose release. The app it replaces may be a
+// single-container legacy install (a release that gained a docker-compose.yml)
+// — that container is removed below.
 func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *common.App) error {
-	if payload.Stage == common.DEV {
-		return errors.New("cannot update dev app")
-	}
-
-	if payload.NewestVersion == app.Version {
-		return errors.New("the app is already equal to the newest version")
-	}
-
 	// Validate the NEW definition before touching the running app. The engine
 	// would reject a broken bind mount only at container-create time — after
 	// the teardown below has already destroyed the working old version. A
@@ -283,6 +317,19 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		return composeTransitionErr(ctx, err)
 	}
 
+	// legacy -> compose: the predecessor runs as a single container that no
+	// compose project owns, so the teardown above does not touch it. It would
+	// otherwise keep running — and keep its host ports bound — while the new
+	// project tried to start alongside it.
+	if payload.DockerCompose == nil {
+		err = sm.removeLegacyProdInstall(payload)
+		if err != nil {
+			return err
+		}
+
+		sm.releaseSupersededHostPorts(payload, false)
+	}
+
 	pullMessage := fmt.Sprintf("Succesfully installed the app: %s (Version: %s)", payload.AppName, payload.NewestVersion)
 	writeErr := sm.LogManager.Write(payload.ContainerName.Prod, pullMessage)
 	if writeErr != nil {
@@ -303,10 +350,8 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 
 	// TODO: remove old images from docker-compose
 
-	// Promote the new compose definition to the active one, then record the
-	// completed update (versions + the app's current target).
-	payload.DockerCompose = payload.NewDockerCompose
-
 	// The state validation will ensure it will reach it's requestedState again
+	// (persistPostUpdateRequestedState promotes the new definition to the
+	// active one).
 	return sm.persistPostUpdateRequestedState(payload, app)
 }

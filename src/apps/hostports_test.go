@@ -145,6 +145,55 @@ func TestReleaseApp(t *testing.T) {
 	assert.Equal(t, portOther, stillThere)
 }
 
+// An update that migrates an app between the compose and single-container
+// flows releases only the flow it leaves. A blanket ReleaseApp there would hand
+// back the ports the incoming flow has already reserved for itself — the
+// compose path renders (and reserves) the new project's ports before the old
+// install is torn down.
+func TestReleaseAppFlowReleasesOnlyTheDepartingFlow(t *testing.T) {
+	reg := newTestRegistry()
+
+	legacy := testKey(1, 8080)
+	composeA := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "http", Port: 8080, Service: "web"}
+	composeB := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 5000, Service: "db"}
+	otherApp := testKey(2, 8080)
+
+	legacyPort, _ := reg.RecoverOrReserve(legacy, 0)
+	composeAPort, _ := reg.RecoverOrReserve(composeA, 0)
+	_, _ = reg.RecoverOrReserve(composeB, 0)
+	otherPort, _ := reg.RecoverOrReserve(otherApp, 0)
+
+	// legacy -> compose: only the unqualified key goes.
+	reg.ReleaseAppFlow(common.PROD, 1, false)
+
+	_, ok := reg.Get(legacy)
+	assert.False(t, ok, "the superseded single-container reservation must be released")
+	got, ok := reg.Get(composeA)
+	assert.True(t, ok, "the incoming compose reservations must survive")
+	assert.Equal(t, composeAPort, got)
+	_, ok = reg.Get(composeB)
+	assert.True(t, ok)
+
+	// The freed port is handed out again; the compose ones are still held.
+	reclaimed, _ := reg.RecoverOrReserve(testKey(3, 1000), legacyPort)
+	assert.Equal(t, legacyPort, reclaimed)
+	sameAsCompose, _ := reg.RecoverOrReserve(testKey(3, 2000), composeAPort)
+	assert.NotEqual(t, composeAPort, sameAsCompose, "a held compose port must not be reissued")
+
+	// compose -> legacy: now the service-qualified keys go.
+	reg.ReleaseAppFlow(common.PROD, 1, true)
+
+	_, ok = reg.Get(composeA)
+	assert.False(t, ok)
+	_, ok = reg.Get(composeB)
+	assert.False(t, ok)
+
+	// Another app is never touched.
+	stillThere, ok := reg.Get(otherApp)
+	assert.True(t, ok)
+	assert.Equal(t, otherPort, stillThere)
+}
+
 func TestGetByPortFindsComposeServiceAssignments(t *testing.T) {
 	reg := newTestRegistry()
 
