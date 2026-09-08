@@ -272,6 +272,7 @@ func (am *AppStore) FetchRequestedAppStates() ([]common.TransitionPayload, error
 		payload.EnvironmentTemplate = deviceSyncState.EnvironmentTemplate
 		payload.Ports = deviceSyncState.Ports
 		payload.AppCredEpoch = deviceSyncState.AppCredEpoch
+		payload.DockerCredentials = common.NormalizeDockerCredentialKeys(deviceSyncState.DockerCredentials)
 
 		appPayloads = append(appPayloads, payload)
 	}

@@ -212,4 +212,9 @@ type DeviceSyncResponse struct {
 	AppKey                 uint64                 `json:"app_key"`
 	// Generation of this app's per-app WAMP credential; absent (0) = epoch 1.
 	AppCredEpoch uint64 `json:"app_cred_epoch"`
+	// Third-party registry credentials for the app's external images, keyed by
+	// registry host. The backend only emits them for DEV-stage rows (the
+	// developer's own devices) — PROD releases are re-hosted into the store
+	// registry at publish time and never need them.
+	DockerCredentials map[string]DockerCredential `json:"docker_credentials"`
 }

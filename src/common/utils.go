@@ -54,6 +54,39 @@ func BuildRegistryImageName(registryURL string, mainRepositoryName string, image
 	return strings.ToLower(fmt.Sprintf("%s%s%s", registryURL, mainRepositoryName, imageName))
 }
 
+// NormalizeRegistryHost reduces any registry reference to the canonical
+// `host[:port]` form used as the docker_credentials map key across the whole
+// platform (UI, backend, SQL and agent apply the same rule): trimmed, scheme
+// stripped, anything after the first "/" dropped, lowercased.
+// `https://MyRegistry.azurecr.io/repo/` → `myregistry.azurecr.io`. Registry
+// hosts are case-insensitive and image refs only ever carry the lowercase
+// form, so lookups against user-typed keys must go through this.
+func NormalizeRegistryHost(entry string) string {
+	entry = strings.TrimSpace(entry)
+	entry = strings.TrimPrefix(entry, "http://")
+	entry = strings.TrimPrefix(entry, "https://")
+	entry, _, _ = strings.Cut(entry, "/")
+	return strings.ToLower(entry)
+}
+
+// NormalizeDockerCredentialKeys rekeys a credential map by the canonical
+// registry-host form, dropping entries whose key normalizes to nothing.
+// Backends and the UI normalize before storing, but payloads authored before
+// that (or hand-edited rows) may still carry `https://…`, trailing-slash or
+// mixed-case keys.
+func NormalizeDockerCredentialKeys(credentials map[string]DockerCredential) map[string]DockerCredential {
+	if credentials == nil {
+		return nil
+	}
+	normalized := make(map[string]DockerCredential, len(credentials))
+	for host, credential := range credentials {
+		if key := NormalizeRegistryHost(host); key != "" {
+			normalized[key] = credential
+		}
+	}
+	return normalized
+}
+
 func BuildAgentUpdateProgress(serialNumber string) string {
 	return fmt.Sprintf("%s.%s.%s", topicPrefix, serialNumber, topics.AgentProgress)
 }

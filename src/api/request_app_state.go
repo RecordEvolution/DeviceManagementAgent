@@ -354,8 +354,15 @@ func responseToTransitionPayload(config *config.Config, result messenger.Result)
 				return common.TransitionPayload{}, fmt.Errorf("%w docker credentials", errdefs.ErrFailedToParse)
 			}
 
+			// Key by the canonical host form so lookups by image-ref host
+			// match regardless of how the user spelled the registry.
+			host := common.NormalizeRegistryHost(key)
+			if host == "" {
+				continue
+			}
+
 			// Assign the credentials to the output map
-			dockerCredentials[key] = common.DockerCredential{
+			dockerCredentials[host] = common.DockerCredential{
 				Username: username,
 				Password: password,
 			}

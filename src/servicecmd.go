@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reagent/common"
 	"reagent/config"
 	"strings"
 )
@@ -93,11 +94,10 @@ func splitCommandLine(s string) []string {
 // normalizeRegistryHost reduces a registry reference from the .flock to the
 // `host[:port]` form Docker matches insecure-registries against: no scheme,
 // no trailing slash (`136.230.111.59:15001/` → `136.230.111.59:15001`).
+// Delegates to the platform-wide canonical rule so daemon.json entries and
+// docker_credentials keys can never diverge.
 func normalizeRegistryHost(entry string) string {
-	entry = strings.TrimSpace(entry)
-	entry = strings.TrimPrefix(entry, "http://")
-	entry = strings.TrimPrefix(entry, "https://")
-	return strings.TrimRight(entry, "/")
+	return common.NormalizeRegistryHost(entry)
 }
 
 // hostHasPort reports whether a normalized registry reference carries an

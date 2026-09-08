@@ -211,6 +211,8 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 		return err
 	}
 
+	sm.warnUncredentialedComposeRegistries(payload, payload.DockerCompose, payload.ContainerName.Dev)
+
 	err = teardownComposeProject(compose, dockerComposePath)
 	if err != nil {
 		return err
@@ -306,6 +308,8 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		}
 		return err
 	}
+
+	sm.warnUncredentialedComposeRegistries(payload, payload.DockerCompose, payload.ContainerName.Prod)
 
 	// Decide up front whether this is a FRESH INSTALL whose service images
 	// still have to be downloaded. `compose up` pulls missing images

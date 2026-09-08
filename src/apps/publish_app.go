@@ -7,7 +7,6 @@ import (
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
-	"strings"
 	"time"
 )
 
@@ -173,30 +172,6 @@ func (sm *StateMachine) publishComposeApp(payload common.TransitionPayload, app 
 	return nil
 }
 
-// registryHostOfImage returns the registry host of an image reference,
-// following docker's own convention: the first path component is a registry
-// host only when it contains '.' or ':' or is exactly "localhost"; every
-// other reference lives on Docker Hub.
-func registryHostOfImage(imageRef string) string {
-	firstComponent, _, found := strings.Cut(imageRef, "/")
-	if found && (strings.ContainsAny(firstComponent, ".:") || firstComponent == "localhost") {
-		return firstComponent
-	}
-	return "docker.io"
-}
-
-// credentialForRegistryHost resolves the credential entry for a registry host,
-// tolerating a trailing slash on the configured host (the appstore transfer's
-// buildImageTransfer matches the same two spellings). A miss yields empty
-// credentials, i.e. an anonymous pull.
-func credentialForRegistryHost(credentials map[string]common.DockerCredential, host string) container.AuthConfig {
-	cred, found := credentials[host]
-	if !found {
-		cred = credentials[host+"/"]
-	}
-	return container.AuthConfig{Username: cred.Username, Password: cred.Password}
-}
-
 // rehostSourceImages makes a release self-contained: f_create_release rewrites
 // every service's image to a store-registry name and keeps the authored
 // external ref of image-only services in the x-source-image extension field.
@@ -235,13 +210,28 @@ func (sm *StateMachine) rehostSourceImages(payload common.TransitionPayload) err
 			return err
 		}
 
+		sourceHost := registryHostOfImage(sourceImage)
+		authConfig, credentialFound := credentialForRegistryHost(payload.DockerCredentials, sourceHost)
+		if !credentialFound {
+			err = sm.LogManager.Write(payload.PublishContainerName, registryCredentialMissMessage(sourceHost))
+			if err != nil {
+				return err
+			}
+		}
+
 		pullOptions := container.PullOptions{
-			AuthConfig: credentialForRegistryHost(payload.DockerCredentials, registryHostOfImage(sourceImage)),
+			AuthConfig: authConfig,
 			PullID:     common.BuildDockerPullID(payload.AppKey, payload.AppName),
 		}
 
 		pullReader, err := sm.Container.Pull(context.Background(), sourceImage, pullOptions)
 		if err != nil {
+			if isRegistryAuthError(err) {
+				if !credentialFound {
+					return fmt.Errorf("registry %s rejected the pull of %s: %w — the registry requires credentials and none are stored for it; add them for host %q under App Settings → Docker Registry Credentials, then publish again", sourceHost, sourceImage, err, common.NormalizeRegistryHost(sourceHost))
+				}
+				return fmt.Errorf("registry %s rejected the stored credentials while pulling %s: %w — check the username/password under App Settings → Docker Registry Credentials, then publish again", sourceHost, sourceImage, err)
+			}
 			return err
 		}
 

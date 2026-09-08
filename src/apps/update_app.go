@@ -66,7 +66,6 @@ func (sm *StateMachine) updateLegacyApp(payload common.TransitionPayload, app *c
 		return err
 	}
 
-	config := sm.Container.GetConfig()
 	initMessage := fmt.Sprintf("Initialising download for the app: %s...", payload.AppName)
 	err = sm.LogManager.Write(payload.ContainerName.Prod, initMessage)
 	if err != nil {
@@ -92,14 +91,9 @@ func (sm *StateMachine) updateLegacyApp(payload common.TransitionPayload, app *c
 		return err
 	}
 
-	authConfig := container.AuthConfig{
-		Username: payload.RegisteryToken,
-		Password: config.ReswarmConfig.Secret,
-	}
-
 	fullImageNameWithVersion := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.NewestVersion)
 	pullOptions := container.PullOptions{
-		AuthConfig: authConfig,
+		AuthConfig: sm.authConfigForImage(payload, fullImageNameWithVersion, payload.ContainerName.Prod),
 		PullID:     common.BuildDockerPullID(payload.AppKey, payload.AppName),
 	}
 
@@ -296,6 +290,8 @@ func (sm *StateMachine) updateComposeApp(payload common.TransitionPayload, app *
 		}
 		return err
 	}
+
+	sm.warnUncredentialedComposeRegistries(payload, payload.NewDockerCompose, payload.ContainerName.Prod)
 
 	err = sm.LogManager.ClearLogHistory(payload.ContainerName.Prod)
 	if err != nil {

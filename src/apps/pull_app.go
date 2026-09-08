@@ -98,6 +98,8 @@ func (sm *StateMachine) pullComposeApp(payload common.TransitionPayload, app *co
 		return err
 	}
 
+	sm.warnUncredentialedComposeRegistries(payload, payload.DockerCompose, topicForLogStream)
+
 	err = sm.pullComposeImages(ctx, payload, dockerComposePath, nil)
 	if err != nil {
 		return err
@@ -116,8 +118,6 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 	if payload.DockerCompose != nil {
 		return sm.pullComposeApp(payload, app)
 	}
-
-	config := sm.Container.GetConfig()
 
 	if payload.Stage == common.DEV {
 		// cannot pull dev apps from registry
@@ -150,14 +150,9 @@ func (sm *StateMachine) pullApp(payload common.TransitionPayload, app *common.Ap
 		return err
 	}
 
-	authConfig := container.AuthConfig{
-		Username: payload.RegisteryToken,
-		Password: config.ReswarmConfig.Secret,
-	}
-
 	fullImageNameWithVersion := fmt.Sprintf("%s:%s", payload.RegistryImageName.Prod, payload.NewestVersion)
 	pullOptions := container.PullOptions{
-		AuthConfig: authConfig,
+		AuthConfig: sm.authConfigForImage(payload, fullImageNameWithVersion, payload.ContainerName.Prod),
 		PullID:     common.BuildDockerPullID(payload.AppKey, payload.AppName),
 	}
 

@@ -310,14 +310,18 @@ func (sm *StateMachine) InitTransition(app *common.App, payload common.Transitio
 func (sm *StateMachine) HandleRegistryLoginsWithDefault(payload common.TransitionPayload) error {
 	config := sm.Container.GetConfig()
 
-	if payload.DockerCredentials == nil {
-		payload.DockerCredentials = make(map[string]common.DockerCredential)
+	// Log in with canonical host keys (`docker login` stores auth under the
+	// bare host anyway) into a fresh map, so the store entry can never
+	// clobber a user credential inside the payload's own map.
+	credentials := common.NormalizeDockerCredentialKeys(payload.DockerCredentials)
+	if credentials == nil {
+		credentials = make(map[string]common.DockerCredential, 1)
 	}
 
-	payload.DockerCredentials[config.ReswarmConfig.DockerRegistryURL] = common.DockerCredential{
+	credentials[common.NormalizeRegistryHost(config.ReswarmConfig.DockerRegistryURL)] = common.DockerCredential{
 		Username: payload.RegisteryToken,
 		Password: config.ReswarmConfig.Secret,
 	}
 
-	return sm.Container.HandleRegistryLogins(payload.DockerCredentials)
+	return sm.Container.HandleRegistryLogins(credentials)
 }
