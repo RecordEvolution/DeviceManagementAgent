@@ -56,3 +56,7 @@ const InstallOSUpdateProgress Topic = "install_os_update_progress"
 const PerformOSUpdate Topic = "perform_os_update"
 const PerformOSUpdateProgress Topic = "perform_os_update_progress"
 const GetTunnelState Topic = "get_tunnel_state"
+
+// CheckHostPort answers whether a candidate reserved host port is free on the
+// device (called by the backend before it saves a reservation).
+const CheckHostPort Topic = "check_host_port"

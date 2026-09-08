@@ -984,24 +984,26 @@ func (frpTm *FrpTunnelManager) SetMessenger(messenger messenger.Messenger) {
 	frpTm.messenger = messenger
 }
 
-func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol) (uint64, error) {
+func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol, reserved bool) (uint64, error) {
 	args := []interface{}{
 		common.Dict{
 			"port":     port,
 			"protocol": string(protocol),
+			// device_key lets the port manager attribute the request; reserved
+			// switches it to strict validation (range hard-fail, collision ->
+			// error) instead of falling back to an allocated port. Older
+			// servers ignore both keys.
+			"device_key": frpTm.config.ReswarmConfig.DeviceKey,
+			"reserved":   reserved,
 		},
 	}
 
 	result, err := frpTm.messenger.Call(context.Background(), topics.ExposePort, args, common.Dict{}, nil, nil)
 	if err != nil {
-		if strings.Contains(err.Error(), "Duplicate value") {
-			log.Debug().Msg("Port still exposed in backend, continuing...")
-			return port, nil
-		}
 		return 0, err
 	}
 
-	if result.Arguments == nil || len(result.Arguments) == 0 {
+	if len(result.Arguments) == 0 {
 		return 0, errors.New("arguments is empty")
 	}
 
@@ -1011,10 +1013,9 @@ func (frpTm *FrpTunnelManager) reserveRemotePort(port uint64, protocol Protocol)
 		return 0, errors.New("failed to parse payload")
 	}
 
-	remotePortKw := payload["remote_port"]
-	remotePort, ok := remotePortKw.(uint64)
-	if !ok {
-		return 0, errors.New("failed to parse port")
+	remotePort, ok := common.ToUint64(payload["remote_port"])
+	if !ok || remotePort == 0 {
+		return 0, errors.New("failed to parse remote_port")
 	}
 
 	return remotePort, nil
@@ -1283,7 +1284,7 @@ func (frpTm *FrpTunnelManager) AddTunnel(config TunnelConfig) (TunnelConfig, err
 	// Don't need to reserve a port if the user starts an HTTP tunnel
 	if config.Protocol != HTTP && config.Protocol != HTTPS {
 		// If no remote port is set, we will allocate one
-		remotePort, err := frpTm.reserveRemotePort(config.RemotePort, config.Protocol)
+		remotePort, err := frpTm.reserveRemotePort(config.RemotePort, config.Protocol, config.Reserved)
 		if err != nil {
 			log.Error().Err(err).Msg("Error while reserving remote port")
 			return fail(err)

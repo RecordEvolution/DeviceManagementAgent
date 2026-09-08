@@ -5,11 +5,15 @@
 package tunnel
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"reagent/common"
 	"reagent/config"
+	"reagent/messenger"
+	"reagent/messenger/topics"
+	"reagent/testutil/fakes"
 	"runtime"
 	"strings"
 	"testing"
@@ -1061,4 +1065,69 @@ func TestConfigBuilderAddTunnelConfigUpdatesStaleLocalPort(t *testing.T) {
 	require.Len(t, configs, 1, "update must not append a duplicate proxy")
 	assert.Equal(t, uint64(41999), configs[0].LocalPort)
 	assert.Equal(t, uint64(30022), configs[0].RemotePort, "granted remote port survives the update")
+}
+
+// A changed reservation must win over a stale stored remote port: same local
+// port and IP but a different non-zero requested remote is an update, not a
+// dedup skip — while a zero-remote upsert still preserves the granted port.
+func TestConfigBuilderAddTunnelConfigNonZeroRemoteWins(t *testing.T) {
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION)})
+	builder := NewTunnelConfigBuilder(cfg)
+
+	conf := TunnelConfig{
+		Subdomain:  CreateSubdomain(TCP, 9, "ssh", 22),
+		Protocol:   TCP,
+		LocalPort:  22,
+		RemotePort: 30022,
+	}
+	builder.AddTunnelConfig(conf)
+
+	conf.RemotePort = 30500
+	builder.AddTunnelConfig(conf)
+
+	configs := mustConfigs(t, &builder)
+	require.Len(t, configs, 1)
+	assert.Equal(t, uint64(30500), configs[0].RemotePort)
+
+	conf.RemotePort = 0
+	conf.LocalPort = 2200
+	builder.AddTunnelConfig(conf)
+
+	configs = mustConfigs(t, &builder)
+	require.Len(t, configs, 1)
+	assert.Equal(t, uint64(2200), configs[0].LocalPort)
+	assert.Equal(t, uint64(30500), configs[0].RemotePort, "a zero-remote update keeps the granted port")
+}
+
+// reserveRemotePort sends device_key and the reserved flag on the expose_port
+// payload, tolerates any numeric wire type on the response, and no longer
+// swallows backend errors (the old "Duplicate value" shortcut).
+func TestReserveRemotePortPayloadAndErrors(t *testing.T) {
+	msg := fakes.NewMessenger()
+	cfg := builderConfig(t, &config.ReswarmConfig{Environment: string(common.PRODUCTION), DeviceKey: 77})
+
+	frpTm := &FrpTunnelManager{messenger: msg, config: cfg}
+
+	msg.CallResponses[string(topics.ExposePort)] = fakes.CallResponse{
+		Result: messenger.Result{Arguments: []interface{}{map[string]interface{}{
+			// float64 is what a JSON serializer hands back; the old uint64-only
+			// assertion rejected it.
+			"remote_port": float64(30500),
+		}}},
+	}
+
+	port, err := frpTm.reserveRemotePort(30500, TCP, true)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(30500), port)
+
+	require.Len(t, msg.CallCalls, 1)
+	payload, ok := msg.CallCalls[0].Args[0].(common.Dict)
+	require.True(t, ok)
+	assert.Equal(t, 77, payload["device_key"])
+	assert.Equal(t, true, payload["reserved"])
+	assert.Equal(t, "tcp", payload["protocol"])
+
+	msg.CallErrors[string(topics.ExposePort)] = errors.New("Duplicate value: port already exposed")
+	_, err = frpTm.reserveRemotePort(30500, TCP, true)
+	require.Error(t, err, "backend errors must propagate, not be swallowed")
 }

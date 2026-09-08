@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"reagent/common"
 	"reagent/container"
+	"reagent/tunnel"
 	"sync"
 	"testing"
 
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,9 +135,10 @@ func TestReleaseApp(t *testing.T) {
 	_, ok = reg.Get(keyTCP)
 	assert.False(t, ok)
 
-	// The released ports can be handed out again.
+	// The released ports can be handed out again (claims are per protocol, so
+	// each is reclaimed under the protocol that held it).
 	reclaimedA, _ := reg.RecoverOrReserve(testKey(3, 1000), portHTTP)
-	reclaimedB, _ := reg.RecoverOrReserve(testKey(3, 2000), portTCP)
+	reclaimedB, _ := reg.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 3, Protocol: "tcp", Port: 2000}, portTCP)
 	assert.Equal(t, portHTTP, reclaimedA)
 	assert.Equal(t, portTCP, reclaimedB)
 
@@ -345,4 +348,350 @@ func TestReassignComposePortsAfterBindConflict(t *testing.T) {
 
 		assert.False(t, am.reassignComposePortsAfterBindConflict(payload, errors.New("Bind for 0.0.0.0:40010 failed: port is already allocated")))
 	})
+}
+
+// =============================================================================
+// User-reserved host ports (PinExact / provider / availability)
+// =============================================================================
+
+func TestPinExactSemantics(t *testing.T) {
+	reg := newTestRegistry()
+
+	key := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 1883}
+
+	// Pins may live outside the 40000-49999 pool.
+	require.NoError(t, reg.PinExact(key, 15000, false))
+	assert.True(t, reg.IsPinned(key))
+	got, ok := reg.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, uint64(15000), got)
+
+	// Re-pinning the same port for the same key is idempotent.
+	require.NoError(t, reg.PinExact(key, 15000, false))
+
+	// Another key can neither pin the held port…
+	other := hostPortKey{Stage: common.PROD, AppKey: 2, Protocol: "tcp", Port: 1883}
+	err := reg.PinExact(other, 15000, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already used by another app")
+	// …nor does the failed pin fall back to a pool port (exact-or-fail).
+	_, ok = reg.Get(other)
+	assert.False(t, ok)
+
+	// A changed reservation replaces the old claim and frees the old port.
+	require.NoError(t, reg.PinExact(key, 15001, false))
+	require.NoError(t, reg.PinExact(other, 15000, false))
+}
+
+func TestPinExactProbeAndDenylist(t *testing.T) {
+	reg := newTestRegistry()
+	reg.probeFree = func(protocol string, port uint64) bool { return false }
+
+	key := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 1883}
+
+	err := reg.PinExact(key, 15000, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "in use by another process")
+
+	// skipProbe recovers our own live binding despite the failing probe.
+	require.NoError(t, reg.PinExact(key, 15000, true))
+
+	// Agent-internal ports are refused even with skipProbe.
+	err = reg.PinExact(hostPortKey{Stage: common.PROD, AppKey: 2, Protocol: "tcp", Port: 9}, 7411, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "denylisted")
+
+	// Port 80 is NOT statically denylisted: the agent's pprof endpoint only
+	// listens there when -profiling is passed (default off), and a live
+	// listener is caught by the OS probe instead. Users may reserve 80 for a
+	// web service.
+	reg.probeFree = func(protocol string, port uint64) bool { return true }
+	require.NoError(t, reg.PinExact(hostPortKey{Stage: common.PROD, AppKey: 3, Protocol: "tcp", Port: 8080}, 80, false))
+}
+
+func TestHostPortClaimsAreProtocolKeyed(t *testing.T) {
+	reg := newTestRegistry()
+
+	tcpKey := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 5000}
+	udpKey := hostPortKey{Stage: common.PROD, AppKey: 2, Protocol: "udp", Port: 5000}
+
+	// The same numeric port can be held on tcp and udp at once.
+	require.NoError(t, reg.PinExact(tcpKey, 45000, false))
+	require.NoError(t, reg.PinExact(udpKey, 45000, false))
+
+	// Releasing the tcp holder frees only the tcp claim…
+	reg.ReleaseApp(common.PROD, 1)
+	assert.False(t, reg.IsPinned(tcpKey), "release must clear the pin")
+	require.NoError(t, reg.PinExact(hostPortKey{Stage: common.PROD, AppKey: 3, Protocol: "tcp", Port: 5000}, 45000, false))
+
+	// …while the udp hold survives.
+	err := reg.PinExact(hostPortKey{Stage: common.PROD, AppKey: 3, Protocol: "udp", Port: 5001}, 45000, false)
+	require.Error(t, err)
+}
+
+func TestReassignFreshRefusesPinnedKeys(t *testing.T) {
+	reg := newTestRegistry()
+
+	key := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 1883}
+	require.NoError(t, reg.PinExact(key, 15000, false))
+
+	_, err := reg.ReassignFresh(key)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "never reassigned")
+
+	// The pin survives the refused reassign.
+	got, ok := reg.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, uint64(15000), got)
+	assert.True(t, reg.IsPinned(key))
+}
+
+func TestReleaseStalePin(t *testing.T) {
+	reg := newTestRegistry()
+
+	// Pins are matched across the compose service qualifier, since tunnel
+	// rules carry none.
+	key := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 8080, Service: "web"}
+	require.NoError(t, reg.PinExact(key, 15000, false))
+
+	assert.True(t, reg.ReleaseStalePin(common.PROD, 1, "tcp", 8080))
+	assert.False(t, reg.IsPinned(key))
+	_, ok := reg.Get(key)
+	assert.False(t, ok, "the pinned assignment is dropped with the pin")
+
+	// Unpinned pool assignments are left alone.
+	pooled, err := reg.RecoverOrReserve(key, 41000)
+	require.NoError(t, err)
+	assert.False(t, reg.ReleaseStalePin(common.PROD, 1, "tcp", 8080))
+	kept, ok := reg.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, pooled, kept)
+}
+
+func TestPoolScanSkipsReservedPorts(t *testing.T) {
+	reg := newTestRegistry()
+
+	owner := hostPortKey{Stage: common.PROD, AppKey: 9, Protocol: "tcp", Port: 1883}
+	reg.SetReservationsProvider(func() []reservedHostPort {
+		return []reservedHostPort{{Protocol: "tcp", Port: hostPortRangeStart, Owner: owner}}
+	})
+
+	// Another app's pool scan must skip the reserved port…
+	got, err := reg.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 8080}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, hostPortRangeStart+1, got)
+
+	// …and a stale preferred hint must not be recovered onto it either.
+	got, err = reg.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 2, Protocol: "tcp", Port: 8081}, hostPortRangeStart)
+	require.NoError(t, err)
+	assert.NotEqual(t, hostPortRangeStart, got)
+
+	// The owner itself may still claim its reserved port.
+	require.NoError(t, reg.PinExact(owner, hostPortRangeStart, false))
+
+	// A tcp reservation does not block the udp namespace.
+	gotUDP, err := reg.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 3, Protocol: "udp", Port: 5000}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, hostPortRangeStart, gotUDP)
+}
+
+func TestCheckAvailabilityReasons(t *testing.T) {
+	reg := newTestRegistry()
+
+	me := hostPortKey{Stage: common.PROD, AppKey: 1, Protocol: "tcp", Port: 1883}
+	otherOwner := hostPortKey{Stage: common.PROD, AppKey: 2, Protocol: "tcp", Port: 1884}
+
+	reg.SetReservationsProvider(func() []reservedHostPort {
+		return []reservedHostPort{
+			{Protocol: "tcp", Port: 15000, Owner: otherOwner},
+			{Protocol: "tcp", Port: 15001, Owner: me},
+		}
+	})
+
+	ok, reason := reg.CheckAvailability(me, 7411)
+	assert.False(t, ok)
+	assert.Equal(t, "denylisted", reason)
+
+	ok, reason = reg.CheckAvailability(me, 15000)
+	assert.False(t, ok)
+	assert.Equal(t, "taken_by_app", reason)
+
+	// A port another app is assigned (pinned or pooled) is taken_by_app too.
+	require.NoError(t, reg.PinExact(otherOwner, 15100, false))
+	ok, reason = reg.CheckAvailability(me, 15100)
+	assert.False(t, ok)
+	assert.Equal(t, "taken_by_app", reason)
+
+	// Our own assignment and our own reservation stay available even when the
+	// OS probe fails — the bind it trips over is our own container's.
+	require.NoError(t, reg.PinExact(me, 15002, false))
+	reg.probeFree = func(string, uint64) bool { return false }
+	ok, reason = reg.CheckAvailability(me, 15002)
+	assert.True(t, ok)
+	assert.Equal(t, "", reason)
+	ok, reason = reg.CheckAvailability(me, 15001)
+	assert.True(t, ok)
+	assert.Equal(t, "", reason)
+
+	// An OS-occupied port that is nobody's assignment is taken_by_process.
+	ok, reason = reg.CheckAvailability(me, 15200)
+	assert.False(t, ok)
+	assert.Equal(t, "taken_by_process", reason)
+
+	reg.probeFree = func(string, uint64) bool { return true }
+	ok, reason = reg.CheckAvailability(me, 15300)
+	assert.True(t, ok)
+	assert.Equal(t, "", reason)
+}
+
+func TestReserveLaunchHostPortPinsReservation(t *testing.T) {
+	am, _, _, _, _, _ := amHarness(t)
+	am.hostPorts.probeFree = func(string, uint64) bool { return true }
+
+	payload := amPayload(32, "pinlaunch", common.RUNNING, common.PROD)
+	rule := common.PortForwardRule{Port: 1883, Protocol: "udp", Active: true, ReservedHostPort: 15000}
+
+	port, err := am.reserveLaunchHostPort(payload, rule, map[string]uint64{})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(15000), port)
+	assert.True(t, am.hostPorts.IsPinned(hostPortKeyForRule(common.PROD, 32, rule)))
+
+	// A conflicting reservation fails the launch, never pool-falls-back.
+	otherPayload := amPayload(33, "pinlaunch2", common.RUNNING, common.PROD)
+	_, err = am.reserveLaunchHostPort(otherPayload, common.PortForwardRule{Port: 1884, Protocol: "udp", ReservedHostPort: 15000}, map[string]uint64{})
+	require.Error(t, err)
+
+	// DEV apps ignore reserved_* entirely (declared-port rule applies).
+	devPayload := amPayload(34, "devapp", common.RUNNING, common.DEV)
+	port, err = am.reserveLaunchHostPort(devPayload, common.PortForwardRule{Port: 8080, Protocol: "tcp", ReservedHostPort: 16000}, map[string]uint64{})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(8080), port)
+
+	// http rules ignore reserved_* too: the pool serves them as before.
+	httpPayload := amPayload(35, "httpapp", common.RUNNING, common.PROD)
+	port, err = am.reserveLaunchHostPort(httpPayload, common.PortForwardRule{Port: 8081, Protocol: "http", ReservedHostPort: 16001}, map[string]uint64{})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, port, hostPortRangeStart)
+	assert.LessOrEqual(t, port, hostPortRangeEnd)
+}
+
+func TestReassignAfterBindConflictSkipsPinnedKeys(t *testing.T) {
+	t.Run("single-container", func(t *testing.T) {
+		am := &AppManager{hostPorts: newTestRegistry()}
+		payload := common.TransitionPayload{Stage: common.PROD, AppKey: 5, AppName: "app"}
+		rule := common.PortForwardRule{Port: 1883, Protocol: "tcp", ReservedHostPort: 15000}
+		ports, err := tunnel.PortForwardRuleToInterface([]common.PortForwardRule{rule})
+		require.NoError(t, err)
+		payload.Ports = ports
+
+		key := hostPortKeyForRule(common.PROD, 5, rule)
+		require.NoError(t, am.hostPorts.PinExact(key, 15000, false))
+
+		bindErr := errors.New("Bind for 0.0.0.0:15000 failed: port is already allocated")
+		assert.False(t, am.reassignPortsAfterBindConflict(payload, bindErr), "only a pinned port conflicted: no retry, surface the failure")
+
+		got, ok := am.hostPorts.Get(key)
+		require.True(t, ok)
+		assert.Equal(t, uint64(15000), got, "a pinned port is never reassigned")
+	})
+
+	t.Run("compose", func(t *testing.T) {
+		am := &AppManager{hostPorts: newTestRegistry()}
+		payload := common.TransitionPayload{
+			Stage: common.PROD, AppKey: 5, AppName: "app",
+			DockerCompose: map[string]interface{}{
+				"services": map[string]interface{}{
+					"web": map[string]interface{}{"ports": []interface{}{"8080:80"}},
+				},
+			},
+		}
+
+		key := hostPortKey{Stage: common.PROD, AppKey: 5, Protocol: "tcp", Port: 8080, Service: "web"}
+		require.NoError(t, am.hostPorts.PinExact(key, 15000, false))
+
+		bindErr := errors.New("Bind for 0.0.0.0:15000 failed: port is already allocated")
+		assert.False(t, am.reassignComposePortsAfterBindConflict(payload, bindErr))
+
+		got, ok := am.hostPorts.Get(key)
+		require.True(t, ok)
+		assert.Equal(t, uint64(15000), got)
+	})
+}
+
+func TestRewriteComposeHostPortsPinsReservation(t *testing.T) {
+	am, mockContainer, _, _, _, _ := amHarness(t)
+	am.hostPorts.probeFree = func(string, uint64) bool { return true }
+	mockContainer.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
+
+	payload := amPayload(36, "composepin", common.RUNNING, common.PROD)
+	payload.DockerCompose = map[string]interface{}{
+		"services": map[string]interface{}{
+			"web": map[string]interface{}{"ports": []interface{}{"8080:80"}},
+		},
+	}
+	ports, err := tunnel.PortForwardRuleToInterface([]common.PortForwardRule{
+		{RuleName: "web", Port: 8080, Protocol: "tcp", Active: true, ReservedHostPort: 15000},
+	})
+	require.NoError(t, err)
+	payload.Ports = ports
+
+	rewriteTarget := map[string]interface{}{
+		"services": map[string]interface{}{
+			"web": map[string]interface{}{"ports": []interface{}{"8080:80"}},
+		},
+	}
+	require.NoError(t, am.StateMachine.rewriteComposeHostPorts(payload, rewriteTarget))
+
+	web := rewriteTarget["services"].(map[string]interface{})["web"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"0.0.0.0:15000:80"}, web["ports"])
+
+	key := hostPortKey{Stage: common.PROD, AppKey: 36, Protocol: "tcp", Port: 8080, Service: "web"}
+	assert.True(t, am.hostPorts.IsPinned(key))
+}
+
+func TestRewriteComposeHostPortsReservedAmbiguityFails(t *testing.T) {
+	am, mockContainer, _, _, _, _ := amHarness(t)
+	mockContainer.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
+
+	compose := map[string]interface{}{
+		"services": map[string]interface{}{
+			"web": map[string]interface{}{"ports": []interface{}{"8080:80"}},
+			"api": map[string]interface{}{"ports": []interface{}{"8080:81"}},
+		},
+	}
+
+	payload := amPayload(37, "composeambig", common.RUNNING, common.PROD)
+	payload.DockerCompose = compose
+	ports, err := tunnel.PortForwardRuleToInterface([]common.PortForwardRule{
+		{RuleName: "web", Port: 8080, Protocol: "tcp", Active: true, ReservedHostPort: 15000},
+	})
+	require.NoError(t, err)
+	payload.Ports = ports
+
+	err = am.StateMachine.rewriteComposeHostPorts(payload, compose)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous_compose_rule")
+}
+
+func TestCheckHostPortAvailability(t *testing.T) {
+	am, _, _, appStore, _, _ := amHarness(t)
+	am.hostPorts.probeFree = func(string, uint64) bool { return true }
+
+	ok, reason := am.CheckHostPortAvailability(50, common.PROD, "tcp", 1883, 15000)
+	assert.True(t, ok)
+	assert.Equal(t, "", reason)
+
+	// A compose app whose rule maps onto several services is ambiguous.
+	payload := amPayload(51, "ambigapp", common.RUNNING, common.PROD)
+	payload.DockerCompose = map[string]interface{}{
+		"services": map[string]interface{}{
+			"web": map[string]interface{}{"ports": []interface{}{"9090:80"}},
+			"api": map[string]interface{}{"ports": []interface{}{"9090:81"}},
+		},
+	}
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	ok, reason = am.CheckHostPortAvailability(51, common.PROD, "tcp", 9090, 15000)
+	assert.False(t, ok)
+	assert.Equal(t, "ambiguous_compose_rule", reason)
 }

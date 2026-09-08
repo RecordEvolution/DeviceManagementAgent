@@ -100,6 +100,17 @@ type PortForwardRule struct {
 	// round-trips through t_device_to_app.ports is just a stale cached hint.
 	// Injected into app containers as {RemotePortEnvironment}_CLOUD.
 	CloudRemotePort uint64 `json:"cloud_remote_port,omitempty"`
+	// ReservedHostPort / ReservedRemotePort are user-owned desired state: the
+	// device host port / tunnel remote port the user pinned in the UI. The
+	// agent carries them and honors them exactly — or fails loudly — but never
+	// modifies them (the backend SQL discards agent-written reserved_* on the
+	// device write-back path anyway).
+	ReservedHostPort   uint64 `json:"reserved_host_port,omitempty"`
+	ReservedRemotePort uint64 `json:"reserved_remote_port,omitempty"`
+	// ReservationError is the agent's async failure surface for a reservation
+	// it could not honor; persisted upstream and shown in the UI, cleared on
+	// the next successful reconcile.
+	ReservationError string `json:"reservation_error,omitempty"`
 }
 
 // TransitionPayload provides the data used by the StateMachine to transition between states.

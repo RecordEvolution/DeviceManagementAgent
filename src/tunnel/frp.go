@@ -43,6 +43,11 @@ type TunnelConfig struct {
 	// from Subdomain instead, so callers building a config to add need not set
 	// it.
 	Name string
+	// Reserved marks RemotePort as a user reservation: expose_port then
+	// validates strictly (range hard-fail, collision -> error) instead of
+	// falling back to an allocated port. Not serialized to frpc.yaml, so it
+	// does not survive a config read-back.
+	Reserved bool
 }
 
 // YAML config structures matching frp v0.65.0 format
@@ -525,13 +530,16 @@ func (builder *TunnelConfigBuilder) AddTunnelConfig(conf TunnelConfig) {
 
 	// Upsert: a proxy left over from a previous agent run may point at a
 	// stale local port (the app was republished on a different host port).
-	// Skipping it would leave frpc dialing a dead port forever.
+	// Skipping it would leave frpc dialing a dead port forever. A non-zero
+	// requested remote port must equally win over a stale stored one (a
+	// changed reservation), so a mismatch there is an update, not a skip.
 	for i, proxy := range builder.yamlConfig.Proxies {
 		if proxy.Name != tunnelID {
 			continue
 		}
 
-		if proxy.LocalPort == proxyConfig.LocalPort && proxy.LocalIP == proxyConfig.LocalIP {
+		if proxy.LocalPort == proxyConfig.LocalPort && proxy.LocalIP == proxyConfig.LocalIP &&
+			(proxyConfig.RemotePort == 0 || proxy.RemotePort == proxyConfig.RemotePort) {
 			log.Debug().Str("tunnelID", tunnelID).Msg("Tunnel already exists in config, skipping add")
 			return
 		}

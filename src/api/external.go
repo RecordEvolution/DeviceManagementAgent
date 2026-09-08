@@ -75,6 +75,7 @@ func (ex *External) getTopicHandlerMap() map[topics.Topic]RegistrationHandler {
 		topics.QueryAppLogs:            ex.queryAppLogsHandler,
 		topics.QueryDeviceLogs:         ex.queryDeviceLogsHandler,
 		topics.GetTunnelState:          ex.getTunnelState,
+		topics.CheckHostPort:           ex.checkHostPortHandler,
 
 		topics.GetOSRelease:     ex.getOSReleaseHandler,
 		topics.DownloadOSUpdate: ex.downloadOSUpdateHandler,

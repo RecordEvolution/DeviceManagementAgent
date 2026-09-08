@@ -38,6 +38,13 @@ type AppManager struct {
 	// mayRebuildTunnel.
 	tunnelRebuilds    map[string]*tunnelRebuildState
 	tunnelRebuildLock sync.Mutex
+
+	// reservationNotes paces the user-visible "takes effect on next restart"
+	// app-log line for a host-port reservation applied to a running container:
+	// once per (rule, reserved port), not once per sync pass. See
+	// notePendingReservation.
+	reservationNotes    map[hostPortKey]uint64
+	reservationNoteLock sync.Mutex
 }
 
 // Rebuild pacing for a tunnel whose proxy frps will not accept.
@@ -74,7 +81,41 @@ func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm t
 	}
 
 	am.StateObserver.AppManager = &am
+	am.hostPorts.SetReservationsProvider(am.reservedHostPorts)
 	return &am
+}
+
+// reservedHostPorts lists every user-pinned host port across ALL installed
+// apps, read live from the requested-state rows the cloud syncs down (no
+// one-shot boot seeding: reservations made while an app is stopped — which
+// has no registry assignment — must still block the pool and availability
+// checks). Invoked by the registry under its own lock; must not call back
+// into it.
+func (am *AppManager) reservedHostPorts() []reservedHostPort {
+	payloads, err := am.AppStore.GetRequestedStates()
+	if err != nil {
+		log.Debug().Err(err).Msg("Could not read requested states for host port reservations")
+		return nil
+	}
+
+	reservations := make([]reservedHostPort, 0)
+	for _, statePayload := range payloads {
+		rules, err := tunnel.InterfaceToPortForwardRule(statePayload.Ports)
+		if err != nil {
+			continue
+		}
+		for _, rule := range rules {
+			if reservedHostPortFor(statePayload.Stage, rule) == 0 {
+				continue
+			}
+			reservations = append(reservations, reservedHostPort{
+				Protocol: wireProtocol(rule.Protocol),
+				Port:     rule.ReservedHostPort,
+				Owner:    hostPortKeyForRule(statePayload.Stage, statePayload.AppKey, rule),
+			})
+		}
+	}
+	return reservations
 }
 
 func (am *AppManager) syncPortState(payload common.TransitionPayload, app *common.App) error {
@@ -124,12 +165,24 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
 		newConfig := tunnel.TunnelConfig{}
 
+		// A user-pinned remote port is the desired state; it only applies to
+		// PROD tcp/udp rules (http/https and DEV carry reserved_* inert).
+		reservedRemote := uint64(0)
+		if reservationsApply(payload.Stage, portRule) {
+			reservedRemote = portRule.ReservedRemotePort
+		}
+		wantRemote := portRule.RemotePort
+		if reservedRemote != 0 {
+			wantRemote = reservedRemote
+		}
+
 		// The port frpc dials: the agent-managed host port the declared port
 		// is published on. Rules with an explicit LocalIP point away from the
 		// app container and keep their declared port.
 		dialPort, dialPortKnown := portRule.Port, true
+		reservationFailure := ""
 		if portRule.LocalIP == "" {
-			dialPort, dialPortKnown = am.resolveTunnelHostPort(payload, portRule)
+			dialPort, dialPortKnown, reservationFailure = am.resolveTunnelHostPort(payload, portRule)
 		}
 
 		if portRule.Active {
@@ -146,7 +199,8 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 						Protocol:   tunnel.Protocol(portRule.Protocol),
 						LocalPort:  dialPort,
 						LocalIP:    portRule.LocalIP,
-						RemotePort: portRule.RemotePort,
+						RemotePort: wantRemote,
+						Reserved:   reservedRemote != 0,
 					}
 
 					tnl := am.tunnelManager.Get(tunnelID)
@@ -164,9 +218,14 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					// worth pacing: a brand-new tunnel, and one whose local port
 					// genuinely changed, are real work and rebuild immediately.
 					// deferRebuild holds this pass off without touching the
-					// stored config — see mayRebuildTunnel.
+					// stored config — see mayRebuildTunnel. A live tunnel whose
+					// remote port contradicts a non-zero reservation is stale
+					// the same way a wrong local port is: applying or changing
+					// a reservation must move a running tunnel (and drop the
+					// old frps bind promptly), so it takes the Remove+Add path.
 					alive, deferRebuild := false, false
-					if tnl != nil && tnl.Config.LocalPort == dialPort {
+					if tnl != nil && tnl.Config.LocalPort == dialPort &&
+						(reservedRemote == 0 || tnl.Config.RemotePort == reservedRemote) {
 						var reason string
 						alive, reason = am.tunnelProxyAlive(tunnelID)
 						if alive {
@@ -206,6 +265,21 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 							// Keep the incoming rule as-is rather than
 							// persisting the zero config a failed add returns.
 							log.Error().Stack().Err(addErr).Msg("Failed to add tunnel")
+							if reservedRemote != 0 {
+								// A reserved rule must not fail silently: the
+								// UI row would spin forever on a log-only
+								// failure. Surface it on the rule and in the
+								// app log — but only when the failure actually
+								// changed: syncPortState runs on every sync
+								// pass, and a persisting frps refusal (already
+								// persisted on the incoming rule) must not
+								// write the same line into the user-visible
+								// app log once per pass forever.
+								reservationFailure = addErr.Error()
+								if reservationFailure != portRule.ReservationError {
+									am.writeAppLog(payload.ContainerName.Prod, fmt.Sprintf("Reserved tunnel port %d for port %d could not be established: %v. Reserved ports are never reassigned automatically - free the port or change the reservation.", reservedRemote, portRule.Port, addErr))
+								}
+							}
 						} else {
 							newConfig = added
 						}
@@ -241,9 +315,26 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 		}
 
 		newPort := portRule
-		if newConfig.RemotePort != 0 && newPort.RemotePort != newConfig.RemotePort {
-			newPort.RemotePort = newConfig.RemotePort
-			log.Info().Str("app", payload.AppName).Int("localPort", int(portRule.Port)).Int("remotePort", int(newPort.RemotePort)).Msg("Assigned new remote port for tunnel")
+		if reservationFailure != "" {
+			newPort.ReservationError = reservationFailure
+		}
+		if newConfig.RemotePort != 0 {
+			if reservedRemote != 0 && newConfig.RemotePort != reservedRemote {
+				// Never persist a granted remote port that contradicts the
+				// user's reservation: the reserved value stays the desired
+				// state and the mismatch is surfaced instead.
+				newPort.RemotePort = reservedRemote
+				newPort.ReservationError = fmt.Sprintf("tunnel granted port %d instead of reserved %d", newConfig.RemotePort, reservedRemote)
+				log.Warn().Str("app", payload.AppName).Uint64("granted", newConfig.RemotePort).Uint64("reserved", reservedRemote).Msg("Tunnel grant contradicts the reserved remote port")
+			} else {
+				if newPort.RemotePort != newConfig.RemotePort {
+					newPort.RemotePort = newConfig.RemotePort
+					log.Info().Str("app", payload.AppName).Int("localPort", int(portRule.Port)).Int("remotePort", int(newPort.RemotePort)).Msg("Assigned new remote port for tunnel")
+				}
+				// A grant matching the reservation (or no reservation at all)
+				// clears any stale failure from a previous pass.
+				newPort.ReservationError = ""
+			}
 		}
 		if dialPortKnown && portRule.LocalIP == "" && newPort.HostPort != dialPort {
 			// Persist the host port to t_device_to_app.ports: shown in the

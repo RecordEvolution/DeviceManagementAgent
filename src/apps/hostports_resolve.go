@@ -24,6 +24,69 @@ func hostPortKeyForRule(stage common.Stage, appKey uint64, rule common.PortForwa
 	return hostPortKey{Stage: stage, AppKey: appKey, Protocol: wireProtocol(rule.Protocol), Port: rule.Port}
 }
 
+// reservedHostPortFor returns the rule's user-pinned host port, or 0 when none
+// applies. Reservations are PROD tcp/udp only: DEV apps and http/https rules
+// carry reserved_* keys inert — ignored without erroring, per the cross-repo
+// contract.
+func reservedHostPortFor(stage common.Stage, rule common.PortForwardRule) uint64 {
+	if !reservationsApply(stage, rule) {
+		return 0
+	}
+	return rule.ReservedHostPort
+}
+
+// reservationsApply reports whether reserved_* keys on this rule are honored
+// at all (PROD tcp/udp only).
+func reservationsApply(stage common.Stage, rule common.PortForwardRule) bool {
+	return stage == common.PROD && (rule.Protocol == "tcp" || rule.Protocol == "udp")
+}
+
+// reservedPortUnavailableLog is the app-log line for every reservation the
+// agent could not honor: the one behavior promise is that it never quietly
+// moves the port instead.
+func reservedPortUnavailableLog(reservedPort uint64, declaredPort uint64, reason interface{}) string {
+	return fmt.Sprintf("Reserved host port %d for port %d is unavailable: %v. Reserved ports are never reassigned automatically - free the port or change the reservation.", reservedPort, declaredPort, reason)
+}
+
+// countComposeRuleMatches returns how many of the app's compose port entries a
+// rule maps onto. More than one means a reservation is ambiguous: pinning
+// would pick a nondeterministic service (reason token: ambiguous_compose_rule).
+func countComposeRuleMatches(dockerCompose map[string]interface{}, rule common.PortForwardRule) int {
+	matches := 0
+	for _, entry := range parseComposePorts(dockerCompose) {
+		if entry.matchesRule(rule.Port, rule.Protocol) {
+			matches++
+		}
+	}
+	return matches
+}
+
+// CheckHostPortAvailability answers the check_host_port RPC: whether the rule
+// identified by (appKey, stage, protocol, declaredPort) could take hostPort as
+// its reserved host port right now. Reason tokens per the cross-repo contract:
+// "taken_by_app", "taken_by_process", "ambiguous_compose_rule", "denylisted",
+// "" when available.
+func (am *AppManager) CheckHostPortAvailability(appKey uint64, stage common.Stage, protocol string, declaredPort uint64, hostPort uint64) (bool, string) {
+	rule := common.PortForwardRule{Port: declaredPort, Protocol: protocol}
+	key := hostPortKeyForRule(stage, appKey, rule)
+
+	// Qualify compose keys by service so the check matches the pin the launch
+	// path would attempt; an app not (yet) known locally checks unqualified.
+	if statePayload, err := am.AppStore.GetRequestedState(appKey, stage); err == nil && statePayload.DockerCompose != nil {
+		if countComposeRuleMatches(statePayload.DockerCompose, rule) > 1 {
+			return false, "ambiguous_compose_rule"
+		}
+		for _, entry := range parseComposePorts(statePayload.DockerCompose) {
+			if entry.matchesRule(rule.Port, rule.Protocol) {
+				key.Service = entry.Service
+				break
+			}
+		}
+	}
+
+	return am.hostPorts.CheckAvailability(key, hostPort)
+}
+
 // publishedComposeHostPorts reads the host ports the app's compose project
 // currently publishes, keyed like container.PublishedPortKey. Recovering a
 // still-running previous generation's ports keeps them stable across restarts
@@ -57,13 +120,76 @@ func bindingKey(port uint64, protocol string) string {
 // live docker state and the host_port persisted upstream.
 //
 // ok=false means the app has not been started with managed ports yet; the
-// caller skips tunnel creation and the post-transition sync retries.
-func (am *AppManager) resolveTunnelHostPort(payload common.TransitionPayload, rule common.PortForwardRule) (uint64, bool) {
+// caller skips tunnel creation and the post-transition sync retries. A
+// non-empty reservationErr means ok=false is a reservation the agent could
+// not honor (the caller surfaces it on the rule instead of silently waiting).
+func (am *AppManager) resolveTunnelHostPort(payload common.TransitionPayload, rule common.PortForwardRule) (hostPort uint64, ok bool, reservationErr string) {
 	stage, appKey := payload.Stage, payload.AppKey
 	protocol := wireProtocol(rule.Protocol)
 
+	if reservedPort := reservedHostPortFor(stage, rule); reservedPort != 0 {
+		key := hostPortKeyForRule(stage, appKey, rule)
+		livePort := uint64(0)
+		if payload.DockerCompose != nil {
+			if countComposeRuleMatches(payload.DockerCompose, rule) > 1 {
+				log.Warn().Str("app", payload.AppName).Uint64("port", rule.Port).Msg("Reserved host port is ambiguous across compose services; deferring tunnel")
+				return 0, false, fmt.Sprintf("reserved host port %d is ambiguous: several compose services declare port %d (ambiguous_compose_rule)", reservedPort, rule.Port)
+			}
+			if service, published := am.findComposeRulePort(payload, rule); service != "" {
+				key.Service = service
+				livePort = published
+			}
+		} else {
+			// Reserved rules exist only on PROD (see reservationsApply), so
+			// the PROD container name is the right one to inspect.
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+			if bindings, err := am.StateMachine.Container.GetContainerPortBindings(ctx, payload.ContainerName.Prod); err == nil {
+				livePort = bindings[bindingKey(rule.Port, protocol)]
+			}
+		}
+
+		// Pin regardless of what the container currently publishes: the pool
+		// must never hand the reserved port to another app while a not-yet-
+		// applied reservation waits for its container recreate. skipProbe: the
+		// reservation was validated at launch; the bind the probe would trip
+		// over is our own published container's.
+		if err := am.hostPorts.PinExact(key, reservedPort, true); err != nil {
+			// Never dial a wrong port for a reserved rule: defer the tunnel.
+			log.Warn().Err(err).Str("app", payload.AppName).Uint64("port", rule.Port).Uint64("reservedHostPort", reservedPort).Msg("Reserved host port is unavailable; deferring tunnel")
+			return 0, false, err.Error()
+		}
+
+		if livePort != 0 && livePort != reservedPort {
+			// The running container still publishes its pre-reservation port:
+			// a reservation saved on a RUNNING app arrives via a sync that
+			// never recreates the container, so nothing binds the reserved
+			// port yet. Dialing it would break the working tunnel and write
+			// back a host_port nothing serves. Keep the tunnel on the port
+			// that actually answers — the host_port write-back stays truthful
+			// (the UI shows the reservation as pending) and the reservation
+			// takes effect at the next container recreate via the launch path
+			// (the pin above keeps the port from the pool meanwhile).
+			am.notePendingReservation(key, reservedPort, payload.ContainerName.Prod, rule.Port, livePort)
+			return livePort, true, ""
+		}
+
+		am.clearPendingReservationNote(key)
+		return reservedPort, true, ""
+	}
+
+	// A pin left behind by a removed reservation must not keep steering the
+	// dial port (or blocking reassignment): drop it, so the host port is
+	// re-derived from the live container state below. Matters most for a
+	// reservation removed while still pending — the pinned port was never
+	// bound by the container, and recovering it here would break the working
+	// tunnel exactly like dialing an unapplied reservation would.
+	if am.hostPorts.ReleaseStalePin(stage, appKey, protocol, rule.Port) {
+		am.clearPendingReservationNote(hostPortKeyForRule(stage, appKey, rule))
+	}
+
 	if hostPort, ok := am.hostPorts.GetByPort(stage, appKey, protocol, rule.Port); ok {
-		return hostPort, true
+		return hostPort, true, ""
 	}
 
 	key := hostPortKeyForRule(stage, appKey, rule)
@@ -99,22 +225,22 @@ func (am *AppManager) resolveTunnelHostPort(payload common.TransitionPayload, ru
 				// container is recreated onto a bridge on its next start.
 				networkMode, err := am.StateMachine.Container.GetContainerNetworkMode(ctx, containerName)
 				if err == nil && networkMode == "host" {
-					return rule.Port, true
+					return rule.Port, true, ""
 				}
 			}
 		}
 	}
 
 	if preferred == 0 {
-		return 0, false
+		return 0, false, ""
 	}
 
-	hostPort, err := am.hostPorts.RecoverOrReserve(key, preferred)
+	recovered, err := am.hostPorts.RecoverOrReserve(key, preferred)
 	if err != nil {
 		log.Error().Err(err).Str("app", payload.AppName).Uint64("port", rule.Port).Msg("Failed to recover host port for tunnel")
-		return 0, false
+		return 0, false, ""
 	}
-	return hostPort, true
+	return recovered, true, ""
 }
 
 // findComposeRulePort locates the compose entry a port rule refers to and
@@ -139,6 +265,17 @@ func (am *AppManager) findComposeRulePort(payload common.TransitionPayload, rule
 // the caller surfaces the fallback port in the app log when that loses.
 func (am *AppManager) reserveLaunchHostPort(payload common.TransitionPayload, rule common.PortForwardRule, liveBindings map[string]uint64) (uint64, error) {
 	key := hostPortKeyForRule(payload.Stage, payload.AppKey, rule)
+
+	if reservedPort := reservedHostPortFor(payload.Stage, rule); reservedPort != 0 {
+		// Exact-or-fail: a pin failure fails the whole transition rather than
+		// launching on a different port. Probe skipped only when our own live
+		// binding already publishes exactly the reserved port.
+		skipProbe := liveBindings[bindingKey(rule.Port, key.Protocol)] == reservedPort
+		if err := am.hostPorts.PinExact(key, reservedPort, skipProbe); err != nil {
+			return 0, err
+		}
+		return reservedPort, nil
+	}
 
 	preferred := liveBindings[bindingKey(rule.Port, key.Protocol)]
 	if preferred == 0 {
@@ -187,6 +324,9 @@ func (sm *StateMachine) computePortBindings(payload common.TransitionPayload, po
 	for _, rule := range publishableRules {
 		hostPort, err := am.reserveLaunchHostPort(payload, rule, liveBindings)
 		if err != nil {
+			if reservedPort := reservedHostPortFor(payload.Stage, rule); reservedPort != 0 {
+				sm.LogManager.Write(containerName, reservedPortUnavailableLog(reservedPort, rule.Port, err))
+			}
 			return nil, nil, err
 		}
 
@@ -307,6 +447,17 @@ func (sm *StateMachine) rewriteComposeHostPorts(payload common.TransitionPayload
 		return err
 	}
 
+	// A reservation must map onto exactly one compose entry: when several
+	// services declare the same port, pinning would land on a nondeterministic
+	// service, so the launch fails instead (reason: ambiguous_compose_rule).
+	for _, rule := range portRules {
+		if reservedPort := reservedHostPortFor(payload.Stage, rule); reservedPort != 0 && countComposeRuleMatches(dockerCompose, rule) > 1 {
+			ambiguityErr := fmt.Errorf("reserved host port %d for port %d is ambiguous: several compose services declare the port (ambiguous_compose_rule)", reservedPort, rule.Port)
+			sm.LogManager.Write(payload.ContainerName.Prod, reservedPortUnavailableLog(reservedPort, rule.Port, "several compose services declare the same port"))
+			return ambiguityErr
+		}
+	}
+
 	services, ok := dockerCompose["services"].(map[string]interface{})
 	if !ok {
 		return nil
@@ -356,7 +507,17 @@ func (sm *StateMachine) rewriteComposeHostPorts(payload common.TransitionPayload
 			key := hostPortKey{Stage: payload.Stage, AppKey: payload.AppKey, Protocol: entry.Protocol, Port: entry.DeclaredPort(), Service: serviceName}
 
 			var hostPort uint64
-			if payload.Stage == common.DEV && preferred == 0 && am.hostPorts.ReserveDeclared(key) {
+			if matchingRule != nil && reservedHostPortFor(payload.Stage, *matchingRule) != 0 {
+				reservedPort := matchingRule.ReservedHostPort
+				// Exact-or-fail; probe skipped only when the running project
+				// already publishes the entry on exactly the reserved port.
+				skipProbe := published[container.PublishedPortKey(serviceName, entry.ContainerPort, entry.Protocol)] == reservedPort
+				if pinErr := am.hostPorts.PinExact(key, reservedPort, skipProbe); pinErr != nil {
+					sm.LogManager.Write(payload.ContainerName.Prod, reservedPortUnavailableLog(reservedPort, matchingRule.Port, pinErr))
+					return pinErr
+				}
+				hostPort = reservedPort
+			} else if payload.Stage == common.DEV && preferred == 0 && am.hostPorts.ReserveDeclared(key) {
 				// DEV keeps the authored host port so developers reach the
 				// app where they expect it.
 				hostPort = key.Port
@@ -429,6 +590,50 @@ func normalizeNetworkMode(mode string) string {
 	return mode
 }
 
+// writeAppLog writes one line to the app's log stream, tolerating the partial
+// managers unit tests construct (no StateMachine/LogManager wired).
+func (am *AppManager) writeAppLog(containerName string, message string) {
+	if am.StateMachine == nil || am.StateMachine.LogManager == nil {
+		return
+	}
+	am.StateMachine.LogManager.Write(containerName, message)
+}
+
+// notePendingReservation writes the "takes effect on the next restart"
+// app-log line for a reservation applied to a running container, once per
+// (rule, reserved port): syncPortState runs on every sync pass and the
+// pending state persists until the container is next recreated, so an unpaced
+// line would spam the user-visible app log forever.
+func (am *AppManager) notePendingReservation(key hostPortKey, reservedPort uint64, containerName string, declaredPort uint64, livePort uint64) {
+	am.reservationNoteLock.Lock()
+	if am.reservationNotes == nil {
+		am.reservationNotes = make(map[hostPortKey]uint64)
+	}
+	noted := am.reservationNotes[key] == reservedPort
+	if !noted {
+		am.reservationNotes[key] = reservedPort
+	}
+	am.reservationNoteLock.Unlock()
+
+	if noted {
+		return
+	}
+	am.writeAppLog(containerName, fmt.Sprintf("Reserved host port %d for port %d takes effect on the next restart of the app; until then port %d stays reachable on host port %d.", reservedPort, declaredPort, declaredPort, livePort))
+}
+
+// clearPendingReservationNote forgets the pacing state once the reservation
+// is live (or removed), so a future pending reservation on the same rule is
+// announced again. Matches across compose service qualifiers, like the pins.
+func (am *AppManager) clearPendingReservationNote(key hostPortKey) {
+	am.reservationNoteLock.Lock()
+	for noted := range am.reservationNotes {
+		if sameRule(noted, key) {
+			delete(am.reservationNotes, noted)
+		}
+	}
+	am.reservationNoteLock.Unlock()
+}
+
 // reassignComposePortsAfterBindConflict is reassignPortsAfterBindConflict for
 // compose apps. It walks the compose `ports:` entries rather than the tunnel
 // port rules: compose assignments are recorded under service-qualified keys
@@ -456,6 +661,14 @@ func (am *AppManager) reassignComposePortsAfterBindConflict(payload common.Trans
 
 		hostPort, ok := am.hostPorts.Get(key)
 		if !ok || !strings.Contains(message, fmt.Sprintf(":%d", hostPort)) {
+			continue
+		}
+
+		if am.hostPorts.IsPinned(key) {
+			// A reserved port is never reassigned: when only pinned ports
+			// conflicted this returns false and the bind error becomes a
+			// FAILED transition.
+			am.writeAppLog(payload.ContainerName.Prod, reservedPortUnavailableLog(hostPort, entry.DeclaredPort(), "the port is in use by another process"))
 			continue
 		}
 
@@ -503,6 +716,14 @@ func (am *AppManager) reassignPortsAfterBindConflict(payload common.TransitionPa
 		key := hostPortKeyForRule(payload.Stage, payload.AppKey, rule)
 		hostPort, ok := am.hostPorts.Get(key)
 		if !ok || !strings.Contains(message, fmt.Sprintf(":%d", hostPort)) {
+			continue
+		}
+
+		if am.hostPorts.IsPinned(key) {
+			// A reserved port is never reassigned: when only pinned ports
+			// conflicted this returns false and the bind error becomes a
+			// FAILED transition.
+			am.writeAppLog(payload.ContainerName.Prod, reservedPortUnavailableLog(hostPort, rule.Port, "the port is in use by another process"))
 			continue
 		}
 
