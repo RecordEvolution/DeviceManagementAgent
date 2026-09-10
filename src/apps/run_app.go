@@ -720,10 +720,24 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 		fmt.Sprintf("TUNNEL_DOMAIN=%s", tunnelDomainForApps(config)),
 	}
 
+	// Computed at container start: an IP change is reflected on the next app
+	// restart. LAN deployments are expected to use static IPs or DHCP
+	// reservations.
+	lanIP := reagentnetwork.GetPrimaryLANIP()
+	if lanIP != "" {
+		environmentVariables = append(environmentVariables, fmt.Sprintf("DEVICE_LAN_IP=%s", lanIP))
+	}
+
 	// Point the common runtimes at the CA bundle mounted above. Without it an
 	// app on a corporate-cert appliance cannot complete a TLS handshake to
 	// wss://ws.<appliance domain> and reconnects forever.
 	environmentVariables = append(environmentVariables, caBundleEnvironmentVariables(config)...)
+
+	// Hand the device's own corporate proxy down to the app. Without it an app
+	// on a proxied site has no outbound route at all, and every app author has
+	// to rediscover the site's proxy and wire it up per app. These are
+	// defaults an app can override — see proxyEnvironmentVariables.
+	environmentVariables = append(environmentVariables, proxyEnvironmentVariables(config, lanIP)...)
 
 	// Per-app WAMP identity: lets the platform authorize THIS app rather than
 	// only its device, which is what makes the app-data-access consent switch
@@ -734,13 +748,6 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 			fmt.Sprintf("APP_AUTH_ID=%s", authID),
 			fmt.Sprintf("APP_AUTH_SECRET=%s", secret),
 		)
-	}
-
-	// Computed at container start: an IP change is reflected on the next app
-	// restart. LAN deployments are expected to use static IPs or DHCP
-	// reservations.
-	if lanIP := reagentnetwork.GetPrimaryLANIP(); lanIP != "" {
-		environmentVariables = append(environmentVariables, fmt.Sprintf("DEVICE_LAN_IP=%s", lanIP))
 	}
 
 	if payload.InstanceKey > 0 {
