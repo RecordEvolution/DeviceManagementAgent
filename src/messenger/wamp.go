@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"regexp"
 	"runtime/debug"
@@ -26,10 +27,56 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// reconnectBackoff is the delay between reconnect attempts after a transport
-// failure. Kept short so the agent comes back online quickly; the loop never
-// gives up while the session context is alive.
+// reconnectBackoff is the delay before retrying something that is NOT a failed
+// dial: a local connect-config error, and the duplicate-serial re-register
+// race further down. Kept short and fixed — maxDuplicateSerialAttempts is
+// calibrated against it, and neither case puts a connection attempt on the
+// wire.
 const reconnectBackoff = time.Second
+
+// A failed DIAL backs off exponentially instead, doubling from
+// reconnectBackoffBase up to reconnectBackoffMax.
+//
+// The old fixed one-second delay had the agent opening ~27 connections a
+// minute for as long as an outage lasted, each from a fresh source port and
+// each abandoned mid-handshake. A corporate IPS reads that as a port scan:
+// at tls-sf015 on 2026-09-10, new TCP connections from an edge PC to the
+// appliance were silently dropped for minutes at a time while established
+// ones kept flowing, and the agent's own retry storm is a plausible trigger
+// for the block that sustained it. At the cap the agent tries three times a
+// minute instead, and still recovers within 20s of the path clearing.
+const (
+	reconnectBackoffBase = time.Second
+	reconnectBackoffMax  = 20 * time.Second
+
+	// reconnectBackoffJitter spreads each delay by this fraction either way,
+	// so that a fleet reconnecting after an appliance router restart does not
+	// arrive in lockstep.
+	reconnectBackoffJitter = 0.2
+)
+
+// dialBackoff returns how long to wait before the next dial, given how many
+// consecutive dials have failed (1 for the first failure). The result is
+// always positive and never exceeds reconnectBackoffMax plus its jitter.
+func dialBackoff(consecutiveFailures int) time.Duration {
+	shift := consecutiveFailures - 1
+	if shift < 0 {
+		shift = 0
+	}
+	// Bounded well below the point where the shift would overflow the
+	// int64 nanoseconds behind a Duration.
+	if shift > 30 {
+		shift = 30
+	}
+
+	delay := reconnectBackoffBase << shift
+	if delay > reconnectBackoffMax || delay <= 0 {
+		delay = reconnectBackoffMax
+	}
+
+	spread := float64(delay) * reconnectBackoffJitter
+	return time.Duration(float64(delay) + (rand.Float64()*2-1)*spread)
+}
 
 // maxDuplicateSerialAttempts bounds how many consecutive reconnects may hit
 // ProcedureAlreadyExists when registering the connection-established procedure
@@ -429,6 +476,7 @@ func (s *WampSession) dial() (NexusClient, error) {
 	log.Debug().Msg("Attempting to establish a socket connection...")
 
 	dupRegisterFailures := 0
+	dialFailures := 0
 	for attempt := 1; ; attempt++ {
 		if s.ctx.Err() != nil {
 			return nil, s.ctx.Err()
@@ -465,12 +513,17 @@ func (s *WampSession) dial() (NexusClient, error) {
 				fmt.Println("The IronFlock device connect authentication failed")
 				os.Exit(1)
 			}
-			log.Debug().Err(err).Msgf("Failed to establish a websocket connection (duration: %s, attempt #%d), reattempting in %s", time.Since(requestStart), attempt, reconnectBackoff)
-			if !s.sleepOrDone(reconnectBackoff) {
+			dialFailures++
+			backoff := dialBackoff(dialFailures)
+			log.Debug().Err(err).Msgf("Failed to establish a websocket connection (duration: %s, attempt #%d), reattempting in %s", time.Since(requestStart), attempt, backoff)
+			if !s.sleepOrDone(backoff) {
 				return nil, s.ctx.Err()
 			}
 			continue
 		}
+
+		// The transport is up; the next failure starts the ramp again.
+		dialFailures = 0
 
 		// Register the device's "I am here" procedure. A second device with
 		// the same serial trying to register the same procedure is rejected
