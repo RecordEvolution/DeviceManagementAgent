@@ -159,12 +159,20 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 
 	dockerCompose["name"] = common.BuildComposeContainerName(payload.Stage, app.AppKey, app.AppName)
 
+	// The release's own store images name a repository we host; which HOST
+	// serves it is this device's business, not the publisher's. Resolve it
+	// before anything reads the file — see resolveComposeStoreImages.
+	if resolved := resolveComposeStoreImages(config.ReswarmConfig, app.AppKey, app.AppName, dockerCompose); resolved > 0 {
+		log.Debug().Msgf("resolved %d store image reference(s) of %s onto %s", resolved, app.AppName, config.ReswarmConfig.DockerRegistryURL)
+	}
+
 	services, ok := (dockerCompose["services"]).(map[string]interface{})
 	if !ok {
 		return "", errors.New("failed to infer services")
 	}
 
 	envFilesHostDir := appEnvFilesHostDir(config, payload.Stage, app.AppName)
+	caBundleHostDir := appCABundleHostDir(config)
 
 	for _, serviceInterface := range services {
 		service, ok := (serviceInterface).(map[string]interface{})
@@ -175,6 +183,7 @@ func (sm *StateMachine) SetupComposeFiles(payload common.TransitionPayload, app 
 		service["env_file"] = DotEnvFileName
 		addComposeExtraHost(service)
 		addComposeEnvFilesMount(service, envFilesHostDir)
+		addComposeCABundleMount(service, caBundleHostDir)
 	}
 
 	err = sm.rewriteComposeHostPorts(payload, dockerCompose)

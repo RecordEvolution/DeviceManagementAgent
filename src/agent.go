@@ -21,6 +21,7 @@ import (
 	"reagent/store"
 	"reagent/system"
 	"reagent/terminal"
+	"reagent/trust"
 	"reagent/tunnel"
 	"runtime"
 	"sync"
@@ -274,8 +275,36 @@ func (agent *Agent) updateRemoteDevice() error {
 	return nil
 }
 
+// ensureAppCABundle refreshes the CA bundle app containers verify TLS against.
+//
+// It runs before any app starts so that the first container of the boot
+// already sees a current bundle. Failure is never fatal: apps then run without
+// the mount, exactly as they did before the bundle existed, and the reason is
+// logged rather than blocking startup on a device whose network is not up yet.
+func ensureAppCABundle(generalConfig *config.Config) {
+	appsDir := generalConfig.CommandLineArguments.AppsDirectory
+
+	if !trust.Enabled(generalConfig.ReswarmConfig.ApplianceDomain) {
+		// A device detached from its appliance domain must not keep mounting
+		// a trust set nobody refreshes.
+		if err := trust.Remove(appsDir); err != nil {
+			log.Debug().Err(err).Msg("failed to remove the stale app CA bundle")
+		}
+		return
+	}
+
+	path, err := trust.Build(appsDir, generalConfig.ReswarmConfig.DeviceEndpointURL)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to build the app CA bundle; apps will fall back to their image's own trust store")
+		return
+	}
+	log.Debug().Str("path", path).Msg("app CA bundle written")
+}
+
 func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	cliArgs := generalConfig.CommandLineArguments
+
+	ensureAppCABundle(generalConfig)
 
 	database, err := persistence.NewSQLiteDb(generalConfig)
 	if err != nil {

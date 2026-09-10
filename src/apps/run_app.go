@@ -11,6 +11,7 @@ import (
 	"reagent/errdefs"
 	reagentnetwork "reagent/network"
 	"reagent/system"
+	"reagent/trust"
 	"reagent/tunnel"
 	"strings"
 	"time"
@@ -668,6 +669,17 @@ func computeMounts(stage common.Stage, appName string, config *config.Config) ([
 		})
 	}
 
+	// Trust: the device's own CA set, so an app on a corporate-cert appliance
+	// can verify the endpoints it is told to connect to (see reagent/trust).
+	if caDir := appCABundleHostDir(config); caDir != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   caDir,
+			Target:   trust.ContainerDir,
+			ReadOnly: true,
+		})
+	}
+
 	// for nvidia
 	if _, err := os.Stat("/usr/local/cuda"); !os.IsNotExist(err) {
 		mounts = append(mounts, mount.Mount{
@@ -707,6 +719,11 @@ func buildDefaultEnvironmentVariables(config *config.Config, payload common.Tran
 		// replicating server-side logic.
 		fmt.Sprintf("TUNNEL_DOMAIN=%s", tunnelDomainForApps(config)),
 	}
+
+	// Point the common runtimes at the CA bundle mounted above. Without it an
+	// app on a corporate-cert appliance cannot complete a TLS handshake to
+	// wss://ws.<appliance domain> and reconnects forever.
+	environmentVariables = append(environmentVariables, caBundleEnvironmentVariables(config)...)
 
 	// Per-app WAMP identity: lets the platform authorize THIS app rather than
 	// only its device, which is what makes the app-data-access consent switch

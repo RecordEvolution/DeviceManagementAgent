@@ -8,14 +8,24 @@ import (
 	"strings"
 )
 
-// registryHostOfImage returns the registry host of an image reference,
-// following docker's own convention: the first path component is a registry
-// host only when it contains '.' or ':' or is exactly "localhost"; every
-// other reference lives on Docker Hub.
-func registryHostOfImage(imageRef string) string {
-	firstComponent, _, found := strings.Cut(imageRef, "/")
+// splitRegistryHost splits an image reference into its registry host and the
+// repository part that follows it, using docker's own convention: the first
+// path component is a registry host only when it contains '.' or ':' or is
+// exactly "localhost". The host is "" for a reference that carries none, in
+// which case the whole reference is the repository.
+func splitRegistryHost(imageRef string) (host string, repository string) {
+	firstComponent, remainder, found := strings.Cut(imageRef, "/")
 	if found && (strings.ContainsAny(firstComponent, ".:") || firstComponent == "localhost") {
-		return firstComponent
+		return firstComponent, remainder
+	}
+	return "", imageRef
+}
+
+// registryHostOfImage returns the registry host of an image reference; a
+// reference that carries no host lives on Docker Hub.
+func registryHostOfImage(imageRef string) string {
+	if host, _ := splitRegistryHost(imageRef); host != "" {
+		return host
 	}
 	return "docker.io"
 }
@@ -144,6 +154,100 @@ func composeReferencesRegistryHost(compose map[string]interface{}, host string) 
 	return false
 }
 
+// isOwnStoreImageRepository reports whether a repository path names one of THIS
+// app's store images. app.f_create_release mints one per compose service as
+//
+//	<docker_main_repository>prod_<arch>_<appKey>_<appName>_<n>:<version>
+//
+// lowercased, for every service of a release — image-only services included,
+// whose authored reference is preserved beside it in x-source-image. The
+// "prod" is a literal there, not the stage. Matching on the app's own key and
+// name is what keeps this off an authored reference that merely happens to
+// live under the same repository prefix.
+func isOwnStoreImageRepository(mainRepository string, appKey uint64, appName string, repository string) bool {
+	prefix := strings.ToLower(strings.TrimSpace(mainRepository))
+	if prefix == "" || appName == "" {
+		return false
+	}
+
+	repository = strings.ToLower(repository)
+	if !strings.HasPrefix(repository, prefix) {
+		return false
+	}
+
+	imageName := strings.TrimPrefix(repository, prefix)
+	if !strings.HasPrefix(imageName, strings.ToLower(string(common.PROD))+"_") {
+		return false
+	}
+
+	return strings.Contains(imageName, fmt.Sprintf("_%d_%s_", appKey, strings.ToLower(appName)))
+}
+
+// resolveComposeStoreImages rewrites, in place, every service image that names
+// one of this app's own store images onto the registry host THIS device is
+// configured for, and reports how many references it changed.
+//
+// A release's image references are minted once, at publish time, carrying
+// whichever registry URL the platform that minted them was configured with
+// (app.f_create_release, and the appliance app-store sync in RESWARM
+// appStore.ts). That host is a LOCATION, and it is frozen into release data
+// that outlives the address it names: an appliance changes IP, switches
+// between plain and domain mode, and serves one registry under two names at
+// once, so no single literal is right for every reader — the same release row
+// is read by the appliance's own colocated agent, by off-host devices, and in
+// the cloud. The repository part, by contrast, is stable everywhere. So the
+// device resolves the location itself, here, when the compose file is
+// materialised — the same treatment host ports, env_file and extra_hosts
+// already get in SetupComposeFiles. Stored release data is never touched.
+//
+// A reference whose host actually changes makes the next `compose up` recreate
+// that service: the image is a different tag to docker, so it is pulled once
+// under the new name. That is the intended self-heal for references stranded
+// by a mode switch, and it costs one pull.
+func resolveComposeStoreImages(reswarmConfig *config.ReswarmConfig, appKey uint64, appName string, compose map[string]interface{}) int {
+	if reswarmConfig == nil || compose == nil {
+		return 0
+	}
+
+	registryBase := strings.TrimSuffix(strings.TrimSpace(reswarmConfig.DockerRegistryURL), "/")
+	if registryBase == "" {
+		return 0
+	}
+
+	services, ok := compose["services"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+
+	resolved := 0
+	for _, serviceInterface := range services {
+		service, ok := serviceInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		imageRef, _ := service["image"].(string)
+		if imageRef == "" {
+			continue
+		}
+
+		_, repository := splitRegistryHost(imageRef)
+		if !isOwnStoreImageRepository(reswarmConfig.DockerMainRepository, appKey, appName, repository) {
+			continue
+		}
+
+		resolvedRef := registryBase + "/" + repository
+		if resolvedRef == imageRef {
+			continue
+		}
+
+		service["image"] = resolvedRef
+		resolved++
+	}
+
+	return resolved
+}
+
 // authConfigForImage picks pull credentials by the image's registry host: the
 // platform's own registry gets the device's store token, any other host the
 // app's docker_credentials entry. A miss on an external host degrades to an
@@ -185,9 +289,18 @@ func (sm *StateMachine) warnUncredentialedComposeRegistries(payload common.Trans
 
 	warned := make(map[string]bool)
 	for _, imageRef := range composeImageRefs(compose) {
-		host := registryHostOfImage(imageRef)
+		host, repository := splitRegistryHost(imageRef)
 		normalizedHost := common.NormalizeRegistryHost(host)
 		if normalizedHost == "" || warned[normalizedHost] || isPlatformRegistryHost(config.ReswarmConfig, host) {
+			continue
+		}
+
+		// A store image of this app is pulled from the device's own registry
+		// whatever host the reference was minted with (resolveComposeStoreImages),
+		// so the minted host is not a registry anyone needs credentials for.
+		// Warning about it would send the reader looking for a credential that
+		// changes nothing.
+		if isOwnStoreImageRepository(config.ReswarmConfig.DockerMainRepository, payload.AppKey, payload.AppName, repository) {
 			continue
 		}
 

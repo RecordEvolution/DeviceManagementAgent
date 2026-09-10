@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"reagent/common"
 	"reagent/config"
+	"reagent/trust"
 	"reagent/tunnel"
 	"strings"
 )
@@ -115,5 +116,79 @@ func addComposeExtraHost(service map[string]interface{}) {
 		if _, present := hosts["host.docker.internal"]; !present {
 			hosts["host.docker.internal"] = "host-gateway"
 		}
+	}
+}
+
+// appCABundleHostDir returns the device-side directory holding the CA bundle
+// app containers should verify TLS against, or "" when this device provides
+// none. Callers mount only what exists, so a device where the bundle could not
+// be built behaves exactly as it did before.
+//
+// See the trust package for why this is scoped to appliance-domain devices and
+// why the bundle carries the whole host store rather than just the private CA.
+func appCABundleHostDir(cfg *config.Config) string {
+	if cfg == nil || cfg.ReswarmConfig == nil || cfg.CommandLineArguments == nil {
+		return ""
+	}
+	if !trust.Enabled(cfg.ReswarmConfig.ApplianceDomain) {
+		return ""
+	}
+	if !trust.Available(cfg.CommandLineArguments.AppsDirectory) {
+		return ""
+	}
+	return trust.HostDir(cfg.CommandLineArguments.AppsDirectory)
+}
+
+// caBundleEnvironmentVariables points the common runtimes at the mounted
+// bundle. SSL_CERT_FILE covers OpenSSL-based stacks (Python's ssl, .NET on
+// Linux, Go), REQUESTS_CA_BUNDLE covers Python requests — which uses certifi
+// and ignores the OpenSSL paths entirely — and NODE_EXTRA_CA_CERTS covers
+// Node, where it ADDS to the built-in set rather than replacing it.
+// IRONFLOCK_CA_BUNDLE is the name the SDKs can read when a runtime needs the
+// path explicitly.
+//
+// These are defaults: buildProdEnvironmentVariables appends app-supplied
+// variables after them, so an app that sets its own SSL_CERT_FILE still wins.
+func caBundleEnvironmentVariables(cfg *config.Config) []string {
+	if appCABundleHostDir(cfg) == "" {
+		return nil
+	}
+	return []string{
+		"SSL_CERT_FILE=" + trust.ContainerPath,
+		"REQUESTS_CA_BUNDLE=" + trust.ContainerPath,
+		"NODE_EXTRA_CA_CERTS=" + trust.ContainerPath,
+		"IRONFLOCK_CA_BUNDLE=" + trust.ContainerPath,
+	}
+}
+
+// addComposeCABundleMount mounts the CA bundle directory read-only into a
+// compose service. Authored volumes are preserved; a service that already
+// mounts something there keeps its own.
+func addComposeCABundleMount(service map[string]interface{}, hostCADir string) {
+	if hostCADir == "" {
+		return
+	}
+
+	mountEntry := hostCADir + ":" + trust.ContainerDir + ":ro"
+
+	switch volumes := service["volumes"].(type) {
+	case nil:
+		service["volumes"] = []interface{}{mountEntry}
+	case []interface{}:
+		for _, volume := range volumes {
+			switch entry := volume.(type) {
+			case string:
+				if strings.Contains(entry, ":"+trust.ContainerDir) {
+					return
+				}
+			case map[string]interface{}: // long syntax
+				if target, ok := entry["target"].(string); ok && strings.HasPrefix(target, trust.ContainerDir) {
+					return
+				}
+			}
+		}
+		service["volumes"] = append(volumes, mountEntry)
+	default:
+		// Unexpected shape — leave as authored.
 	}
 }
