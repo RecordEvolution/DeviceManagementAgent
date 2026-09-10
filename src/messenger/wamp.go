@@ -842,8 +842,23 @@ func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 		return nil
 	}
 
-	if reswarmBaseURL := fmt.Sprint(args["reswarmBaseURL"]); reswarmBaseURL != "" {
+	// Type-asserted, not fmt.Sprint-ed: an absent key would otherwise cache
+	// the literal "<nil>" as the base URL.
+	if reswarmBaseURL, ok := args["reswarmBaseURL"].(string); ok && reswarmBaseURL != "" {
 		s.agentConfig.ReswarmConfig.ReswarmBaseURL = reswarmBaseURL
+	}
+
+	// Appliance backends hand off the effective OTA base on every heartbeat
+	// (see applyHandedOffUpdateURL for who takes it and who does not). Persist
+	// it so the next start still uses the local mirror; a failed write costs
+	// only the persistence, never the heartbeat, and is retried on the next
+	// start because the on-disk value then still differs.
+	if changed, url := applyHandedOffUpdateURL(s.agentConfig.ReswarmConfig, args["agentUpdateURL"]); changed {
+		log.Info().Msgf("agent update base handed off by backend: %s", url)
+		cfgPath := s.agentConfig.CommandLineArguments.ConfigFileLocation
+		if err := config.SaveReswarmConfig(cfgPath, s.agentConfig.ReswarmConfig); err != nil {
+			log.Warn().Err(err).Msgf("failed to persist handed-off agent update base to %s", cfgPath)
+		}
 	}
 
 	return nil

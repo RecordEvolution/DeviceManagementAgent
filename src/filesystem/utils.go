@@ -149,14 +149,6 @@ func DownloadURL(filePath string, url string, callback func(DownloadProgress)) e
 		delete(DownloadLocks, filePath)
 	}()
 
-	// open the required file
-	out, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-
-	defer out.Close()
-
 	client := http.Client{
 		Transport: &http.Transport{
 			// Honour HTTP(S)_PROXY/NO_PROXY for the OTA binary download — a
@@ -179,14 +171,36 @@ func DownloadURL(filePath string, url string, callback func(DownloadProgress)) e
 
 	defer resp.Body.Close()
 
+	// A non-2xx body must never land on disk as the "binary": a 404 page has a
+	// Content-Length like any other response, and with the .sha256 sidecar
+	// equally missing the checksum step only warns, so it could get installed.
+	// 206 is accepted alongside 200 in case a Range request is ever used.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download of %s failed: unexpected HTTP status %s", url, resp.Status)
+	}
+
 	size, err := strconv.Atoi(resp.Header.Get("Content-Length"))
 	if err != nil {
 		return err
 	}
 
+	// The destination is created only once the response is accepted, so a
+	// rejected download leaves nothing behind; a body that breaks off is
+	// removed the same way rather than left as a truncated binary.
+	out, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+
+	defer out.Close()
+
 	// copy the http body into the file
 	counter := &WriteCounter{callback: callback, Size: uint64(size), FilePath: filePath}
 	if _, err = io.Copy(out, io.TeeReader(resp.Body, counter)); err != nil {
+		out.Close() // Windows cannot remove an open file
+		if removeErr := os.Remove(filePath); removeErr != nil {
+			log.Warn().Err(removeErr).Msgf("failed to remove partial download %s", filePath)
+		}
 		return err
 	}
 

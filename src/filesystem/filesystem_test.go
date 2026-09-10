@@ -395,6 +395,78 @@ func TestDownloadURL(t *testing.T) {
 	assert.False(t, locked, "download lock should be released after completion")
 }
 
+func TestDownloadURLStatusHandling(t *testing.T) {
+	payload := []byte("binary-bytes")
+
+	tests := []struct {
+		name    string
+		status  int
+		wantErr bool
+	}{
+		{name: "200 OK is written to disk", status: http.StatusOK},
+		{name: "206 Partial Content is accepted", status: http.StatusPartialContent},
+		{name: "404 Not Found is rejected", status: http.StatusNotFound, wantErr: true},
+		{name: "500 Internal Server Error is rejected", status: http.StatusInternalServerError, wantErr: true},
+		{name: "503 Service Unavailable is rejected", status: http.StatusServiceUnavailable, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Error pages carry a Content-Length too — that is exactly how a
+				// 404 body used to end up on disk as the "binary".
+				w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+				w.WriteHeader(tt.status)
+				_, _ = w.Write(payload)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "out.bin")
+			err := DownloadURL(dest, srv.URL, nil)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), strconv.Itoa(tt.status), "error names the status")
+				assert.Contains(t, err.Error(), srv.URL, "error names the URL")
+				_, statErr := os.Stat(dest)
+				assert.True(t, os.IsNotExist(statErr), "a rejected download must leave no file behind")
+			} else {
+				require.NoError(t, err)
+				got, readErr := os.ReadFile(dest)
+				require.NoError(t, readErr)
+				assert.Equal(t, payload, got)
+			}
+
+			_, locked := DownloadLocks[dest]
+			assert.False(t, locked, "download lock should be released")
+		})
+	}
+}
+
+func TestDownloadURLRemovesPartialFileOnTruncatedBody(t *testing.T) {
+	// Hijack the connection to send a raw response that promises more bytes
+	// than it delivers, then close: the client sees an unexpected EOF mid-copy.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		require.True(t, ok, "test server must support hijacking")
+		conn, _, err := hj.Hijack()
+		require.NoError(t, err)
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial")
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "out.bin")
+	err := DownloadURL(dest, srv.URL, nil)
+	require.Error(t, err, "a truncated body should error")
+
+	_, statErr := os.Stat(dest)
+	assert.True(t, os.IsNotExist(statErr), "the partial file must be removed")
+
+	_, locked := DownloadLocks[dest]
+	assert.False(t, locked, "download lock should be released even on error")
+}
+
 func TestDownloadURLMissingContentLength(t *testing.T) {
 	// Stream the body in chunks without ever setting Content-Length. The Go
 	// server then uses chunked transfer-encoding, leaving Content-Length empty,
