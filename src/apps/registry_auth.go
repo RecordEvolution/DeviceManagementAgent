@@ -3,6 +3,7 @@ package apps
 import (
 	"fmt"
 	"reagent/common"
+	"reagent/config"
 	"reagent/container"
 	"strings"
 )
@@ -44,6 +45,105 @@ func credentialForRegistryHost(credentials map[string]common.DockerCredential, h
 	return container.AuthConfig{Username: cred.Username, Password: cred.Password}, found
 }
 
+// applianceRegistryHost returns the name an appliance's registry answers to on
+// its own domain — registry.<appliance_domain>, the Caddy vhost in front of
+// appstore-registry — or "" for a device that is not attached to an appliance
+// domain.
+//
+// An appliance in domain mode has TWO names for ONE registry, and which name
+// an image reference carries depends on who minted it: the appliance's own
+// colocated agent is configured with the loopback form (localhost:15001, see
+// install_ironflock.sh AGENT_DOCKER_REGISTRY_URL — the host's docker daemon
+// resolves it and it survives the registry port leaving the LAN), while every
+// ref the app-store sync rewrites carries the domain form (RESWARM
+// appStore.ts, from the backend's DOCKER_REGISTRY_URL). Both names reach the
+// same registry and the same regauth token service, so the device's own store
+// credential authenticates against either.
+func applianceRegistryHost(reswarmConfig *config.ReswarmConfig) string {
+	if reswarmConfig == nil {
+		return ""
+	}
+	domain := strings.TrimSpace(reswarmConfig.ApplianceDomain)
+	if domain == "" {
+		return ""
+	}
+	return common.NormalizeRegistryHost("registry." + domain)
+}
+
+// platformRegistryHosts lists the canonical registry hosts the device's own
+// store credential (registry token + device secret) authenticates against:
+// the configured registry URL plus, on an appliance, its domain-mode alias.
+func platformRegistryHosts(reswarmConfig *config.ReswarmConfig) []string {
+	if reswarmConfig == nil {
+		return nil
+	}
+
+	hosts := make([]string, 0, 2)
+	if primary := common.NormalizeRegistryHost(reswarmConfig.DockerRegistryURL); primary != "" {
+		hosts = append(hosts, primary)
+	}
+	if alias := applianceRegistryHost(reswarmConfig); alias != "" && (len(hosts) == 0 || hosts[0] != alias) {
+		hosts = append(hosts, alias)
+	}
+
+	return hosts
+}
+
+// isPlatformRegistryHost reports whether an image's registry host is one of
+// the platform's own names, i.e. whether the store credential covers it.
+func isPlatformRegistryHost(reswarmConfig *config.ReswarmConfig, host string) bool {
+	normalizedHost := common.NormalizeRegistryHost(host)
+	if normalizedHost == "" {
+		return false
+	}
+
+	for _, platformHost := range platformRegistryHosts(reswarmConfig) {
+		if platformHost == normalizedHost {
+			return true
+		}
+	}
+
+	return false
+}
+
+// composeImageRefs returns every service's `image:` value in a compose
+// definition, in no particular order.
+func composeImageRefs(compose map[string]interface{}) []string {
+	services, ok := compose["services"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	imageRefs := make([]string, 0, len(services))
+	for _, serviceInterface := range services {
+		service, ok := serviceInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if imageRef, _ := service["image"].(string); imageRef != "" {
+			imageRefs = append(imageRefs, imageRef)
+		}
+	}
+
+	return imageRefs
+}
+
+// composeReferencesRegistryHost reports whether any service image in a compose
+// definition lives on the given (already canonical) registry host.
+func composeReferencesRegistryHost(compose map[string]interface{}, host string) bool {
+	if compose == nil || host == "" {
+		return false
+	}
+
+	for _, imageRef := range composeImageRefs(compose) {
+		if common.NormalizeRegistryHost(registryHostOfImage(imageRef)) == host {
+			return true
+		}
+	}
+
+	return false
+}
+
 // authConfigForImage picks pull credentials by the image's registry host: the
 // platform's own registry gets the device's store token, any other host the
 // app's docker_credentials entry. A miss on an external host degrades to an
@@ -54,7 +154,7 @@ func (sm *StateMachine) authConfigForImage(payload common.TransitionPayload, ima
 	config := sm.Container.GetConfig()
 	host := registryHostOfImage(imageRef)
 
-	if common.NormalizeRegistryHost(host) == common.NormalizeRegistryHost(config.ReswarmConfig.DockerRegistryURL) {
+	if isPlatformRegistryHost(config.ReswarmConfig, host) {
 		return container.AuthConfig{
 			Username: payload.RegisteryToken,
 			Password: config.ReswarmConfig.Secret,
@@ -81,29 +181,13 @@ func (sm *StateMachine) warnUncredentialedComposeRegistries(payload common.Trans
 		return
 	}
 
-	services, ok := compose["services"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
 	config := sm.Container.GetConfig()
-	storeHost := common.NormalizeRegistryHost(config.ReswarmConfig.DockerRegistryURL)
 
 	warned := make(map[string]bool)
-	for _, serviceInterface := range services {
-		service, ok := serviceInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		imageRef, _ := service["image"].(string)
-		if imageRef == "" {
-			continue
-		}
-
+	for _, imageRef := range composeImageRefs(compose) {
 		host := registryHostOfImage(imageRef)
 		normalizedHost := common.NormalizeRegistryHost(host)
-		if normalizedHost == "" || normalizedHost == storeHost || warned[normalizedHost] {
+		if normalizedHost == "" || warned[normalizedHost] || isPlatformRegistryHost(config.ReswarmConfig, host) {
 			continue
 		}
 

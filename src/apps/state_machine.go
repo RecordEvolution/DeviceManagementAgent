@@ -318,9 +318,29 @@ func (sm *StateMachine) HandleRegistryLoginsWithDefault(payload common.Transitio
 		credentials = make(map[string]common.DockerCredential, 1)
 	}
 
-	credentials[common.NormalizeRegistryHost(config.ReswarmConfig.DockerRegistryURL)] = common.DockerCredential{
+	storeCredential := common.DockerCredential{
 		Username: payload.RegisteryToken,
 		Password: config.ReswarmConfig.Secret,
+	}
+	credentials[common.NormalizeRegistryHost(config.ReswarmConfig.DockerRegistryURL)] = storeCredential
+
+	// An appliance in domain mode serves ONE registry under TWO names, and the
+	// appliance's own colocated agent is configured with the loopback one
+	// (localhost:15001) while the app-store sync stamps registry.<appliance_domain>
+	// into every image ref it rewrites (see applianceRegistryHost). `docker
+	// compose pull` looks credentials up by the image's own host, so with a login
+	// under the loopback name only, a synced app's pull ran anonymously and the
+	// daemon reported a bare "Authentication required" for every image
+	// (tls-sf015 ironflock-instance, 2026-09-10). Log in under the alias as well —
+	// but only when this app's compose actually references it: on an appliance
+	// whose cert the host's docker does not trust (local-CA --tls) that login
+	// would fail, and it must not take down transitions that never need it.
+	if alias := applianceRegistryHost(config.ReswarmConfig); alias != "" {
+		if _, exists := credentials[alias]; !exists &&
+			(composeReferencesRegistryHost(payload.DockerCompose, alias) ||
+				composeReferencesRegistryHost(payload.NewDockerCompose, alias)) {
+			credentials[alias] = storeCredential
+		}
 	}
 
 	return sm.Container.HandleRegistryLogins(credentials)
