@@ -18,8 +18,17 @@ what ships:
 Out of scope (deliberately):
 
 - ❌ **The Docker images** — the builder (`Dockerfile`) is a throwaway build vehicle;
-  the `ubuntu:22.04` runtime image (`docker/Dockerfile`) is only used for local dev
-  against the REDeployments stack. Neither ships to devices.
+  the `ubuntu:24.04` runtime image (`docker/Dockerfile`) is only used for local dev
+  against the REDeployments stack (its `agent` service). Neither ships to devices —
+  devices run the static binary pulled from `gs://re-agent`. Note the runtime image
+  *is* pushed to `europe-docker.pkg.dev/.../ironflock-agent` on every tagged release
+  (`release.yml` → `just push-docker-image`), so developers pull it; it just never
+  reaches a device or a production cluster. Kept on **ubuntu** (not alpine) on
+  purpose: its job is to resemble a real device, and devices are glibc Debian-family,
+  so a musl base would make the one environment built for fidelity diverge from
+  production. Bumped `22.04` → `24.04` on **2026-09-11** and given an
+  `apt-get upgrade`, which took it from 133 CVEs (9 fixable) to **115 (0 fixable in
+  the OS layer)**.
 - ❌ **The edge host OS** — it's the customer's device, not something we ship.
 
 ## Tools
@@ -88,14 +97,28 @@ as long as releases go through CI (tag push) rather than a local `just rollout`.
 ## Remediation status
 
 - **Go standard-library CVEs** (the bulk of our findings — `crypto/tls`, `crypto/x509`,
-  `net/url`, `net/http`, …) are fixed by the **Go toolchain**. We pin **`toolchain go1.26.4`**
-  in `src/go.mod` (and `golang:1.26-alpine` in the builder `Dockerfile`); CI's `setup-go`
-  reads `go.mod`. This cleared all 14 reachable stdlib CVEs. Bump the toolchain as new ones
-  are disclosed.
+  `net/url`, `net/http`, …) are fixed by the **Go toolchain**. We pin **`toolchain go1.27.1`**
+  in `src/go.mod` (and `golang:1.27-alpine` in the builder `Dockerfile`); CI's `setup-go`
+  reads `go.mod`. Bump the toolchain as new ones are disclosed — this is not a one-time
+  fix. On **2026-09-11** the pin moved `go1.26.4` → `go1.27.1`, clearing 6 stdlib CVEs
+  (`net/url`, `crypto/tls` ×2, `net/http` ×2, `encoding/asn1`) that had been disclosed
+  since the previous bump.
+- **`golang.org/x` module CVEs** — bumped **2026-09-11**: `x/net` v0.55.0 → **v0.59.0**
+  (GO-2026-5942), `x/crypto` v0.53.0 → **v0.57.0** (GO-2026-6355, -6354, -6303), and
+  `x/text` v0.38.0 → **v0.42.0** (GO-2026-5970, the only one that was *reachable*).
+  Together with the toolchain bump this took govulncheck from **9 reachable / 8 module**
+  findings to **2 reachable / 4 module** — and every remaining one has no fix available
+  (see below).
 - **frpc binary CVEs** — remediated by bumping **`FRP_VERSION`** to a newer release (kept in
   sync across `Justfile`, `scripts/build.sh`, and `src/embedded/frpc.go`).
 
 ### Accepted findings (not actionable)
+
+As of 2026-09-11 **every remaining govulncheck finding reports `Fixed in: N/A`** — there
+is nothing left that a dependency bump can clear. Five are in `github.com/docker/docker`
+(2 reachable, 3 module-only) and one is the unmaintained `golang.org/x/crypto/openpgp`
+(GO-2026-5932, no fix version, we never call it). `v28.5.2+incompatible` is already the
+**latest** published `docker/docker`, so there is no newer release to move to.
 
 `govulncheck` reports two CVEs in `github.com/docker/docker` as reachable; they are
 **accepted / not applicable**:
@@ -106,8 +129,14 @@ as long as releases go through CI (tag push) rather than a local `just rollout`.
   exercised. govulncheck flags them only because importing the client SDK pulls the module's
   `init()` chain into the call graph.
 - There is **no fix in `github.com/docker/docker`** (all versions affected, incl. v28.x); the
-  fix lives only in the renamed, still-**beta** module `github.com/moby/moby/v2@2.0.0-beta.8`.
+  fix lives only in the renamed, still-**beta** module `github.com/moby/moby/v2` (as of
+  2026-09-11: `v2.0.0-beta.23`, still no stable release).
   Migrating a production agent to a beta Docker SDK isn't warranted for a non-applicable issue.
+- **Do not trust trivy's fix hint here.** trivy reports `github.com/docker/docker
+  v28.5.2+incompatible → 29.3.1` as fixable. That `29.3.1` is the *Docker product*
+  version; there is **no v29 on the `github.com/docker/docker` module path** (the proxy
+  list ends at `v28.5.2+incompatible`), because v29 ships as `github.com/moby/moby/v2`.
+  `go get github.com/docker/docker@v29.3.1` cannot resolve. Same accepted reasoning.
 
 Revisit when `github.com/moby/moby/v2` reaches a stable release (then migrate the SDK import).
 

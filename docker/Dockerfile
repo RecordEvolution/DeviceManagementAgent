@@ -15,7 +15,7 @@
 #       --build-arg TARGETARCH=amd64 \
 #       -t ironflock-agent:local .
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # No default — BuildKit auto-populates TARGETARCH from the target platform
 # (host arch if --platform is not set). A default would shadow that and
@@ -25,7 +25,12 @@ FROM ubuntu:22.04
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` is deliberate: the published ubuntu base image lags the
+# archive, so without it the image ships known-vulnerable base packages that a
+# plain `install` never touches (it only resolves the named packages). This is a
+# dev-stack image, but keeping the base current is cheap. See
+# docs/SECURITY-SCANNING.md.
+RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
         apt-transport-https \
         ca-certificates \
         curl \
