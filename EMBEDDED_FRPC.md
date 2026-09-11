@@ -20,8 +20,8 @@ Starting with this version, the `frpc` (Fast Reverse Proxy Client) binary is emb
 
 The FRP version is hardcoded in two places and **must be kept in sync**:
 
-- `src/embedded/frpc.go`: `const FRP_VERSION = "0.65.0"`
-- `scripts/build.sh`: `FRP_VERSION="0.65.0"`
+- `src/embedded/frpc.go`: `const FRP_VERSION = "0.71.0"`
+- `scripts/build.sh`: `FRP_VERSION="0.71.0"`
 
 **Important**: This version must match the `frps` (server) version used in the RETunnel repository.
 
