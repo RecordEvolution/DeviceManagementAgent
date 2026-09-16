@@ -428,27 +428,30 @@ func (m *MockNexusClient) Unsubscribe(topic string) error {
 
 func (m *MockNexusClient) Call(ctx context.Context, procedure string, options wamp.Dict, args wamp.List, kwargs wamp.Dict, progCb client.ProgressHandler) (*wamp.Result, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.callCount++
 	m.lastCallArgs = args
+	overLimit := m.callLimit > 0 && m.callCount > m.callLimit
+	onCall, callError, callResult := m.onCall, m.callError, m.callResult
+	m.mu.Unlock()
 
 	// Check call limit
-	if m.callLimit > 0 && m.callCount > m.callLimit {
+	if overLimit {
 		return nil, ErrMockCallLimitExceeded
 	}
 
-	// Use custom handler if set
-	if m.onCall != nil {
-		return m.onCall(procedure)
+	// The custom handler runs outside the lock, so a handler that blocks (a
+	// test's stand-in for a call that never returns) does not also block
+	// Close, Connected and Done.
+	if onCall != nil {
+		return onCall(procedure)
 	}
 
-	if m.callError != nil {
-		return nil, m.callError
+	if callError != nil {
+		return nil, callError
 	}
 
-	if m.callResult != nil {
-		return m.callResult, nil
+	if callResult != nil {
+		return callResult, nil
 	}
 
 	return &wamp.Result{}, nil

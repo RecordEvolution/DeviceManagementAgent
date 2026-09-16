@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reagent/common"
@@ -123,14 +124,38 @@ type WampSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// statusUpdateMu serializes UpdateRemoteDeviceStatus end to end (probe +
+	// statusSlot serializes UpdateRemoteDeviceStatus end to end (probe +
 	// send). The heartbeat, OnConnect and the daemon-recovery transition
-	// pushes all call it concurrently; without the lock a push whose
+	// pushes all call it concurrently; without it a push whose
 	// docker_available probe hung across a daemon recovery could send its
 	// stale payload AFTER a fresher push, and the backend persists in arrival
 	// order — leaving a wrong badge for up to a heartbeat.
-	statusUpdateMu sync.Mutex
+	//
+	// One slot per connection, re-created in connect(): a push that never
+	// returns (a call parked on a dead writer, a probe hung on a dead mount)
+	// keeps only the slot of the connection it started on, so the next
+	// connection's pushes are not queued behind it. Waiting for the slot is
+	// bounded by statusUpdateTimeout for the same reason.
+	statusSlot          chan struct{}
+	statusUpdateTimeout time.Duration
+	// lastStatusPush is when a push last released the slot (unix nanos);
+	// the stall watchdog reads it as its sign of progress.
+	lastStatusPush atomic.Int64
+	// onStall is what the watchdog does about a heartbeat that stopped
+	// completing rounds: Reconnect, unless a test injects something else.
+	onStall func()
 }
+
+// ErrStatusUpdateStuck is returned when a status push cannot get its turn
+// within statusUpdateTimeout: the push holding the slot has outlived every
+// timeout that should have bounded it. The caller is not queued behind it;
+// the stall watchdog decides what happens next.
+var ErrStatusUpdateStuck = errors.New("previous device status update still in flight")
+
+// heartbeatStallRounds is how many consecutive heartbeat intervals may pass
+// on a live connection without any status push completing before the
+// connection counts as stalled.
+const heartbeatStallRounds = 3
 
 // SetTunnelCapableFunc wires the per-device tunnel-capability getter into the
 // heartbeat payload. Called once by the agent after construction.
@@ -243,13 +268,26 @@ func NewWampSession(cfg *config.Config, socketConfig *SocketConfig, container co
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+	// One heartbeat interval is well above a push's legitimate worst case
+	// (3s docker probe + 10s call + the cancel round-trip).
+	session.statusUpdateTimeout = session.heartbeatInterval()
+	session.onStall = session.Reconnect
 
 	if err := session.connect(false); err != nil {
 		cancel()
 		return nil, err
 	}
 
+	go session.watchHeartbeat()
+
 	return session, nil
+}
+
+func (s *WampSession) heartbeatInterval() time.Duration {
+	if s.socketConfig.HeartbeatInterval != 0 {
+		return s.socketConfig.HeartbeatInterval
+	}
+	return DefaultHeartbeatInterval
 }
 
 // connect dials the router (with retry until success or session close) and
@@ -273,6 +311,7 @@ func (s *WampSession) connect(isReconnect bool) error {
 	// repeated failures and the watcher treats that as a lost connection.
 	hbDone := make(chan struct{})
 	s.heartbeatDone = hbDone
+	s.statusSlot = make(chan struct{}, 1)
 	s.mu.Unlock()
 
 	if s.socketConfig.SetupTestament {
@@ -341,6 +380,11 @@ func (s *WampSession) watchDisconnect(c NexusClient, hbDone chan struct{}) {
 		log.Warn().Msg("WAMP connection lost, reconnecting...")
 	case <-hbDone:
 		log.Warn().Msg("Heartbeat detected connection failure, reconnecting...")
+		// The transport never noticed, so nothing has cancelled this
+		// client: close it in the background so a request parked on its
+		// writer is released. Not awaited — Close waits for running
+		// invocation handlers.
+		go func() { _ = c.Close() }()
 	case <-s.ctx.Done():
 		return
 	}
@@ -352,6 +396,70 @@ func (s *WampSession) watchDisconnect(c NexusClient, hbDone chan struct{}) {
 	}
 }
 
+// watchHeartbeat is the backstop for a heartbeat that stops completing
+// rounds while the connection looks fine — a push parked on a dead writer,
+// a probe hung on a dead mount, a heartbeat goroutine that died. None of
+// that fails a call or wakes the disconnect watcher, so from outside the
+// device just stays DISCONNECTED (tls-sf015, 2026-09-16: eight hours, until
+// someone restarted the agent). After heartbeatStallRounds intervals with
+// no push released it runs onStall — a reconnect, which brings a fresh slot
+// and a fresh heartbeat and leaves whatever is stuck behind.
+func (s *WampSession) watchHeartbeat() {
+	interval := s.heartbeatInterval()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	lastSeen := s.lastStatusPush.Load()
+	stale := 0
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if !s.Connected() {
+			// The disconnect watcher owns this phase; its dial loop is bounded.
+			stale = 0
+			continue
+		}
+		if seen := s.lastStatusPush.Load(); seen != lastSeen {
+			lastSeen = seen
+			stale = 0
+			continue
+		}
+		stale++
+		if stale < heartbeatStallRounds {
+			continue
+		}
+		log.Error().Msgf("No device status push completed in %d heartbeat intervals while connected, forcing a reconnect", stale)
+		stale = 0
+		s.onStall()
+	}
+}
+
+// acquireStatusSlot takes the current connection's status slot, waiting at
+// most statusUpdateTimeout. The returned release stamps lastStatusPush so
+// the stall watchdog sees progress.
+func (s *WampSession) acquireStatusSlot() (release func(), err error) {
+	s.mu.Lock()
+	slot := s.statusSlot
+	timeout := s.statusUpdateTimeout
+	s.mu.Unlock()
+
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case slot <- struct{}{}:
+	case <-t.C:
+		return nil, ErrStatusUpdateStuck
+	}
+	return func() {
+		s.lastStatusPush.Store(time.Now().UnixNano())
+		<-slot
+	}, nil
+}
+
 // startHeartbeat periodically sends a device-status update (CONNECTED) that
 // doubles as an application-level liveness probe and a periodic stats report.
 // After maxConsecutiveFailures failed sends it closes hbDone, which the
@@ -360,10 +468,7 @@ func (s *WampSession) watchDisconnect(c NexusClient, hbDone chan struct{}) {
 // connection replaces s.heartbeatDone this goroutine exits, so heartbeats never
 // accumulate across reconnects.
 func (s *WampSession) startHeartbeat(hbDone chan struct{}) {
-	heartbeatInterval := s.socketConfig.HeartbeatInterval
-	if heartbeatInterval == 0 {
-		heartbeatInterval = DefaultHeartbeatInterval
-	}
+	heartbeatInterval := s.heartbeatInterval()
 
 	go func() {
 		defer func() {
@@ -397,7 +502,11 @@ func (s *WampSession) startHeartbeat(hbDone chan struct{}) {
 				continue
 			}
 
-			if err := s.UpdateRemoteDeviceStatus(CONNECTED); err != nil {
+			if err := s.UpdateRemoteDeviceStatus(CONNECTED); errors.Is(err, ErrStatusUpdateStuck) {
+				// Not a connection failure: a reconnect driven from here would
+				// not free the stuck push. The stall watchdog handles it.
+				log.Warn().Err(err).Msg("Heartbeat skipped")
+			} else if err != nil {
 				consecutiveFailures++
 				log.Warn().Err(err).Msgf("Failed to send heartbeat (%d/%d failures), connection may be lost", consecutiveFailures, maxConsecutiveFailures)
 				if consecutiveFailures >= maxConsecutiveFailures {
@@ -822,11 +931,14 @@ func clientAuthFunc(deviceSecret string) func(c *wamp.Challenge) (string, wamp.D
 }
 
 func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
-	// Serialized: with probe and send under one lock, payloads reach the
+	// Serialized: with probe and send under one slot, payloads reach the
 	// backend in probe order, so a stale health reading can never overwrite a
-	// fresher one (see statusUpdateMu).
-	s.statusUpdateMu.Lock()
-	defer s.statusUpdateMu.Unlock()
+	// fresher one (see statusSlot).
+	release, err := s.acquireStatusSlot()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	cfg := s.GetConfig()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
