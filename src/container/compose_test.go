@@ -360,16 +360,79 @@ func TestComposeErrorNamesSubcommandAndQuotesOutput(t *testing.T) {
 	assert.Equal(t, "docker compose stop failed: exit status 1", bare.Error())
 }
 
-func TestComposeOutputTailKeepsTheLastLines(t *testing.T) {
-	tail := &composeOutputTail{}
-	for i := 0; i < composeTailLines+5; i++ {
-		tail.add(fmt.Sprintf("line-%d", i))
-	}
+func TestComposeOutputTailKeepsTheHeadAndTheLastLines(t *testing.T) {
+	t.Run("short output is rendered once, in order", func(t *testing.T) {
+		tail := &composeOutputTail{}
+		for i := 0; i < composeTailLines; i++ {
+			tail.add(fmt.Sprintf("line-%d", i))
+		}
 
-	joined := tail.String()
-	assert.NotContains(t, joined, "line-4", "the oldest lines are evicted")
-	assert.Contains(t, joined, fmt.Sprintf("line-%d", composeTailLines+4), "the newest line is kept")
-	assert.Len(t, strings.Split(joined, "; "), composeTailLines)
+		joined := tail.String()
+		assert.Len(t, strings.Split(joined, "; "), composeTailLines)
+		assert.True(t, strings.HasPrefix(joined, "line-0; line-1;"), "no line is repeated from the head: %s", joined)
+		assert.NotContains(t, joined, "omitted")
+	})
+
+	t.Run("long output keeps the head, marks the gap and keeps the tail", func(t *testing.T) {
+		tail := &composeOutputTail{}
+		total := composeTailLines + composeHeadLines + 10
+		for i := 0; i < total; i++ {
+			tail.add(fmt.Sprintf("line-%d", i))
+		}
+
+		joined := tail.String()
+		parts := strings.Split(joined, "; ")
+		require.Len(t, parts, composeHeadLines+1+composeTailLines)
+
+		for i := 0; i < composeHeadLines; i++ {
+			assert.Equal(t, fmt.Sprintf("line-%d", i), parts[i], "the first lines are kept")
+		}
+		assert.Equal(t, "(10 line(s) omitted)", parts[composeHeadLines])
+		assert.Equal(t, fmt.Sprintf("line-%d", total-composeTailLines), parts[composeHeadLines+1], "the tail starts right after the gap")
+		assert.Equal(t, fmt.Sprintf("line-%d", total-1), parts[len(parts)-1], "the newest line is kept")
+	})
+
+	t.Run("a head line still inside the tail is not repeated", func(t *testing.T) {
+		tail := &composeOutputTail{}
+		for i := 0; i < composeTailLines+2; i++ {
+			tail.add(fmt.Sprintf("line-%d", i))
+		}
+
+		parts := strings.Split(tail.String(), "; ")
+		require.Len(t, parts, composeTailLines+2, "two evicted lines come from the head, nothing is omitted")
+		assert.Equal(t, "line-0", parts[0])
+		assert.Equal(t, "line-1", parts[1])
+		assert.Equal(t, "line-2", parts[2])
+		assert.NotContains(t, tail.String(), "omitted")
+	})
+
+	t.Run("a kept line is capped", func(t *testing.T) {
+		tail := &composeOutputTail{}
+		tail.add(strings.Repeat("x", composeLineMaxBytes*4))
+
+		assert.Less(t, len(tail.String()), composeLineMaxBytes+8)
+		assert.True(t, strings.HasSuffix(tail.String(), "…"))
+	})
+}
+
+// A crash of the CLI binary itself (Go runtime abort) prints its reason FIRST,
+// then hundreds of stack and register lines. The error must carry that first
+// line, not just the registers at the end.
+func TestComposeErrorCarriesTheReasonOfACrashedCLI(t *testing.T) {
+	c := newFakeComposeCompose(t, `echo "panic: runtime error: invalid memory address" >&2
+echo "goroutine 1 [running]:" >&2
+i=0; while [ $i -lt 200 ]; do echo "  /usr/local/go/src/runtime/proc.go:$i +0x67 fp=0xc0000687e0" >&2; i=$((i+1)); done
+echo "rax 0x0; rip 0x7f32f088195c; rflags 0x246; cs 0x33" >&2
+exit 2`)
+
+	err := c.Stop("/tmp/does-not-matter.yml")
+
+	var composeErr *ComposeError
+	require.ErrorAs(t, err, &composeErr)
+	assert.Contains(t, err.Error(), "exit status 2")
+	assert.Contains(t, err.Error(), "panic: runtime error: invalid memory address", "the crash reason from the head survives")
+	assert.Contains(t, err.Error(), "line(s) omitted")
+	assert.Contains(t, err.Error(), "rflags 0x246", "the tail is still there")
 }
 
 // A failing stop/rm/down is run for effect and nothing consumes its stream;

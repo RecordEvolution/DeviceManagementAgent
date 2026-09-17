@@ -129,9 +129,7 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 
 		log.Warn().Err(rowErr).Msgf("crashloop for %s (%s): failed to refresh the requested-state payload; retrying the captured one",
 			crashTask.Payload.AppName, crashTask.Payload.Stage)
-		retryPayload := crashTask.Payload
-		retryPayload.Retrying = true
-		clm.RequestAppState(retryPayload)
+		clm.driveRetry(crashTask, crashTask.Payload)
 		return
 	}
 
@@ -171,8 +169,57 @@ func (clm *AppManager) crashLoopWake(crashTask *CrashLoop) {
 	// honored. Retrying stays set so RequestAppState does not clear this loop
 	// and the backoff keeps growing.
 	carryPushOnlyFields(&rowPayload, crashTask.Payload)
-	rowPayload.Retrying = true
-	clm.RequestAppState(rowPayload)
+	clm.driveRetry(crashTask, rowPayload)
+}
+
+// driveRetry runs one attempt of a crashloop. A request that fails before its
+// transition even starts (app store read, registry token fetch, port sync)
+// never reaches the transition failure path that extends the loop, so the
+// loop would keep its entry — which tells the observers the retry is owned,
+// see driveCorrectedProdApp — with no goroutine left to drive it. Such a
+// failure counts as a failed attempt and schedules the next one; the check is
+// by task identity so a loop cleared meanwhile (a fresh cloud push took over)
+// is not resurrected.
+func (clm *AppManager) driveRetry(crashTask *CrashLoop, payload common.TransitionPayload) {
+	payload.Retrying = true
+	err := clm.RequestAppState(payload)
+	if err == nil {
+		return
+	}
+
+	clm.crashLoopLock.Lock()
+	_, active := clm.crashLoops[crashTask]
+	clm.crashLoopLock.Unlock()
+	if !active {
+		return
+	}
+
+	log.Warn().Err(err).Msgf("crashloop retry for %s (%s) could not be started; scheduling the next attempt",
+		crashTask.Payload.AppName, crashTask.Payload.Stage)
+	clm.retry(crashTask)
+}
+
+// findCrashLoopLocked returns the loop that owns an app's retries, or nil.
+// The caller holds crashLoopLock.
+func (clm *AppManager) findCrashLoopLocked(appKey uint64, stage common.Stage) *CrashLoop {
+	for crashTask := range clm.crashLoops {
+		if crashTask.Payload.Stage == stage && crashTask.Payload.AppKey == appKey {
+			return crashTask
+		}
+	}
+	return nil
+}
+
+// hasActiveCrashLoop reports whether a crashloop currently owns an app's
+// retries. Every loop entry has a goroutine that will wake and decide
+// (retry, re-plan or clear): incrementCrashLoop always spawns one, a retry
+// that fails re-arms one (driveRetry), and a retry that completes clears the
+// entry (RequestAppState). The observers consult this before re-driving an
+// app themselves.
+func (clm *AppManager) hasActiveCrashLoop(appKey uint64, stage common.Stage) bool {
+	clm.crashLoopLock.Lock()
+	defer clm.crashLoopLock.Unlock()
+	return clm.findCrashLoopLocked(appKey, stage) != nil
 }
 
 // carryPushOnlyFields copies the payload fields that exist only on live cloud
@@ -190,14 +237,7 @@ func carryPushOnlyFields(rowPayload *common.TransitionPayload, captured common.T
 
 func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {
 	clm.crashLoopLock.Lock()
-	var foundTask *CrashLoop
-	for crashTask := range clm.crashLoops {
-		if crashTask.Payload.Stage == stage && crashTask.Payload.AppKey == appKey {
-			foundTask = crashTask
-			break
-		}
-	}
-
+	foundTask := clm.findCrashLoopLocked(appKey, stage)
 	if foundTask != nil {
 		log.Debug().Msgf("clearing an existing crashloop for %d (%s)", appKey, stage)
 		delete(clm.crashLoops, foundTask)
@@ -208,16 +248,7 @@ func (clm *AppManager) clearCrashLoop(appKey uint64, stage common.Stage) {
 
 func (clm *AppManager) incrementCrashLoop(payload common.TransitionPayload) (uint, time.Duration) {
 	clm.crashLoopLock.Lock()
-	existingCrashes := clm.crashLoops
-
-	var existingCrash *CrashLoop
-	for crash := range existingCrashes {
-		if crash.Payload.Stage == payload.Stage &&
-			crash.Payload.AppKey == payload.AppKey {
-			existingCrash = crash
-			break
-		}
-	}
+	existingCrash := clm.findCrashLoopLocked(payload.AppKey, payload.Stage)
 	clm.crashLoopLock.Unlock()
 
 	if existingCrash != nil {

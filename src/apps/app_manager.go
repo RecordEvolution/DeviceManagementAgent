@@ -668,6 +668,14 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 				log.Info().Msgf("Successfully canceled transition for App (%s, %s)", app.AppName, app.Stage)
 			}
 
+			// A completed transition leaves no retry to own. A crashloop retry
+			// that succeeded used to leave its loop entry behind (nothing
+			// cleared it until the next fresh push), so a later failure resumed
+			// at the old, already long backoff — and the observers, which now
+			// defer to an active loop (driveCorrectedProdApp), would have
+			// deferred to a loop with no goroutine behind it.
+			am.clearCrashLoop(app.AppKey, app.Stage)
+
 			// Verify if app has the latest requested state
 			// TODO: properly handle it when verifying fails
 			err := am.VerifyState(app)

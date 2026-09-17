@@ -71,7 +71,7 @@ func (sm *StateMachine) recoverFailedComposeToPresent(payload common.TransitionP
 				return setupErr
 			}
 
-			teardownErr := teardownComposeProject(sm.Container.Compose(), dockerComposePath)
+			teardownErr := sm.teardownComposeProject(payload, app, dockerComposePath)
 			if teardownErr != nil {
 				return teardownErr
 			}

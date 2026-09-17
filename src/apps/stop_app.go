@@ -104,9 +104,7 @@ func (sm *StateMachine) stopDevComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	compose := sm.Container.Compose()
-
-	err = teardownComposeProject(compose, dockerComposePath)
+	err = sm.teardownComposeProject(payload, app, dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -135,9 +133,7 @@ func (sm *StateMachine) stopProdComposeApp(payload common.TransitionPayload, app
 		return err
 	}
 
-	compose := sm.Container.Compose()
-
-	err = teardownComposeProject(compose, dockerComposePath)
+	err = sm.teardownComposeProject(payload, app, dockerComposePath)
 	if err != nil {
 		return err
 	}

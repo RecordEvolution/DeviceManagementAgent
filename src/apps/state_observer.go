@@ -169,7 +169,7 @@ func (so *StateObserver) addComposeObserver(stage common.Stage, appKey uint64, a
 	// containers with the project name) instead of shelling out a
 	// `docker compose ls` — this runs on every container start event.
 	listCtx, listCancel := context.WithTimeout(context.Background(), time.Second*30)
-	containers, err := so.listComposeProjectContainers(listCtx, composeName)
+	containers, err := listComposeProjectContainers(listCtx, so.Container, composeName)
 	listCancel()
 	if err != nil {
 		return false, err
@@ -351,7 +351,7 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 	}
 
 	statusCtx, cancelStatus := context.WithTimeout(context.Background(), time.Second*30)
-	containers, err := so.listComposeProjectContainers(statusCtx, composeName)
+	containers, err := listComposeProjectContainers(statusCtx, so.Container, composeName)
 	cancelStatus()
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to get container status for compose app %s", composeName)
@@ -724,31 +724,9 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 					}
 				}
 
-				if stage == common.PROD {
-					// try to transition to the state it's supposed to be at
-					payload, err := so.AppStore.GetRequestedState(app.AppKey, app.Stage)
-					if err != nil {
-						return
-					}
-
-					if latestAppState == common.FAILED {
-						retries, sleepTime := so.AppManager.incrementCrashLoop(payload)
-						err = so.LogManager.Write(containerName, fmt.Sprintf("Entered a crashloop (%s attempt), retrying in %s", common.Ordinal(retries), sleepTime))
-						if err != nil {
-							log.Error().Err(err).Msgf("failed to publish retry message to container %s", containerName)
-						}
-
-						return
-					} else if hasPendingUpdate(payload) {
-						// Mirrors the compose observer: a failed update leaves the
-						// old container RUNNING (pull-before-teardown), and the
-						// observer must never re-drive a pending update — the
-						// crashloop/verify machinery owns that. See the compose
-						// observer's branch for the full rationale.
-						log.Debug().Msgf("app (%s, %s) has a pending update; leaving the retry to the crashloop/verify machinery", appName, stage)
-					} else {
-						so.AppManager.RequestAppState(payload)
-					}
+				// try to transition to the state it's supposed to be at
+				if stage == common.PROD && so.driveCorrectedProdApp(app, latestAppState, containerName) {
+					return
 				}
 			}
 
@@ -771,12 +749,66 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 // two OS processes (docker CLI + compose plugin) and a full container
 // enumeration in dockerd — polled every second per app, that alone pinned
 // dockerd/containerd on small devices.
-func (so *StateObserver) listComposeProjectContainers(ctx context.Context, composeAppName string) ([]container.ContainerResult, error) {
+func listComposeProjectContainers(ctx context.Context, cont container.Container, composeAppName string) ([]container.ContainerResult, error) {
 	project := common.NormalizeComposeProjectName(composeAppName)
-	return so.Container.ListContainers(ctx, common.Dict{
+	return cont.ListContainers(ctx, common.Dict{
 		"all":     true,
 		"filters": filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
 	})
+}
+
+// driveCorrectedProdApp is what a PROD observer does right after it has
+// corrected an app's state to what its containers show: decide who drives the
+// app back toward its requested state. Returns true when the observer
+// goroutine should end (a FAILED app is handed to the crashloop; a missing
+// requested-state row means there is no target to drive toward).
+//
+// The observer re-drives an app itself ONLY when no other mechanism owns the
+// retry:
+//   - a pending update is driven by the crashloop wake, VerifyState, fresh
+//     cloud pushes and the reconnect reconcile (EnsureRemoteRequestedStates).
+//     Re-driving it here every poll tick would hammer an unreachable registry
+//     ~1s apart, and a PERMANENT failure (which by design has no crashloop)
+//     would re-drive forever;
+//   - an active crashloop owns its app until it converges or a fresh cloud
+//     push clears it. A request from here is a fresh, non-Retrying one, which
+//     RequestAppState answers by clearing the loop. Field hot loop of
+//     2026-09-17 (tls-sf002, app datarelay): `docker compose stop` crashed,
+//     the stop transition failed, marked the app FAILED and started a ~5s
+//     backoff; one second later this observer corrected the FAILED blip back
+//     to RUNNING — the containers were still up — and re-drove the stop as a
+//     fresh request, which cleared the loop, ran the crashing stop again and
+//     started a new loop at attempt 1. The announced backoff was never
+//     honoured and the attempt counter never advanced, every 1-2s, for as long
+//     as the CLI kept crashing.
+func (so *StateObserver) driveCorrectedProdApp(app *common.App, latestAppState common.AppState, logTopic string) (stopObserving bool) {
+	payload, err := so.AppStore.GetRequestedState(app.AppKey, app.Stage)
+	if err != nil {
+		return true
+	}
+
+	if latestAppState == common.FAILED {
+		retries, sleepTime := so.AppManager.incrementCrashLoop(payload)
+		err = so.LogManager.Write(logTopic, fmt.Sprintf("Entered a crashloop (%s attempt), retrying in %s", common.Ordinal(retries), sleepTime))
+		if err != nil {
+			log.Error().Err(err).Msgf("failed to publish retry message to container %s", logTopic)
+		}
+
+		return true
+	}
+
+	if hasPendingUpdate(payload) {
+		log.Debug().Msgf("app (%s, %s) has a pending update; leaving the retry to the crashloop/verify machinery", app.AppName, app.Stage)
+		return false
+	}
+
+	if so.AppManager.hasActiveCrashLoop(app.AppKey, app.Stage) {
+		log.Debug().Msgf("app (%s, %s) is in a crashloop; leaving the retry to its backoff", app.AppName, app.Stage)
+		return false
+	}
+
+	so.AppManager.RequestAppState(payload)
+	return false
 }
 
 // aggregateContainerResults derives one app state from a compose project's
@@ -823,7 +855,7 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 			}
 
 			listCtx, cancelList := context.WithTimeout(observerCtx, time.Second*30)
-			containers, err := so.listComposeProjectContainers(listCtx, composeAppName)
+			containers, err := listComposeProjectContainers(listCtx, so.Container, composeAppName)
 			cancelList()
 			if err != nil {
 				if observerCtx.Err() != nil {
@@ -906,40 +938,10 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 					return
 				}
 
+				// try to transition to the state it's supposed to be at
 				containerTopic := common.BuildContainerName(stage, appKey, appName)
-
-				if stage == common.PROD {
-					// try to transition to the state it's supposed to be at
-					payload, err := so.AppStore.GetRequestedState(app.AppKey, app.Stage)
-					if err != nil {
-						return
-					}
-
-					if latestAppState == common.FAILED {
-						retries, sleepTime := so.AppManager.incrementCrashLoop(payload)
-						err = so.LogManager.Write(containerTopic, fmt.Sprintf("Entered a crashloop (%s attempt), retrying in %s", common.Ordinal(retries), sleepTime))
-						if err != nil {
-							log.Error().Err(err).Msgf("failed to publish retry message to container %s", containerTopic)
-						}
-
-						return
-					} else if hasPendingUpdate(payload) {
-						// A failed update leaves the old version RUNNING (the pull
-						// runs before the teardown) with a FAILED blip just
-						// corrected above. The observer must never re-drive a
-						// pending update: re-driving here every poll tick would
-						// hammer an unreachable registry ~1s apart and, via
-						// RequestAppState's clearCrashLoop, reset the transient
-						// backoff each time — and a PERMANENT failure (which by
-						// design has no crashloop) would re-drive forever. Updates
-						// are driven by the crashloop wake, VerifyState, fresh
-						// cloud pushes and the reconnect reconcile
-						// (EnsureRemoteRequestedStates); the observer only
-						// corrects state.
-						log.Debug().Msgf("app (%s, %s) has a pending update; leaving the retry to the crashloop/verify machinery", appName, stage)
-					} else {
-						so.AppManager.RequestAppState(payload)
-					}
+				if stage == common.PROD && so.driveCorrectedProdApp(app, latestAppState, containerTopic) {
+					return
 				}
 			}
 

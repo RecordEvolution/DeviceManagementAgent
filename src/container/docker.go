@@ -260,7 +260,13 @@ func (docker *Docker) RemoveContainerByID(ctx context.Context, containerID strin
 
 func (docker *Docker) StopContainerByID(ctx context.Context, containerID string, timeout time.Duration) error {
 	timeoutInSeconds := int(timeout.Seconds())
-	return docker.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeoutInSeconds})
+	err := docker.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeoutInSeconds})
+	if err != nil && strings.Contains(err.Error(), "No such container") {
+		// Same classification as RemoveContainerByID: a container that is
+		// already gone is "stopped" for every caller that tolerates absence.
+		return errdefs.ContainerNotFound(err)
+	}
+	return err
 }
 
 func (docker *Docker) StopContainerByName(ctx context.Context, containerName string, timeout time.Duration) error {

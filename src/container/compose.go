@@ -141,6 +141,17 @@ const (
 	// composeTailLines is how many of a compose command's last output lines are
 	// kept to explain a non-zero exit.
 	composeTailLines = 25
+	// composeHeadLines is how many of the FIRST lines are kept as well. The
+	// CLI prints an ordinary failure reason last, but a crash of the CLI
+	// binary itself (a Go runtime abort: "panic: ..." / "fatal error: ...")
+	// prints the reason first and then hundreds of lines of goroutine stacks
+	// and a register dump — the tail alone reported only the registers
+	// (tls-sf002, 2026-09-17).
+	composeHeadLines = 5
+	// composeLineMaxBytes bounds one kept line. A line can legally be up to
+	// maxComposeLineBytes; keeping that much in an error string that ends up
+	// in logs and app-log topics is pointless.
+	composeLineMaxBytes = 512
 
 	// composeStreamBuffer sizes the streamed output channel. Deep enough that a
 	// consumer never realistically falls behind, so the drop below stays
@@ -153,19 +164,31 @@ const (
 	maxComposeLineBytes = 1024 * 1024
 )
 
-// composeOutputTail keeps the last lines a compose command wrote. The CLI
-// reports the actual reason for a failure (a port conflict, a missing image, a
-// registry denial) on stderr and then exits 1, so without the tail a caller
-// only ever sees the bare "exit status 1".
+// composeOutputTail keeps the first and the last lines a compose command
+// wrote. The CLI reports the actual reason for a failure (a port conflict, a
+// missing image, a registry denial) on stderr and then exits 1, so without the
+// tail a caller only ever sees the bare "exit status 1"; the head covers a
+// crash of the CLI itself, which reports its reason first.
 type composeOutputTail struct {
 	mutex   sync.Mutex
+	head    []string
 	lines   []string
+	total   int
 	dropped int
 }
 
 func (t *composeOutputTail) add(line string) {
+	if len(line) > composeLineMaxBytes {
+		line = line[:composeLineMaxBytes] + "…"
+	}
+
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+
+	t.total++
+	if len(t.head) < composeHeadLines {
+		t.head = append(t.head, line)
+	}
 
 	if len(t.lines) == composeTailLines {
 		t.lines = t.lines[1:]
@@ -179,19 +202,39 @@ func (t *composeOutputTail) recordDropped() {
 	t.mutex.Unlock()
 }
 
+// String renders the kept output: the head, an omission marker for what fell
+// out of the tail, then the tail. Lines still in the tail are never repeated
+// from the head.
 func (t *composeOutputTail) String() string {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	lines := make([]string, 0, len(t.lines)+1)
+	lines := make([]string, 0, len(t.head)+len(t.lines)+2)
 	if t.dropped > 0 {
 		lines = append(lines, fmt.Sprintf("(%d output line(s) dropped)", t.dropped))
 	}
-	for _, line := range t.lines {
+
+	appendLine := func(line string) {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			lines = append(lines, line)
 		}
+	}
+
+	// Lines with an index below evicted are no longer in the tail.
+	evicted := t.total - len(t.lines)
+	if evicted > 0 {
+		headKept := min(evicted, len(t.head))
+		for _, line := range t.head[:headKept] {
+			appendLine(line)
+		}
+		if omitted := evicted - headKept; omitted > 0 {
+			lines = append(lines, fmt.Sprintf("(%d line(s) omitted)", omitted))
+		}
+	}
+
+	for _, line := range t.lines {
+		appendLine(line)
 	}
 
 	return strings.Join(lines, "; ")

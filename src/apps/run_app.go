@@ -7,7 +7,6 @@ import (
 	"os"
 	"reagent/common"
 	"reagent/config"
-	reagentcontainer "reagent/container"
 	"reagent/errdefs"
 	reagentnetwork "reagent/network"
 	"reagent/system"
@@ -100,14 +99,103 @@ func (sm *StateMachine) runProdApp(payload common.TransitionPayload, app *common
 // docker's bind.
 const composeUpAttempts = 3
 
-// teardownComposeProject stops and removes the project's containers.
-func teardownComposeProject(compose *reagentcontainer.Compose, dockerComposePath string) error {
-	err := compose.Stop(dockerComposePath)
+// composeFallbackStopTimeout mirrors the compose CLI's default grace period
+// between SIGTERM and SIGKILL for containers stopped through the Docker API.
+const composeFallbackStopTimeout = 10 * time.Second
+
+// teardownComposeProject stops and removes every container of an app's compose
+// project (`docker compose stop` + `rm -f`; networks and volumes survive).
+//
+// It reconciles against the daemon instead of trusting the CLI alone:
+//   - a project with no containers is already torn down, so the CLI is not
+//     spawned at all;
+//   - when the CLI fails although the daemon answers, the containers are
+//     stopped and removed through the Docker API. The compose CLI is a
+//     separate binary that can break on its own — 2026-09-17, tls-sf002:
+//     `docker compose stop` aborted with a Go runtime crash on every run, so
+//     every stop of the app failed while its containers kept running, and the
+//     user had no way to stop the app from the UI. The transition's goal (no
+//     container of the project left) does not depend on which tool reaches it.
+//
+// The CLI error is still returned when the fallback cannot finish the job.
+func (sm *StateMachine) teardownComposeProject(payload common.TransitionPayload, app *common.App, dockerComposePath string) error {
+	project := common.BuildComposeContainerName(payload.Stage, app.AppKey, app.AppName)
+
+	listCtx, cancelList := context.WithTimeout(context.Background(), time.Second*30)
+	containers, listErr := listComposeProjectContainers(listCtx, sm.Container, project)
+	cancelList()
+	if listErr == nil && len(containers) == 0 {
+		log.Debug().Msgf("compose project %s has no containers; nothing to tear down", project)
+		return nil
+	}
+
+	compose := sm.Container.Compose()
+	composeErr := compose.Stop(dockerComposePath)
+	if composeErr == nil {
+		composeErr = compose.Remove(dockerComposePath)
+	}
+	if composeErr == nil {
+		return nil
+	}
+
+	fallbackErr := sm.removeComposeProjectContainers(project)
+	if fallbackErr != nil {
+		log.Error().Err(fallbackErr).Msgf("docker compose teardown of %s failed and the Docker API fallback could not finish it", project)
+		return composeErr
+	}
+
+	log.Warn().Err(composeErr).Msgf("docker compose teardown of %s failed; its containers were stopped and removed through the Docker API instead", project)
+
+	logTopic := payload.ContainerName.Prod
+	if payload.Stage == common.DEV {
+		logTopic = payload.ContainerName.Dev
+	}
+	writeErr := sm.LogManager.Write(logTopic, fmt.Sprintf("docker compose could not stop %s (%s); its containers were stopped and removed directly", payload.AppName, composeErr))
+	if writeErr != nil {
+		log.Debug().Err(writeErr).Msg("failed to write the compose fallback notice to the app log")
+	}
+
+	return nil
+}
+
+// removeComposeProjectContainers stops and removes the project's containers
+// through the Docker API — the end state `docker compose stop` + `rm -f`
+// reach. Listed fresh (the CLI may have got partway) and by project label,
+// which is how compose itself finds them. A container that disappears
+// underneath is already gone, not a failure.
+func (sm *StateMachine) removeComposeProjectContainers(project string) error {
+	listCtx, cancelList := context.WithTimeout(context.Background(), time.Second*30)
+	containers, err := listComposeProjectContainers(listCtx, sm.Container, project)
+	cancelList()
 	if err != nil {
 		return err
 	}
 
-	return compose.Remove(dockerComposePath)
+	for _, cont := range containers {
+		err = sm.removeComposeProjectContainer(cont.ID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (sm *StateMachine) removeComposeProjectContainer(containerID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), composeFallbackStopTimeout+time.Second*30)
+	defer cancel()
+
+	err := sm.Container.StopContainerByID(ctx, containerID, composeFallbackStopTimeout)
+	if err != nil && !errdefs.IsContainerNotFound(err) {
+		return fmt.Errorf("stop container %s: %w", containerID, err)
+	}
+
+	err = sm.Container.RemoveContainerByID(ctx, containerID, map[string]interface{}{"force": true})
+	if err != nil && !errdefs.IsContainerNotFound(err) {
+		return fmt.Errorf("remove container %s: %w", containerID, err)
+	}
+
+	return nil
 }
 
 // composeUp brings the project up, streaming the CLI output to the app's log
@@ -154,7 +242,7 @@ func (sm *StateMachine) composeUp(payload common.TransitionPayload, app *common.
 
 		log.Warn().Str("app", payload.AppName).Msg("Retrying compose up with freshly assigned host ports")
 
-		err = teardownComposeProject(compose, dockerComposePath)
+		err = sm.teardownComposeProject(payload, app, dockerComposePath)
 		if err != nil {
 			return err
 		}
@@ -169,7 +257,7 @@ func (sm *StateMachine) composeUp(payload common.TransitionPayload, app *common.
 
 	// Best effort: a failed `up` can leave part of the project behind, and the
 	// teardown error must not mask the reason the start failed.
-	cleanupErr := teardownComposeProject(compose, dockerComposePath)
+	cleanupErr := sm.teardownComposeProject(payload, app, dockerComposePath)
 	if cleanupErr != nil {
 		log.Warn().Err(cleanupErr).Str("app", payload.AppName).Msg("Failed to clean up the compose project after a failed start")
 	}
@@ -214,7 +302,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 
 	sm.warnUncredentialedComposeRegistries(payload, payload.DockerCompose, payload.ContainerName.Dev)
 
-	err = teardownComposeProject(compose, dockerComposePath)
+	err = sm.teardownComposeProject(payload, app, dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -240,7 +328,7 @@ func (sm *StateMachine) runDevComposeApp(payload common.TransitionPayload, app *
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			cleanupErr := teardownComposeProject(compose, dockerComposePath)
+			cleanupErr := sm.teardownComposeProject(payload, app, dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
@@ -377,7 +465,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 		return err
 	}
 
-	err = teardownComposeProject(compose, dockerComposePath)
+	err = sm.teardownComposeProject(payload, app, dockerComposePath)
 	if err != nil {
 		return err
 	}
@@ -425,7 +513,7 @@ func (sm *StateMachine) runProdComposeApp(payload common.TransitionPayload, app 
 	case err = <-errC:
 		if err != nil {
 			// cleanup docker containers
-			cleanupErr := teardownComposeProject(compose, dockerComposePath)
+			cleanupErr := sm.teardownComposeProject(payload, app, dockerComposePath)
 			if cleanupErr != nil {
 				return cleanupErr
 			}
