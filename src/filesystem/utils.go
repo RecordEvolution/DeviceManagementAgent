@@ -161,6 +161,9 @@ func DownloadURL(filePath string, url string, callback func(DownloadProgress)) e
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
+			// One-shot client like remoteFileClient: close the connection with
+			// the response instead of leaving it idle in an unused pool.
+			DisableKeepAlives: true,
 		},
 	}
 

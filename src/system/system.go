@@ -338,6 +338,7 @@ func (system *System) GetLatestVersion(bucketName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer resp.Close()
 
 	var environmentVersionMap map[string]string
 	json.NewDecoder(resp).Decode(&environmentVersionMap)

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -505,6 +507,61 @@ func TestGetRemoteFile(t *testing.T) {
 	got, err := io.ReadAll(body)
 	require.NoError(t, err)
 	assert.Equal(t, payload, got)
+}
+
+// connClosedServer serves payload and signals on the returned channel once the
+// server side of a client connection is closed.
+func connClosedServer(t *testing.T, payload []byte) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+	closed := make(chan struct{}, 1)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		_, _ = w.Write(payload)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv, closed
+}
+
+// requireConnClosed fails unless the connection closes promptly. A kept-alive
+// connection stays open here until the test server shuts down; behind a
+// firewall that forgets idle sessions, the server's late close gets dropped.
+func requireConnClosed(t *testing.T, closed <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection still open after the response: the client left it idle instead of closing it")
+	}
+}
+
+func TestGetRemoteFileClosesConnection(t *testing.T) {
+	srv, closed := connClosedServer(t, []byte(`{"all":"1.2.3"}`))
+
+	body, err := GetRemoteFile(srv.URL)
+	require.NoError(t, err)
+	_, err = io.ReadAll(body)
+	require.NoError(t, err)
+	require.NoError(t, body.Close())
+
+	requireConnClosed(t, closed)
+}
+
+func TestDownloadURLClosesConnection(t *testing.T) {
+	srv, closed := connClosedServer(t, []byte("binary-bytes"))
+
+	dest := filepath.Join(t.TempDir(), "out.bin")
+	require.NoError(t, DownloadURL(dest, srv.URL, nil))
+
+	requireConnClosed(t, closed)
 }
 
 func TestDecompressTgz(t *testing.T) {

@@ -22,6 +22,11 @@ func remoteFileClient() http.Client {
 			TLSHandshakeTimeout:   5 * time.Second,
 			ExpectContinueTimeout: 5 * time.Second,
 			ResponseHeaderTimeout: 5 * time.Second,
+			// Every call builds its own Transport, so a kept-alive connection is
+			// never reused. It would sit idle until the server drops it (5 min
+			// behind the appliance's Caddy), and a firewall that forgets idle
+			// sessions sooner logs that late close as out-of-state traffic.
+			DisableKeepAlives: true,
 		},
 		Timeout: 10 * time.Second, // timeout for the entire request, i.e. the download itself
 	}
