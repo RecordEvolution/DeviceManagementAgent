@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"reagent/config"
 	"strings"
@@ -286,4 +287,207 @@ func TestMergeCredentialHelperOptOutIdempotent(t *testing.T) {
 func TestMergeCredentialHelperOptOutRejectsMalformed(t *testing.T) {
 	_, _, err := mergeCredentialHelperOptOut([]byte(`{"credHelpers":`), []string{"x:1"})
 	assert.Error(t, err)
+}
+
+// A device attached to an appliance in domain mode must reach it directly. The
+// LAC edge PC went offline exactly here: NO_PROXY was fixed at
+// localhost,127.0.0.1, so the agent sent its platform connection to the
+// corporate proxy, which will not route back into the internal network.
+func TestServiceNoProxyEntriesApplianceDevice(t *testing.T) {
+	entries := serviceNoProxyEntries(&config.ReswarmConfig{
+		ApplianceDomain:   "tls-sf015.corp.trumpf.com",
+		DeviceEndpointURL: "wss://ws.tls-sf015.corp.trumpf.com/ws",
+		DockerRegistryURL: "136.230.111.59:15001/",
+	}, "")
+
+	assert.Equal(t, []string{
+		"localhost",
+		"127.0.0.1",
+		"tls-sf015.corp.trumpf.com",
+		".tls-sf015.corp.trumpf.com",
+		"136.230.111.59",
+	}, entries)
+}
+
+// Negative control: a cloud device's endpoints are public and DO need the
+// proxy. Nothing may be added beyond the loopback defaults, or configuring a
+// proxy would stop the device from reaching the platform at all.
+func TestServiceNoProxyEntriesCloudDeviceAddsNothing(t *testing.T) {
+	entries := serviceNoProxyEntries(&config.ReswarmConfig{
+		DeviceEndpointURL: "wss://cbw.ironflock.com/ws",
+		DockerRegistryURL: "registry.ironflock.com/",
+	}, "")
+
+	assert.Equal(t, []string{"localhost", "127.0.0.1"}, entries)
+}
+
+// The registry port is dropped: an entry carrying one exempts only that port,
+// and the same appliance host is dialled on 443, 15001 and 18080 depending on
+// the mode it runs in.
+func TestServiceNoProxyEntriesDropsRegistryPort(t *testing.T) {
+	entries := serviceNoProxyEntries(&config.ReswarmConfig{
+		DockerRegistryURL: "appliance.corp.example:15001/",
+	}, "")
+
+	assert.Equal(t, []string{"localhost", "127.0.0.1", "appliance.corp.example"}, entries)
+}
+
+func TestServiceNoProxyEntriesMergesFlagWithoutDuplicating(t *testing.T) {
+	entries := serviceNoProxyEntries(&config.ReswarmConfig{
+		ApplianceDomain: "tls-sf015.corp.trumpf.com",
+	}, " TLS-SF015.corp.trumpf.com , 10.0.0.0/8 ,, localhost ")
+
+	assert.Equal(t, []string{
+		"localhost",
+		"127.0.0.1",
+		"tls-sf015.corp.trumpf.com",
+		".tls-sf015.corp.trumpf.com",
+		"10.0.0.0/8",
+	}, entries)
+}
+
+func TestParseServiceInstallFlagsNoProxy(t *testing.T) {
+	opts, err := parseServiceInstallFlags([]string{
+		"-config", "dev.flock",
+		"-proxy", "http://srv01prox.corp.trumpf.com:80",
+		"-no-proxy", "appliance.corp.example",
+	}, `C:\ProgramData`, io.Discard)
+	require.NoError(t, err)
+
+	assert.Equal(t, "http://srv01prox.corp.trumpf.com:80", opts.Proxy)
+	assert.Equal(t, "appliance.corp.example", opts.NoProxy)
+}
+
+// The service environment is only written when a proxy is configured, so
+// -no-proxy on its own would be silently discarded.
+func TestParseServiceInstallFlagsNoProxyRequiresProxy(t *testing.T) {
+	_, err := parseServiceInstallFlags([]string{
+		"-config", "dev.flock",
+		"-no-proxy", "appliance.corp.example",
+	}, `C:\ProgramData`, io.Discard)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "-no-proxy has no effect without -proxy")
+}
+
+func TestParseProxyEnvIgnoresCommentsAndQuotes(t *testing.T) {
+	cfg := parseProxyEnv([]byte(`
+# a comment
+HTTP_PROXY=http://proxy.example:3128
+HTTPS_PROXY="http://proxy.example:3128"
+  no_proxy = localhost,appliance.corp.example
+UNKNOWN_KEY=ignored
+not-a-pair
+`))
+
+	assert.Equal(t, "http://proxy.example:3128", cfg.HTTP)
+	assert.Equal(t, "http://proxy.example:3128", cfg.HTTPS)
+	assert.Equal(t, "localhost,appliance.corp.example", cfg.NoProxy)
+}
+
+func TestRenderProxyEnvRoundTrips(t *testing.T) {
+	cfg := proxyConfig{
+		HTTP:    "http://proxy.example:3128",
+		HTTPS:   "http://proxy.example:3128",
+		NoProxy: "localhost,127.0.0.1,appliance.corp.example",
+	}
+	assert.Equal(t, cfg, parseProxyEnv([]byte(renderProxyEnv(cfg))))
+}
+
+// The seeded file must name the derived hosts literally, or an operator whose
+// appliance is only reachable THROUGH the proxy has nothing to delete.
+func TestRenderProxyEnvNamesDerivedHosts(t *testing.T) {
+	rendered := renderProxyEnv(proxyConfig{
+		HTTP:    "http://proxy.example:3128",
+		HTTPS:   "http://proxy.example:3128",
+		NoProxy: "localhost,127.0.0.1,tls-sf015.corp.trumpf.com",
+	})
+	assert.Contains(t, rendered, "NO_PROXY=localhost,127.0.0.1,tls-sf015.corp.trumpf.com")
+}
+
+func writeTestFlock(t *testing.T, dir string, cfg config.ReswarmConfig) string {
+	t.Helper()
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	path := filepath.Join(dir, "device.flock")
+	require.NoError(t, os.WriteFile(path, raw, 0600))
+	return path
+}
+
+func TestResolveProxyConfigSeedsFromFlags(t *testing.T) {
+	dir := t.TempDir()
+	flock := writeTestFlock(t, dir, config.ReswarmConfig{ApplianceDomain: "appliance.corp.example"})
+	envPath := filepath.Join(dir, proxyEnvFileName)
+
+	cfg, seeded, err := resolveProxyConfig(envPath, &serviceInstallOptions{Proxy: "http://proxy.example:3128"}, flock)
+	require.NoError(t, err)
+	assert.True(t, seeded)
+	assert.Equal(t, "http://proxy.example:3128", cfg.HTTPS)
+	assert.Equal(t, "localhost,127.0.0.1,appliance.corp.example,.appliance.corp.example", cfg.NoProxy)
+
+	written, err := os.ReadFile(envPath)
+	require.NoError(t, err)
+	assert.Equal(t, cfg, parseProxyEnv(written))
+}
+
+// The whole point of the file: a reinstall restores the site's settings with no
+// flags at all, because uninstall destroyed the service key that held them.
+func TestResolveProxyConfigExistingFileWinsWithoutFlags(t *testing.T) {
+	dir := t.TempDir()
+	flock := writeTestFlock(t, dir, config.ReswarmConfig{ApplianceDomain: "appliance.corp.example"})
+	envPath := filepath.Join(dir, proxyEnvFileName)
+	require.NoError(t, os.WriteFile(envPath, []byte("HTTP_PROXY=http://old:80\nHTTPS_PROXY=http://old:80\nNO_PROXY=localhost,edited.example\n"), 0600))
+
+	cfg, seeded, err := resolveProxyConfig(envPath, &serviceInstallOptions{}, flock)
+	require.NoError(t, err)
+	assert.False(t, seeded)
+	assert.Equal(t, "http://old:80", cfg.HTTPS)
+	assert.Equal(t, "localhost,edited.example", cfg.NoProxy)
+}
+
+// An operator who deleted the appliance from NO_PROXY (appliance reachable only
+// THROUGH the proxy) must not have that undone by a reinstall that passes -proxy.
+func TestResolveProxyConfigDoesNotUndoAnEdit(t *testing.T) {
+	dir := t.TempDir()
+	flock := writeTestFlock(t, dir, config.ReswarmConfig{ApplianceDomain: "appliance.corp.example"})
+	envPath := filepath.Join(dir, proxyEnvFileName)
+	require.NoError(t, os.WriteFile(envPath, []byte("HTTP_PROXY=http://proxy.example:3128\nHTTPS_PROXY=http://proxy.example:3128\nNO_PROXY=localhost,127.0.0.1\n"), 0600))
+
+	cfg, _, err := resolveProxyConfig(envPath, &serviceInstallOptions{Proxy: "http://proxy.example:3128", NoProxy: "something.else"}, flock)
+	require.NoError(t, err)
+	assert.Equal(t, "localhost,127.0.0.1", cfg.NoProxy)
+	assert.NotContains(t, cfg.NoProxy, "appliance.corp.example")
+}
+
+func TestResolveProxyConfigForceReplaces(t *testing.T) {
+	dir := t.TempDir()
+	flock := writeTestFlock(t, dir, config.ReswarmConfig{ApplianceDomain: "appliance.corp.example"})
+	envPath := filepath.Join(dir, proxyEnvFileName)
+	require.NoError(t, os.WriteFile(envPath, []byte("HTTP_PROXY=http://old:80\nHTTPS_PROXY=http://old:80\nNO_PROXY=localhost,edited.example\n"), 0600))
+
+	cfg, seeded, err := resolveProxyConfig(envPath, &serviceInstallOptions{Proxy: "http://new:3128", ForceProxy: true}, flock)
+	require.NoError(t, err)
+	assert.True(t, seeded)
+	assert.Equal(t, "http://new:3128", cfg.HTTPS)
+	assert.Contains(t, cfg.NoProxy, "appliance.corp.example")
+}
+
+// Negative control: a device with no proxy and no file writes no service
+// environment at all, exactly as before this existed.
+func TestResolveProxyConfigNoProxyNoFile(t *testing.T) {
+	dir := t.TempDir()
+	flock := writeTestFlock(t, dir, config.ReswarmConfig{})
+	envPath := filepath.Join(dir, proxyEnvFileName)
+
+	cfg, seeded, err := resolveProxyConfig(envPath, &serviceInstallOptions{}, flock)
+	require.NoError(t, err)
+	assert.False(t, seeded)
+	assert.False(t, cfg.configured())
+	assert.NoFileExists(t, envPath)
+}
+
+func TestParseServiceInstallFlagsForceProxyRequiresProxy(t *testing.T) {
+	_, err := parseServiceInstallFlags([]string{"-config", "dev.flock", "-force-proxy"}, `C:\ProgramData`, io.Discard)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "-force-proxy has no effect without -proxy")
 }

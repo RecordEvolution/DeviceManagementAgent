@@ -234,11 +234,25 @@ func serviceInstall(args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not register the repair scheduled task (an interrupted self-update will need a manual repair): %v\n", err)
 	}
 
-	if opts.Proxy != "" {
-		err = setServiceProxy(opts.Proxy)
+	// Proxy settings come from proxy.env when the device already has one, so a
+	// reinstall restores this site's configuration without the operator
+	// remembering any flags. Flags seed that file on a fresh device.
+	proxyEnvPath := filepath.Join(opts.AgentDir, proxyEnvFileName)
+	proxyCfg, seeded, err := resolveProxyConfig(proxyEnvPath, opts, installedConfig)
+	if err != nil {
+		return err
+	}
+	if proxyCfg.configured() {
+		err = setServiceProxy(proxyCfg)
 		if err != nil {
 			return fmt.Errorf("failed to set the service proxy environment: %w", err)
 		}
+		if seeded {
+			fmt.Printf("Proxy configured, and written to %s — edit that file to change it.\n", proxyEnvPath)
+		} else {
+			fmt.Printf("Proxy configured from %s\n", proxyEnvPath)
+		}
+		fmt.Printf("Reached directly (NO_PROXY): %s\n", proxyCfg.NoProxy)
 	}
 
 	// Docker must trust the appliance's plain-HTTP registry or every app
@@ -508,17 +522,12 @@ func dockerDaemonJSONPath() (string, error) {
 // corporate proxy, times out before that). Docker only re-reads the file on
 // restart, so the caller's output must say so when something was added.
 func ensureDockerInsecureRegistries(flockPath string) error {
-	raw, err := os.ReadFile(flockPath)
+	flockCfg, err := readFlockConfig(flockPath)
 	if err != nil {
 		return err
 	}
-	var flockCfg config.ReswarmConfig
-	err = json.Unmarshal(raw, &flockCfg)
-	if err != nil {
-		return fmt.Errorf("could not parse %s: %w", flockPath, err)
-	}
 
-	entries := insecureRegistryEntries(&flockCfg)
+	entries := insecureRegistryEntries(flockCfg)
 	if len(entries) == 0 {
 		return nil
 	}
@@ -611,18 +620,19 @@ func ensureDockerCredentialStore(flockPath string) error {
 // setServiceProxy writes the proxy into the service's Environment registry
 // value (REG_MULTI_SZ). A LocalSystem service only inherits machine-wide
 // environment, and Go does not read the WinHTTP/IE proxy settings.
-func setServiceProxy(proxy string) error {
+//
+// All three entries are written together because the value is a single
+// REG_MULTI_SZ. This key is NOT the place to keep the operator's settings:
+// `service uninstall` deletes the service and the value with it, so the
+// durable copy lives in proxy.env and this only mirrors it.
+func setServiceProxy(cfg proxyConfig) error {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\`+serviceName, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer key.Close()
 
-	return key.SetStringsValue("Environment", []string{
-		"HTTP_PROXY=" + proxy,
-		"HTTPS_PROXY=" + proxy,
-		"NO_PROXY=localhost,127.0.0.1",
-	})
+	return key.SetStringsValue("Environment", cfg.environmentEntries())
 }
 
 func runCommand(name string, args ...string) error {
