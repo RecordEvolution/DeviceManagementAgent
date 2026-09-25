@@ -179,6 +179,9 @@ exit 0
 	mc.EXPECT().Compose().Return(fake).Maybe()
 	// SetupComposeFiles recovers already-published host ports via the API.
 	mc.EXPECT().GetComposePublishedPorts(mock.Anything, mock.Anything).Return(map[string]uint64{}, nil).Maybe()
+	// A compose log stream that ends reads the project's history, which looks
+	// the project up via the API.
+	mc.EXPECT().ListContainers(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	fwdAllowLogs(mc)
 
 	return sm, mc, st, cfg, callsFile

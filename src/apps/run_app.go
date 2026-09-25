@@ -7,6 +7,7 @@ import (
 	"os"
 	"reagent/common"
 	"reagent/config"
+	"reagent/container"
 	"reagent/errdefs"
 	reagentnetwork "reagent/network"
 	"reagent/system"
@@ -15,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
+	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/rs/zerolog/log"
@@ -122,7 +123,7 @@ func (sm *StateMachine) teardownComposeProject(payload common.TransitionPayload,
 	project := common.BuildComposeContainerName(payload.Stage, app.AppKey, app.AppName)
 
 	listCtx, cancelList := context.WithTimeout(context.Background(), time.Second*30)
-	containers, listErr := listComposeProjectContainers(listCtx, sm.Container, project)
+	containers, listErr := container.ListComposeProjectContainers(listCtx, sm.Container, project)
 	cancelList()
 	if listErr == nil && len(containers) == 0 {
 		log.Debug().Msgf("compose project %s has no containers; nothing to tear down", project)
@@ -165,7 +166,7 @@ func (sm *StateMachine) teardownComposeProject(payload common.TransitionPayload,
 // underneath is already gone, not a failure.
 func (sm *StateMachine) removeComposeProjectContainers(project string) error {
 	listCtx, cancelList := context.WithTimeout(context.Background(), time.Second*30)
-	containers, err := listComposeProjectContainers(listCtx, sm.Container, project)
+	containers, err := container.ListComposeProjectContainers(listCtx, sm.Container, project)
 	cancelList()
 	if err != nil {
 		return err
@@ -580,7 +581,7 @@ func (sm *StateMachine) runDevApp(payload common.TransitionPayload, app *common.
 		waitForContainerByIDContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
 
-		_, err = sm.Container.WaitForContainerByID(waitForContainerByIDContext, cont.ID, container.WaitConditionRemoved)
+		_, err = sm.Container.WaitForContainerByID(waitForContainerByIDContext, cont.ID, dockercontainer.WaitConditionRemoved)
 		if err != nil {
 			// expected behaviour, see: https://github.com/docker/docker-py/issues/2270
 			// still useful, and will wait if it's still not removed
@@ -885,7 +886,7 @@ func (sm *StateMachine) remotePortEnvVars(config *config.Config, appName string,
 	return envs
 }
 
-func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*container.Config, *container.HostConfig, error) {
+func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload, app *common.App) (*dockercontainer.Config, *dockercontainer.HostConfig, error) {
 	config := sm.Container.GetConfig()
 	systemDefaultVariables := buildDefaultEnvironmentVariables(config, payload, app.Stage, app, sm.AppCredKey())
 	environmentVariables := buildProdEnvironmentVariables(systemDefaultVariables, payload.EnvironmentVariables)
@@ -917,7 +918,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	}
 	devicePortEnvs := devicePortEnvsFromBindings(portBindings)
 
-	var containerConfig container.Config
+	var containerConfig dockercontainer.Config
 
 	if app.Stage == common.DEV {
 		// Write all environment variables to files
@@ -931,7 +932,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		// Only pass small env vars to container, large ones are available in /data/env/
 		containerEnvVars := filterLargeEnvVars(allEnvVars)
 
-		containerConfig = container.Config{
+		containerConfig = dockercontainer.Config{
 			Image:        payload.RegistryImageName.Dev,
 			Env:          containerEnvVars,
 			Labels:       map[string]string{"real": "True"},
@@ -989,7 +990,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 		// Only pass small env vars to container, large ones are available in /data/env/
 		containerEnvVars := filterLargeEnvVars(allEnvVars)
 
-		containerConfig = container.Config{
+		containerConfig = dockercontainer.Config{
 			Image:  fullImageNameWithTag,
 			Env:    containerEnvVars,
 			Labels: map[string]string{"real": "True"},
@@ -1004,14 +1005,14 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 
 	containerConfig.ExposedPorts = exposedPorts
 
-	hostConfig := container.HostConfig{
+	hostConfig := dockercontainer.HostConfig{
 		// CapDrop: []string{"NET_ADMIN"},
-		RestartPolicy: container.RestartPolicy{
+		RestartPolicy: dockercontainer.RestartPolicy{
 			Name: "no",
 		},
 		Mounts: mounts,
-		Resources: container.Resources{
-			Devices: []container.DeviceMapping{
+		Resources: dockercontainer.Resources{
+			Devices: []dockercontainer.DeviceMapping{
 				{
 					PathOnHost:      "/dev",
 					PathInContainer: "/dev",
@@ -1028,7 +1029,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	if system.HasNvidiaGPU() {
 		log.Debug().Msgf("Detected a NVIDIA GPU, will request NVIDIA Device capabilities...")
 		hostConfig.Runtime = "nvidia"
-		// hostConfig.DeviceRequests = []container.DeviceRequest{
+		// hostConfig.DeviceRequests = []dockercontainer.DeviceRequest{
 		// 	{
 		// 		Driver: "nvidia",
 		// 		Count:  -1,
@@ -1044,7 +1045,7 @@ func (sm *StateMachine) computeContainerConfigs(payload common.TransitionPayload
 	return &containerConfig, &hostConfig, nil
 }
 
-func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *common.App, cConfig *container.Config, hConfig *container.HostConfig) (string, error) {
+func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *common.App, cConfig *dockercontainer.Config, hConfig *dockercontainer.HostConfig) (string, error) {
 	var containerID string
 	var containerName string
 
@@ -1072,7 +1073,7 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 
 		waitForRemovalContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
-		_, err = sm.Container.WaitForContainerByID(waitForRemovalContext, cont.ID, container.WaitConditionRemoved)
+		_, err = sm.Container.WaitForContainerByID(waitForRemovalContext, cont.ID, dockercontainer.WaitConditionRemoved)
 		if err != nil && !errdefs.IsContainerNotFound(err) {
 			return "", err
 		}
@@ -1101,7 +1102,7 @@ func (sm *StateMachine) createContainer(payload common.TransitionPayload, app *c
 
 				// remove NVIDIA host configuration
 				hConfig.Runtime = ""
-				hConfig.DeviceRequests = []container.DeviceRequest{}
+				hConfig.DeviceRequests = []dockercontainer.DeviceRequest{}
 
 				createContainerContext, cancel := context.WithTimeout(context.Background(), time.Second*30)
 				defer cancel()
@@ -1165,7 +1166,7 @@ func (sm *StateMachine) startContainerOnce(payload common.TransitionPayload, app
 			sm.Container.RemoveContainerByID(removeContainerByIdContext, containerID, map[string]interface{}{"force": true})
 
 			// remove nvidia device request
-			hostConfig.DeviceRequests = []container.DeviceRequest{}
+			hostConfig.DeviceRequests = []dockercontainer.DeviceRequest{}
 
 			containerID, err = sm.createContainer(payload, app, containerConfig, hostConfig)
 			if err != nil {

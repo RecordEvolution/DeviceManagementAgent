@@ -167,7 +167,7 @@ func (lm *LogManager) readWindow(
 		return nil, "", err
 	}
 
-	composeReader, composeErr := lm.Container.Compose().LogsByContainerName(containerName+"_compose", query)
+	composeReader, composeErr := lm.composeLogs(ctx, containerName, query)
 	if composeErr == nil {
 		return scanLines(composeReader), sourceCompose, nil
 	}
@@ -182,6 +182,25 @@ func (lm *LogManager) readWindow(
 	}
 
 	return history, sourceHistory, nil
+}
+
+// composeLogs reads a compose app's logs, finding its compose file through the
+// label Docker keeps on every container of the project. That lookup is one
+// Docker API call; the `docker compose ls` it replaces was a CLI spawn of its
+// own, paid before the `compose logs` spawn that does the actual read.
+func (lm *LogManager) composeLogs(ctx context.Context, containerName string, query container.LogQuery) (io.ReadCloser, error) {
+	containers, err := container.ListComposeProjectContainers(ctx, lm.Container, containerName+"_compose")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range containers {
+		if configFiles := c.Labels[container.ComposeConfigFilesLabel]; configFiles != "" {
+			return lm.Container.Compose().Logs(ctx, configFiles, query)
+		}
+	}
+
+	return nil, errors.New("compose project not found")
 }
 
 // oldestAvailable reads the first line the daemon will still serve.

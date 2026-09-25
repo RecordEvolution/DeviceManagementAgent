@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/rs/zerolog/log"
 )
 
@@ -662,39 +663,32 @@ func (q LogQuery) DockerOptions() common.Dict {
 	return options
 }
 
-// LogsByContainerName reads the logs of a whole compose project, addressed by
-// the agent's compose container name (`<stage>_<key>_<name>_compose`).
+// ListComposeProjectContainers returns every container (running or not) of a
+// compose app in one Docker API call, via the project label docker compose
+// stamps on all containers it creates. It stands in for `docker compose ls` /
+// `docker compose ps`: each of those costs two OS processes (docker CLI +
+// compose plugin) and a full container enumeration in dockerd, which on small
+// devices runs to seconds — longer on the first call, from a cold page cache.
+func ListComposeProjectContainers(ctx context.Context, cont Container, composeAppName string) ([]ContainerResult, error) {
+	project := common.NormalizeComposeProjectName(composeAppName)
+	return cont.ListContainers(ctx, common.Dict{
+		"all":     true,
+		"filters": filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
+	})
+}
+
+// ComposeConfigFilesLabel carries the compose file(s) a container was created
+// from — the same value `docker compose ls` reports as ConfigFiles.
+const ComposeConfigFilesLabel = "com.docker.compose.project.config_files"
+
+// Logs reads the logs of a whole compose project.
 //
 // Every service in the project is included, each line prefixed with its service
 // name — for a multi-container app that prefix is the only thing identifying
 // which service spoke, so it is deliberately kept. Output is CombinedOutput, so
 // compose's own progress and warning text on stderr is interleaved with the
 // container output.
-func (c *Compose) LogsByContainerName(containerName string, query LogQuery) (io.ReadCloser, error) {
-	composeListEntry, err := c.List()
-	if err != nil {
-		return nil, err
-	}
-
-	var foundComposeEntry *ComposeListEntry
-	for _, composeEntry := range composeListEntry {
-		if composeEntry.Name == containerName {
-			foundComposeEntry = &composeEntry
-		}
-	}
-
-	if foundComposeEntry == nil {
-		return nil, errors.New("compose entry not found")
-	}
-
-	return c.logs(foundComposeEntry.ConfigFiles, query)
-}
-
-func (c *Compose) Logs(dockerComposePath string, query LogQuery) (io.ReadCloser, error) {
-	return c.logs(dockerComposePath, query)
-}
-
-func (c *Compose) logs(dockerComposePath string, query LogQuery) (io.ReadCloser, error) {
+func (c *Compose) Logs(ctx context.Context, dockerComposePath string, query LogQuery) (io.ReadCloser, error) {
 	binary := c.binary
 	if binary == "" {
 		binary = "docker"
@@ -702,7 +696,7 @@ func (c *Compose) logs(dockerComposePath string, query LogQuery) (io.ReadCloser,
 
 	args := append([]string{"compose", "-f", dockerComposePath}, query.ComposeArgs()...)
 
-	output, err := exec.Command(binary, args...).CombinedOutput()
+	output, err := exec.CommandContext(ctx, binary, args...).CombinedOutput()
 	if err != nil {
 		return nil, err
 	}

@@ -5,14 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reagent/common"
 	"reagent/container"
 	"reagent/errdefs"
+	"reagent/testutil/builders"
 	"reagent/testutil/mocks"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -177,7 +181,7 @@ func TestQueryLogsFallback(t *testing.T) {
 
 		cont.EXPECT().Logs(mock.Anything, "prod_1_logapp", mock.Anything).
 			Return(nil, errdefs.ContainerNotFound(errors.New("No such container")))
-		cont.EXPECT().Compose().Return(&container.Compose{})
+		cont.EXPECT().ListContainers(mock.Anything, mock.Anything).Return(nil, nil)
 
 		result, err := lm.QueryLogs(context.Background(), LogQueryRequest{ContainerName: "prod_1_logapp"})
 
@@ -186,6 +190,41 @@ func TestQueryLogsFallback(t *testing.T) {
 		assert.Equal(t, []string{"stored-1", "stored-2"}, result.Lines)
 		// No retention floor is claimed for a store that has no timestamps.
 		assert.True(t, result.OldestAvailable.IsZero())
+	})
+
+	// The project's compose file comes from the label Docker keeps on its
+	// containers. `docker compose ls` used to find it: a CLI spawn of its own,
+	// ahead of the `compose logs` spawn — on a small device, seconds of a
+	// console's first load.
+	t.Run("reads a compose project through its label, without compose ls", func(t *testing.T) {
+		lm, cont, _, _ := newTestManager(t)
+
+		dir := t.TempDir()
+		callsFile := filepath.Join(dir, "calls.log")
+		script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\necho 'web-1  | hello'\n", callsFile)
+		binPath := filepath.Join(dir, "fake-docker")
+		require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
+
+		cont.EXPECT().Logs(mock.Anything, "prod_1_logapp", mock.Anything).
+			Return(nil, errdefs.ContainerNotFound(errors.New("No such container")))
+		cont.EXPECT().ListContainers(mock.Anything, mock.MatchedBy(func(options common.Dict) bool {
+			args, ok := options["filters"].(filters.Args)
+			return ok && args.ExactMatch("label", "com.docker.compose.project=prod_1_logapp_compose")
+		})).Return([]container.ContainerResult{{
+			Labels: map[string]string{container.ComposeConfigFilesLabel: "/apps/logapp/docker-compose.json"},
+		}}, nil)
+		cont.EXPECT().Compose().Return(container.NewComposeWithBinary(builders.DefaultTestConfig(), binPath))
+
+		result, err := lm.QueryLogs(context.Background(), LogQueryRequest{ContainerName: "prod_1_logapp", Tail: 10})
+
+		require.NoError(t, err)
+		assert.Equal(t, "compose", result.Source)
+		assert.Equal(t, []string{"web-1  | hello"}, result.Lines)
+
+		calls, err := os.ReadFile(callsFile)
+		require.NoError(t, err)
+		assert.Equal(t, "compose -f /apps/logapp/docker-compose.json logs --no-color --tail 10 --timestamps\n", string(calls),
+			"exactly one CLI spawn, the read itself")
 	})
 
 	t.Run("surfaces a real docker failure instead of quietly serving history", func(t *testing.T) {

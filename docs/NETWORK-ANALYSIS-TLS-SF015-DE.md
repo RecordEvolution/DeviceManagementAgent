@@ -7,7 +7,8 @@
 | Erstellt am | 10.09.2026 |
 | Erstellt von | IronFlock (Marko Petzold) |
 | Betroffene Systeme | `LAC_LS02_WinPC` (10.130.23.35) und Appliance `tls-sf015.corp.trumpf.com` (136.230.111.59) |
-| Status | Ursache eingegrenzt auf eine Komponente im Netzwerkpfad; Endgeräte als Ursache messtechnisch ausgeschlossen |
+| Aktualisiert am | 24.09.2026 |
+| Status | **Behoben am 24.09.2026.** Ursache war eine identitätsbasierte Firewall-Richtlinie (Identity-Aware Proxy), siehe Abschnitt 12 |
 
 ---
 
@@ -255,3 +256,44 @@ Die Messungen laufen weiter, sodass weitere Störungsfenster automatisch erfasst
 4. Auskunft, welches Produkt die unter 9.1 beschriebene **TCP-Option 112** setzt und die Pfad-MTU auf 1368 Byte reduziert.
 
 Für Rückfragen und für eine gemeinsame Messung während einer laufenden Störung stehen wir zur Verfügung.
+
+---
+
+## 12. Auflösung (24.09.2026)
+
+### 12.1 Behebung
+
+Die TRUMPF IT hat dem PC am 24.09.2026 eine **feste IP-Adresse** zugewiesen und den **Identity-Aware Proxy für dieses Gerät deaktiviert**. Der Zugriff des PCs auf die Appliance ist damit über eine IP-basierte Regel geregelt statt über die Identität des angemeldeten Benutzers.
+
+Nachweis mit der Messanordnung aus Abschnitt 5 am selben Tag gegen 10:53 Uhr: Die SYN-Pakete des PCs zu den Ports 443 und 18080 kommen auf der Appliance an und werden innerhalb von 0,3 ms mit SYN-ACK beantwortet. Der Verbindungstest auf dem PC ist für beide Ports erfolgreich.
+
+Das ist eine Momentaufnahme. Ob die Störung dauerhaft behoben ist, zeigt erst der Betrieb über die nächsten Tage.
+
+### 12.2 Ursache
+
+Solange die Freigabe an den angemeldeten Windows-Benutzer gebunden war, galt sie nur, solange die Firewall die IP-Adresse 10.130.23.35 einem Benutzer zuordnen konnte. Lief diese Zuordnung ab, passte die Quelle auf keine erlaubende Regel mehr. Neue Verbindungen wurden dann still verworfen, während bereits etablierte Verbindungen in der Zustandstabelle blieben und weiterliefen. Wurde die Zuordnung erneuert, etwa durch eine neue Anmeldung, kamen die Verbindungen wieder an.
+
+Das erklärt alle Beobachtungen aus den Abschnitten 6 und 8:
+
+- neue SYN-Pakete werden still verworfen, ohne RST und ohne ICMP-Fehlermeldung,
+- ICMP zwischen denselben Hosts funktioniert durchgehend,
+- bestehende Sessions laufen ununterbrochen weiter,
+- der Wiederanlauf erfolgt ohne jede Änderung an den Endgeräten.
+
+Auch die stark schwankende Störungsdauer von 1 Minute bis 4 Stunden passt dazu. Sie hing davon ab, wann die Zuordnung erneuert wurde, und nicht von einem festen Sperrzeitraum.
+
+### 12.3 Warum das für alle IronFlock-Edge-Geräte gilt
+
+Der IronFlock-Geräteagent läuft als Windows-Dienst unter dem Systemkonto. Er hält seine Verbindung rund um die Uhr, unabhängig davon, ob ein Benutzer am Gerät angemeldet ist. Eine Regel, die an eine Benutzeranmeldung gebunden ist, trennt ein solches Gerät zwangsläufig, sobald die Benutzersitzung abläuft. Das ist keine Fehlkonfiguration dieses einen PCs, sondern eine grundsätzliche Unverträglichkeit zwischen einem unbeaufsichtigten Dienst und einer benutzerbezogenen Freigabe.
+
+**Wir bitten deshalb, weitere IronFlock-Edge-Geräte am Standort ebenso einzurichten:** feste IP-Adresse (oder eine Geräteidentität) und eine IP-basierte Regel, ausgenommen von der benutzerbezogenen Durchsetzung. Dasselbe gilt für Geräte, die später hinzukommen.
+
+### 12.4 Einordnung der Hinweise aus Abschnitt 9
+
+- **9.1, TCP-Option 112 und MSS von 1328 Byte:** Die SYN-Pakete des PCs tragen beide Merkmale auch in den Mitschnitten vom 24.09.2026, obwohl die Verbindungen jetzt funktionieren. Sie stehen mit der Störung also nicht in Zusammenhang.
+- **9.2, Verbindungsrate des Agenten:** Eine Sperre wegen der Verbindungsrate war nicht die Ursache. Das exponentiell wachsende Rückfallverhalten des Agenten ist trotzdem umgesetzt, weil es die Last während jeder Störung senkt.
+- **9.3 und Abschnitt 11:** Mit der gefundenen Ursache erledigt.
+
+### 12.5 Davon getrennt: Leerlauf-Timeout einzelner HTTPS-Verbindungen
+
+Die von der TRUMPF IT am 17.09.2026 gemeldeten Verwürfe mit dem Protokolleintrag „First packet isn't SYN" sind ein **eigenes Thema**. Sie betreffen einzelne HTTPS-Verbindungen zur Registry, die länger ungenutzt waren als der Leerlauf-Timeout der Firewall, und nicht das Gerät als Ganzes. Die Gegenmaßnahme auf unserer Seite, eine kürzere Leerlaufzeit auf der Appliance und keine offen gehaltenen Verbindungen im Agenten, ist vorbereitet, aber noch nicht ausgeliefert.

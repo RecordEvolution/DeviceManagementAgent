@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/filters"
 	"github.com/rs/zerolog/log"
 )
 
@@ -169,7 +168,7 @@ func (so *StateObserver) addComposeObserver(stage common.Stage, appKey uint64, a
 	// containers with the project name) instead of shelling out a
 	// `docker compose ls` — this runs on every container start event.
 	listCtx, listCancel := context.WithTimeout(context.Background(), time.Second*30)
-	containers, err := listComposeProjectContainers(listCtx, so.Container, composeName)
+	containers, err := container.ListComposeProjectContainers(listCtx, so.Container, composeName)
 	listCancel()
 	if err != nil {
 		return false, err
@@ -351,7 +350,7 @@ func (so *StateObserver) CorrectComposeAppState(requestedState common.Transition
 	}
 
 	statusCtx, cancelStatus := context.WithTimeout(context.Background(), time.Second*30)
-	containers, err := listComposeProjectContainers(statusCtx, so.Container, composeName)
+	containers, err := container.ListComposeProjectContainers(statusCtx, so.Container, composeName)
 	cancelStatus()
 	if err != nil {
 		log.Error().Err(err).Msgf("Failed to get container status for compose app %s", composeName)
@@ -742,21 +741,6 @@ func (so *StateObserver) observeAppState(observerCtx context.Context, stage comm
 	return errorC
 }
 
-// listComposeProjectContainers returns every container (running or not) of a
-// compose app in one Docker API call, via the project label docker compose
-// stamps on all containers it creates. Replaces the former
-// `docker compose ls` + `docker compose ps` CLI spawns: each of those cost
-// two OS processes (docker CLI + compose plugin) and a full container
-// enumeration in dockerd — polled every second per app, that alone pinned
-// dockerd/containerd on small devices.
-func listComposeProjectContainers(ctx context.Context, cont container.Container, composeAppName string) ([]container.ContainerResult, error) {
-	project := common.NormalizeComposeProjectName(composeAppName)
-	return cont.ListContainers(ctx, common.Dict{
-		"all":     true,
-		"filters": filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
-	})
-}
-
 // driveCorrectedProdApp is what a PROD observer does right after it has
 // corrected an app's state to what its containers show: decide who drives the
 // app back toward its requested state. Returns true when the observer
@@ -855,7 +839,7 @@ func (so *StateObserver) observeComposeAppState(observerCtx context.Context, sta
 			}
 
 			listCtx, cancelList := context.WithTimeout(observerCtx, time.Second*30)
-			containers, err := listComposeProjectContainers(listCtx, so.Container, composeAppName)
+			containers, err := container.ListComposeProjectContainers(listCtx, so.Container, composeAppName)
 			cancelList()
 			if err != nil {
 				if observerCtx.Err() != nil {

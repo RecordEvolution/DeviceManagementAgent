@@ -730,9 +730,7 @@ func (lm *LogManager) getNonAgentLogsCompose(containerName string) ([]string, er
 	}
 
 	if containsOnlyAgentLogs || len(history) == 0 {
-		compose := lm.Container.Compose()
-
-		reader, err := compose.LogsByContainerName(containerName+"_compose", container.LogQuery{Tail: 50})
+		reader, err := lm.composeLogs(context.Background(), containerName, container.LogQuery{Tail: 50})
 		if err != nil {
 			log.Warn().Err(err).Msgf("No log history found for: %s", containerName)
 			return []string{}, nil

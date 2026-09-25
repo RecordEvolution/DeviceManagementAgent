@@ -17,6 +17,7 @@ import (
 	"reagent/store"
 	"reagent/testutil/builders"
 	"reagent/testutil/fakes"
+	"reagent/testutil/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,6 +131,10 @@ func composeITStateMachine(t *testing.T, docker *container.Docker) (*StateMachin
 	observer := NewObserver(docker, &appStore, nil)
 	logManager := logging.NewLogManager(docker, msg, db, appStore)
 	sm := NewStateMachine(docker, &logManager, &observer, nil)
+	// SetupComposeFiles resolves host ports through the AppManager the observer
+	// points back to (rewriteComposeHostPorts), exactly as in production. The
+	// tunnel manager is a strict mock: nothing on the compose path may reach it.
+	NewAppManager(&sm, &appStore, &observer, mocks.NewTunnelManager(t))
 
 	// Give any async log-history drain goroutines a moment before the DB closes
 	// (newExecTestDB registers the close; LIFO ordering runs this sleep first).
