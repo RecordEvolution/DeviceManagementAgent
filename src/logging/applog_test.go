@@ -314,8 +314,7 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 			Arguments: []interface{}{[]interface{}{uint64(987654)}},
 		}, nil)
 
-		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
-		require.NoError(t, err)
+		id := lm.getActiveSubscriptionID("prod_1_myapp")
 		assert.Equal(t, "987654", id)
 
 		// Verify match was called with the built log topic as the only argument.
@@ -333,8 +332,7 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 			Arguments: []interface{}{},
 		}, nil)
 
-		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
-		require.NoError(t, err)
+		id := lm.getActiveSubscriptionID("prod_1_myapp")
 		assert.Equal(t, "", id)
 	})
 
@@ -345,8 +343,7 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 			Arguments: []interface{}{nil},
 		}, nil)
 
-		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
-		require.NoError(t, err)
+		id := lm.getActiveSubscriptionID("prod_1_myapp")
 		assert.Equal(t, "", id)
 	})
 
@@ -357,18 +354,16 @@ func TestGetActiveSubscriptionID(t *testing.T) {
 			Arguments: []interface{}{[]interface{}{}},
 		}, nil)
 
-		id, err := lm.getActiveSubscriptionID("prod_1_myapp")
-		require.NoError(t, err)
+		id := lm.getActiveSubscriptionID("prod_1_myapp")
 		assert.Equal(t, "", id)
 	})
 
-	t.Run("propagates call error", func(t *testing.T) {
+	t.Run("a failed match is no subscriber", func(t *testing.T) {
 		lm, _, msg, _ := newTestManager(t)
 
 		msg.SetCallError(string(topics.MetaProcMatchSubscription), assert.AnError)
 
-		_, err := lm.getActiveSubscriptionID("prod_1_myapp")
-		require.Error(t, err)
+		assert.Equal(t, "", lm.getActiveSubscriptionID("prod_1_myapp"))
 	})
 }
 
@@ -458,6 +453,66 @@ func TestStreamLogsChannelEnablesPublishWhenSubscribed(t *testing.T) {
 
 	assert.True(t, lp.Publish)
 	assert.Equal(t, "555", lp.SubscriptionID)
+}
+
+// A match the router could not answer (a cluster member that did not, a
+// dropped connection) is no subscriber yet, as in ReviveDeadLogs: failing on
+// it failed the build, run or pull whose output was to be streamed.
+func TestStreamLogsChannelWhenTheMatchFails(t *testing.T) {
+	lm, _, msg, _ := newTestManager(t)
+
+	containerName := "prod_4_matchless"
+	msg.SetCallError(string(topics.MetaProcMatchSubscription), errors.New("ironflock.error.cluster_incomplete"))
+
+	ch := make(chan string, 1)
+	lp, err := lm.StreamLogsChannel(ch, containerName)
+	require.NoError(t, err)
+	require.NotNil(t, lp)
+	assert.False(t, lp.Publish)
+
+	lm.activeLogsMutex.Lock()
+	registered := lm.activeLogs[containerName]
+	lm.activeLogsMutex.Unlock()
+	assert.Same(t, lp, registered)
+}
+
+// closeSignal is a log stream that reports when it is closed.
+type closeSignal struct {
+	io.Reader
+	closed chan struct{}
+}
+
+func (c *closeSignal) Close() error {
+	close(c.closed)
+	return nil
+}
+
+func TestInitLogStreamWhenTheMatchFails(t *testing.T) {
+	lm, _, msg, _ := newTestManager(t)
+
+	// Not a container name: the stream's cleanup stops at parsing it, before
+	// the database and the container.
+	containerName := "build-output"
+	msg.SetCallError(string(topics.MetaProcMatchSubscription), errors.New("ironflock.error.cluster_incomplete"))
+
+	stream := &closeSignal{Reader: bytes.NewBufferString("Step 1/2 : FROM alpine\n"), closed: make(chan struct{})}
+	require.NoError(t, lm.initLogStream(containerName, common.BUILD, stream))
+
+	lm.activeLogsMutex.Lock()
+	followed := lm.activeLogs[containerName]
+	lm.activeLogsMutex.Unlock()
+	require.NotNil(t, followed, "the stream was dropped")
+
+	select {
+	case <-stream.closed:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "the followed stream was never closed")
+	}
+	followed.subscriptionStateMutex.Lock()
+	defer followed.subscriptionStateMutex.Unlock()
+	assert.False(t, followed.Publish)
+	require.Len(t, followed.logHistory, 1, "the stream was not read")
+	assert.Equal(t, "Step 1/2 : FROM alpine", followed.logHistory[0].entry)
 }
 
 func TestSetMessenger(t *testing.T) {

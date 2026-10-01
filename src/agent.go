@@ -530,7 +530,6 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	// established a connection, replace the dummy messenger
 	appStore.SetMessenger(mainSession)
 	terminalManager.SetMessenger(mainSession)
-	terminalManager.InitUnregisterWatcher()
 	logManager.SetMessenger(mainSession)
 	tunnelManager.SetMessenger(mainSession)
 	// The appliance's appstore registry keeps its blobs on this same disk, and

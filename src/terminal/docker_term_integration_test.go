@@ -18,6 +18,7 @@ import (
 	"reagent/container"
 	"reagent/testutil/builders"
 	"reagent/testutil/fakes"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,7 +154,7 @@ func TestTerminalManager_RealExecSession_RoundTrip(t *testing.T) {
 	// RequestTerminalSession exercises the real getShell (ExecCommand
 	// "cat /etc/shells") and createTerminalSession (ExecAttach) paths and
 	// registers the session in ActiveSessions.
-	session, err := tm.RequestTerminalSession(containerName)
+	session, err := tm.RequestTerminalSession(containerName, "4242")
 	require.NoError(t, err, "failed to request real terminal session")
 	require.NotNil(t, session)
 	require.NotEmpty(t, session.SessionID)
@@ -166,7 +167,7 @@ func TestTerminalManager_RealExecSession_RoundTrip(t *testing.T) {
 	// Ensure the session is cleaned up (closes the hijacked connection and
 	// removes it from ActiveSessions) even if a later assertion fails.
 	t.Cleanup(func() {
-		_ = tm.StopTerminalSession(session.SessionID)
+		_ = tm.StopTerminalSession(session.SessionID, "4242")
 	})
 
 	// Write a command with a unique marker to the exec'd shell's stdin. A TTY
@@ -186,7 +187,7 @@ func TestTerminalManager_RealExecSession_RoundTrip(t *testing.T) {
 	)
 
 	// Tearing down should remove the session from the manager's active set.
-	require.NoError(t, tm.StopTerminalSession(session.SessionID), "failed to stop terminal session")
+	require.NoError(t, tm.StopTerminalSession(session.SessionID, "4242"), "failed to stop terminal session")
 
 	_, err = tm.getSession(session.SessionID)
 	require.Error(t, err, "expected session to be gone from ActiveSessions after StopTerminalSession")
@@ -222,4 +223,86 @@ func readUntilMarker(t *testing.T, reader *bufio.Reader, conn interface{ SetRead
 	}
 
 	return bytes.Contains(acc.Bytes(), marker)
+}
+
+// Closing an exec's connection does not end its shell: the daemon keeps the
+// pty open. Stopping a session, as the UI does when it lets go of the terminal
+// and the reaper does when nobody watches it, must still end the shell in the
+// container, of a session that was asked for and never started too.
+func TestTerminalManager_RealExecSession_StopEndsANeverStartedShell(t *testing.T) {
+	docker := newDockerOrSkip(t)
+	ensureImageOrSkip(t, docker)
+
+	containerName := startThrowawayContainer(t, docker)
+
+	tm := NewTerminalManager(fakes.NewMessenger(), docker)
+
+	session, err := tm.RequestTerminalSession(containerName, "4242")
+	require.NoError(t, err, "failed to request real terminal session")
+	t.Cleanup(func() {
+		_ = tm.StopTerminalSession(session.SessionID, "4242")
+	})
+
+	require.Eventually(t, func() bool { return running(t, docker, containerName, "/bin/sh") == 1 },
+		terminalReadWindow, 200*time.Millisecond, "the session's shell never ran")
+
+	require.NoError(t, tm.StopTerminalSession(session.SessionID, "4242"))
+
+	require.Eventually(t, func() bool { return running(t, docker, containerName, "/bin/sh") == 0 },
+		terminalReadWindow, 200*time.Millisecond, "the shell outlived its session")
+}
+
+// A started session's shell ends too, and a program the user left running in
+// the foreground with it.
+func TestTerminalManager_RealExecSession_StopEndsAStartedShell(t *testing.T) {
+	docker := newDockerOrSkip(t)
+	ensureImageOrSkip(t, docker)
+
+	containerName := startThrowawayContainer(t, docker)
+
+	tm := NewTerminalManager(fakes.NewMessenger(), docker)
+
+	session, err := tm.RequestTerminalSession(containerName, "4242")
+	require.NoError(t, err, "failed to request real terminal session")
+	t.Cleanup(func() {
+		_ = tm.StopTerminalSession(session.SessionID, "4242")
+	})
+	require.NoError(t, tm.StartTerminalSession(session.SessionID, "4242"))
+
+	session.inputChan <- "sleep 1000\n"
+
+	require.Eventually(t, func() bool {
+		return running(t, docker, containerName, "/bin/sh") == 1 && running(t, docker, containerName, "sleep 1000") == 1
+	}, terminalReadWindow, 200*time.Millisecond, "the session's shell never ran its command")
+
+	require.NoError(t, tm.StopTerminalSession(session.SessionID, "4242"))
+
+	require.Eventually(t, func() bool {
+		return running(t, docker, containerName, "/bin/sh") == 0 && running(t, docker, containerName, "sleep 1000") == 0
+	}, terminalReadWindow, 200*time.Millisecond, "the shell or its command outlived its session")
+}
+
+// running counts the processes in the container whose command line is
+// command. alpine has neither zsh nor bash, so a session's shell is /bin/sh.
+func running(t *testing.T, docker *container.Docker, containerName string, command string) int {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), containerOpsTimeout)
+	defer cancel()
+
+	ps, err := docker.ExecCommand(ctx, containerName, []string{"ps", "-o", "args"})
+	require.NoError(t, err)
+	defer ps.Conn.Close()
+
+	output, err := io.ReadAll(ps.Reader)
+	require.NoError(t, err)
+
+	found := 0
+	for _, line := range strings.Split(string(output), "\n") {
+		// The stream is multiplexed: a frame header may precede a line.
+		if strings.HasSuffix(strings.TrimSpace(line), command) {
+			found++
+		}
+	}
+	return found
 }

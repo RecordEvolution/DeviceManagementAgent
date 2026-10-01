@@ -833,10 +833,7 @@ func (lm *LogManager) SetupLogConsumer(containerName string) chan *LogProccess {
 func (lm *LogManager) StreamLogsChannel(channel chan string, containerName string) (*LogProccess, error) {
 
 	// in case there is already an active subscription, we need to start publishing straight away
-	id, err := lm.getActiveSubscriptionID(containerName)
-	if err != nil {
-		return nil, err
-	}
+	id := lm.getActiveSubscriptionID(containerName)
 
 	logProcess := LogProccess{
 		ContainerName: containerName,
@@ -1031,11 +1028,7 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 	}
 
 	// in case there is already an active subscription, we need to start publishing straight away
-	id, err := lm.getActiveSubscriptionID(containerName)
-	if err != nil {
-		stream.Close()
-		return err
-	}
+	id := lm.getActiveSubscriptionID(containerName)
 
 	activeLog := LogProccess{
 		ContainerName: containerName,
@@ -1056,7 +1049,13 @@ func (lm *LogManager) initLogStream(containerName string, logType common.LogType
 	return lm.emitStream(&activeLog)
 }
 
-func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, error) {
+// getActiveSubscriptionID returns the id of a subscription to the container's
+// log topic, or "" when there is none. A failed match counts as none, as in
+// ReviveDeadLogs: the router could not say (a cluster member did not answer,
+// the connection dropped), and failing on it failed the build, run or pull the
+// logs are for. The logs are still kept, and published once a subscription to
+// the topic is created (see SetupEndpoints).
+func (lm *LogManager) getActiveSubscriptionID(containerName string) string {
 	ctx := context.Background()
 	// Use wamp.subscription.match (routing-match), not wamp.subscription.lookup:
 	// lookup only finds a subscription whose registered URI is *identical* to the
@@ -1067,25 +1066,26 @@ func (lm *LogManager) getActiveSubscriptionID(containerName string) (string, err
 	// publishing immediately instead of waiting for the next ReviveDeadLogs.
 	result, err := lm.Messenger.Call(ctx, topics.MetaProcMatchSubscription, []interface{}{lm.buildTopic(containerName)}, nil, nil, nil)
 	if err != nil {
-		return "", err
+		log.Warn().Err(err).Msgf("failed to match log subscriptions for %s, publishing once one is created", containerName)
+		return ""
 	}
 
 	if result.Arguments == nil || len(result.Arguments) == 0 {
-		return "", nil
+		return ""
 	}
 
 	// match returns a list of matching subscription IDs (or nil if none).
 	switch ids := result.Arguments[0].(type) {
 	case nil:
-		return "", nil
+		return ""
 	case []interface{}:
 		if len(ids) == 0 {
-			return "", nil
+			return ""
 		}
-		return fmt.Sprint(ids[0]), nil
+		return fmt.Sprint(ids[0])
 	default:
 		// tolerate a router returning a bare id
-		return fmt.Sprint(ids), nil
+		return fmt.Sprint(ids)
 	}
 }
 
@@ -1138,7 +1138,7 @@ func (lm *LogManager) StreamBlocking(containerName string, logType common.LogTyp
 	if !shouldPublish {
 		// No live entry (or one created before anyone subscribed): ask the
 		// router whether someone is listening right now.
-		if id, err := lm.getActiveSubscriptionID(containerName); err == nil && id != "" {
+		if id := lm.getActiveSubscriptionID(containerName); id != "" {
 			shouldPublish = true
 			if entry != nil {
 				entry.subscriptionStateMutex.Lock()

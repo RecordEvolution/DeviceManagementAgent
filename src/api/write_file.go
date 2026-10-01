@@ -23,6 +23,10 @@ func (ex *External) writeToFileHandler(ctx context.Context, response messenger.R
 	args := response.Arguments
 
 	// Matches file_transfer.ts payload
+	if len(args) < 5 {
+		return nil, fmt.Errorf("failed to parse args, expected 5 but got %d", len(args))
+	}
+
 	chunkArg := args[0]
 	fileNameArg := args[1]
 	containerNameArg := args[2]

@@ -18,15 +18,9 @@ func (ex *External) getAppLogHistoryHandler(ctx context.Context, response messen
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to get app log history"))
 	}
 
-	args := response.Arguments
-
-	if args == nil || args[0] == nil {
-		return nil, fmt.Errorf("arguments are missing")
-	}
-
-	argsDict, ok := args[0].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("first param should be a dict")
+	argsDict, err := firstArgDict(response.Arguments)
+	if err != nil {
+		return nil, err
 	}
 
 	containerName, ok := argsDict["containerName"].(string)

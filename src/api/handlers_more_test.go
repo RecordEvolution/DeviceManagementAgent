@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reagent/common"
@@ -251,6 +252,28 @@ func TestPruneImageHandler(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, res)
 	})
+
+	// The options are optional. The check for them was inverted and indexed
+	// the argument list whenever it was nil or empty, panicking the client's
+	// invocation goroutine, which nothing recovers.
+	for _, args := range [][]interface{}{nil, {}, {nil}} {
+		t.Run(fmt.Sprintf("absent options %#v prune only dangling images", args), func(t *testing.T) {
+			cont := mocks.NewContainer(t)
+			cont.EXPECT().PruneDanglingImages(mock.Anything).Return("", nil).Once()
+
+			ex := &External{Container: cont, Privilege: priv(t, true)}
+
+			require.NotPanics(t, func() {
+				res, err := ex.pruneImageHandler(context.Background(), messenger.Result{
+					Details:   systemDetails(),
+					Arguments: args,
+				})
+
+				require.NoError(t, err)
+				require.NotNil(t, res)
+			})
+		})
+	}
 
 	t.Run("rejects non-dict first argument", func(t *testing.T) {
 		// Validation happens before any container call; strict mock stays untouched.
@@ -536,6 +559,24 @@ func TestWriteToFileHandler(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Nil(t, res)
+		})
+	}
+
+	// Indexed, a short list panicked the client's invocation goroutine, which
+	// nothing recovers, and took the agent down.
+	for _, args := range [][]interface{}{nil, {}, {"BEGIN", "f", "c", uint64(0)}} {
+		t.Run(fmt.Sprintf("rejects the short argument list %#v", args), func(t *testing.T) {
+			ex := &External{Privilege: priv(t, true)}
+
+			require.NotPanics(t, func() {
+				res, err := ex.writeToFileHandler(context.Background(), messenger.Result{
+					Details:   systemDetails(),
+					Arguments: args,
+				})
+
+				require.Error(t, err)
+				assert.Nil(t, res)
+			})
 		})
 	}
 }

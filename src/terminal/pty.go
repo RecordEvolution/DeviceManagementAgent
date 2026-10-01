@@ -99,11 +99,11 @@ func (pT *PseudoTerminal) Setup(config *config.Config, session messenger.Messeng
 	// restarts.
 	pT.registerControlTopics(session)
 
+	options, kwargs := outputAudience(pT.Id)
+
 	safe.Go(func() {
 		for output := range pT.Output {
-
-			options := common.Dict{"acknowledge": true}
-			err := session.Publish(topics.Topic(dataTopic), []interface{}{output}, nil, options)
+			err := session.Publish(topics.Topic(dataTopic), []interface{}{output}, kwargs, options)
 			if err != nil {
 				fmt.Println(err.Error())
 			}
@@ -201,6 +201,10 @@ func (pT *PseudoTerminal) signalCleanup() {
 // failed (re)registration is visible in the agent logs.
 func (pT *PseudoTerminal) registerControlTopics(session messenger.Messenger) {
 	err := session.Subscribe(topics.Topic(pT.WriteTopic), func(r messenger.Result) error {
+		if !fromOwner(pT.Id, r.Details) {
+			return errors.New("dropped keystrokes from a publisher that does not own the terminal")
+		}
+
 		// Bounds-checked: the router invokes these handlers on its own receive
 		// goroutine with no recover in the path, so an argument-less publish to
 		// the write topic would take the whole agent down with it.
@@ -226,6 +230,10 @@ func (pT *PseudoTerminal) registerControlTopics(session messenger.Messenger) {
 	}
 
 	err = session.Register(topics.Topic(pT.ResizeTopic), func(ctx context.Context, invocation messenger.Result) (*messenger.InvokeResult, error) {
+		if !calledByOwner(pT.Id, invocation) {
+			return nil, errNotOwner
+		}
+
 		if len(invocation.Arguments) == 0 {
 			return nil, errors.New("failed to parse args, payload is missing")
 		}

@@ -44,8 +44,6 @@ const GetAgentMetaData Topic = "get_agent_metadata"
 
 const UpdateAgent Topic = "update_agent"
 
-const CmdExecutionPrefix Topic = "cmd_output"
-const ExecuteCommand Topic = "execute_cmd"
 const InitDeviceTerminal Topic = "init_device_terminal"
 
 const GetOSRelease Topic = "get_os_release"

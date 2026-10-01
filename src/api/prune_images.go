@@ -24,7 +24,8 @@ func (ex *External) pruneImageHandler(ctx context.Context, response messenger.Re
 	args := response.Arguments
 	options := common.Dict{}
 
-	if args != nil || args[0] != nil {
+	// The options are optional: absent, or null, they are the defaults.
+	if len(args) > 0 && args[0] != nil {
 		argsDict, ok := args[0].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("first param should be a dict")

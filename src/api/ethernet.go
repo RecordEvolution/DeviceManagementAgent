@@ -47,7 +47,7 @@ func (ex *External) updateIPConfigHandler(ctx context.Context, response messenge
 		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to update ip config"))
 	}
 
-	if response.Arguments == nil {
+	if len(response.Arguments) == 0 {
 		return nil, errors.New("failed to parse args, payload is missing")
 	}
 

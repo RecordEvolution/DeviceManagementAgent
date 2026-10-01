@@ -115,18 +115,123 @@ func TestWrapDetails(t *testing.T) {
 		assert.Equal(t, "123", seen.Details["caller_authid"])
 	})
 
-	t.Run("leaves system authid untouched when requestor key is not numeric", func(t *testing.T) {
+	t.Run("replaces system authid using requestor_account_key from a decoded args map", func(t *testing.T) {
+		// Decoders hand the first argument over as a plain map, not common.Dict.
 		h, seen := newCapture()
 		wrapped := wrapDetails(h)
 
 		_, err := wrapped(context.Background(), messenger.Result{
-			Details:     common.Dict{"caller_authid": "system"},
-			ArgumentsKw: common.Dict{"requestor_account_key": "not-a-number"},
+			Details:   common.Dict{"caller_authid": "system"},
+			Arguments: []interface{}{map[string]interface{}{"requestor_account_key": uint64(4242)}},
 		})
 
 		require.NoError(t, err)
-		// strconv.Atoi fails, so the value remains the original string.
-		assert.Equal(t, "system", seen.Details["caller_authid"])
+		assert.Equal(t, uint64(4242), seen.Details["caller_authid"])
+	})
+
+	t.Run("reads every wire form of an account", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			key  interface{}
+			want uint64
+		}{
+			{"string", "42", 42},
+			{"JSON integer", uint64(42), 42},
+			{"msgpack integer", int64(42), 42},
+			{"sized integer", int32(42), 42},
+			{"float 42.0", float64(42), 42},
+			{"float printed as an exponent", float64(1234567), 1234567},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h, seen := newCapture()
+
+				_, err := wrapDetails(h)(context.Background(), messenger.Result{
+					Details:     common.Dict{"caller_authid": "system"},
+					ArgumentsKw: common.Dict{"requestor_account_key": tc.key},
+				})
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, seen.Details["caller_authid"])
+			})
+		}
+	})
+
+	t.Run("a named key that is no account is no longer trusted as system", func(t *testing.T) {
+		// The handler still runs (backend-only handlers check nobody), but as
+		// a caller every privilege check refuses.
+		for _, tc := range []struct {
+			name string
+			key  interface{}
+		}{
+			{"trailing garbage", "42x"},
+			{"negative", int64(-1)},
+			{"negative string", "-1"},
+			{"zero", uint64(0)},
+			{"zero string", "0"},
+			{"fraction", float64(42.5)},
+			{"empty string", ""},
+			{"the word system", "system"},
+			{"a list", []interface{}{uint64(42)}},
+			{"a float past the exact integers", float64(1e20)},
+			{"null", nil},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for _, where := range []struct {
+					name   string
+					result messenger.Result
+				}{
+					{"in kwargs", messenger.Result{
+						Details:     common.Dict{"caller_authid": "system"},
+						ArgumentsKw: common.Dict{"requestor_account_key": tc.key},
+					}},
+					{"in a decoded args map", messenger.Result{
+						Details:   common.Dict{"caller_authid": "system"},
+						Arguments: []interface{}{map[string]interface{}{"requestor_account_key": tc.key}},
+					}},
+				} {
+					h, seen := newCapture()
+
+					_, err := wrapDetails(h)(context.Background(), where.result)
+
+					require.NoError(t, err, where.name)
+					assert.Equal(t, unnamedAccount, seen.Details["caller_authid"], where.name)
+				}
+			})
+		}
+	})
+
+	t.Run("an explicit null in the kwargs names nobody, whatever the args map says", func(t *testing.T) {
+		// JS `?? null` and Python None send a key that is there but empty. It
+		// must not leave the call trusted as 'system', and the kwargs decide
+		// once they carry the key.
+		for _, first := range []interface{}{
+			map[string]interface{}{"requestor_account_key": "9"},
+			common.Dict{"requestor_account_key": "9"},
+			map[string]interface{}{"other": "value"},
+		} {
+			h, seen := newCapture()
+
+			_, err := wrapDetails(h)(context.Background(), messenger.Result{
+				Details:     common.Dict{"caller_authid": "system"},
+				ArgumentsKw: common.Dict{"requestor_account_key": nil},
+				Arguments:   []interface{}{first},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, unnamedAccount, seen.Details["caller_authid"], "%#v", first)
+		}
+	})
+
+	t.Run("an explicit null in an in-process args dict names nobody", func(t *testing.T) {
+		h, seen := newCapture()
+
+		_, err := wrapDetails(h)(context.Background(), messenger.Result{
+			Details:   common.Dict{"caller_authid": "system"},
+			Arguments: []interface{}{common.Dict{"requestor_account_key": nil}},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, unnamedAccount, seen.Details["caller_authid"])
 	})
 
 	t.Run("ignores args dict missing requestor key", func(t *testing.T) {
@@ -140,6 +245,33 @@ func TestWrapDetails(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "system", seen.Details["caller_authid"])
+	})
+}
+
+// Privilege.Check answers 'system' and accounts only. Anything else, such as
+// the caller wrapDetails puts in for a key that names no account, is refused
+// on the device, without a lookup and without an error the caller would see.
+func TestPrivilegeCheckRefusesCallersThatAreNoAccount(t *testing.T) {
+	for _, caller := range []string{unnamedAccount, "0", "-1", "42x", "12-34"} {
+		t.Run(caller, func(t *testing.T) {
+			m := fakes.NewMessenger()
+
+			granted, err := newPrivilege(testConfig(), m).Check("READ", common.Dict{"caller_authid": caller})
+
+			require.NoError(t, err)
+			assert.False(t, granted)
+			assert.Zero(t, m.GetCallCount())
+		})
+	}
+
+	t.Run("an account is looked up", func(t *testing.T) {
+		details, m := grantPrivilege(true)
+
+		granted, err := newPrivilege(testConfig(), m).Check("READ", details)
+
+		require.NoError(t, err)
+		assert.True(t, granted)
+		assert.Equal(t, "READ", requestedPrivilege(t, m))
 	})
 }
 
@@ -765,6 +897,23 @@ func TestUpdateIPConfigHandler(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, res)
+	})
+
+	t.Run("rejects an empty argument list", func(t *testing.T) {
+		// Indexed, it panicked the client's invocation goroutine, which
+		// nothing recovers, and took the agent down.
+		net := mocks.NewNetwork(t)
+		ex := &External{Network: net, Privilege: priv(t, true)}
+
+		require.NotPanics(t, func() {
+			res, err := ex.updateIPConfigHandler(context.Background(), messenger.Result{
+				Details:   systemDetails(),
+				Arguments: []interface{}{},
+			})
+
+			require.Error(t, err)
+			assert.Nil(t, res)
+		})
 	})
 
 	parseErrCases := []struct {

@@ -138,6 +138,22 @@ func TestGetAppLogHistoryHandler(t *testing.T) {
 		assert.Nil(t, res)
 	})
 
+	t.Run("rejects an empty argument list", func(t *testing.T) {
+		// Indexed, it panicked the client's invocation goroutine, which
+		// nothing recovers, and took the agent down.
+		ex, _, _ := newLogManagerEx(t, true)
+
+		require.NotPanics(t, func() {
+			res, err := ex.getAppLogHistoryHandler(context.Background(), messenger.Result{
+				Details:   systemDetails(),
+				Arguments: []interface{}{},
+			})
+
+			require.Error(t, err)
+			assert.Nil(t, res)
+		})
+	})
+
 	t.Run("rejects non-dict first arg", func(t *testing.T) {
 		ex, _, _ := newLogManagerEx(t, true)
 
@@ -182,77 +198,6 @@ func TestGetAppLogHistoryHandler(t *testing.T) {
 		assert.Nil(t, res)
 		assert.True(t, errdefs.IsInsufficientPrivileges(err))
 	})
-}
-
-// =============================================================================
-// codeExecutionHandler - argument parsing/validation (no exec reached)
-//
-// The handler has no privilege gate; it validates the args dict and only then
-// builds an exec.Command. Every case below fails parsing before exec.Command,
-// so no system process is started.
-// =============================================================================
-
-func TestCodeExecutionHandlerValidation(t *testing.T) {
-	cases := []struct {
-		name string
-		args []interface{}
-	}{
-		{
-			name: "nil args",
-			args: nil,
-		},
-		{
-			name: "empty first arg",
-			args: []interface{}{nil},
-		},
-		{
-			name: "non-dict first arg",
-			args: []interface{}{"not-a-dict"},
-		},
-		{
-			name: "missing cmd",
-			args: []interface{}{map[string]interface{}{"blocking": true}},
-		},
-		{
-			name: "bad cmd type",
-			args: []interface{}{map[string]interface{}{"cmd": 123, "blocking": true}},
-		},
-		{
-			name: "missing blocking",
-			args: []interface{}{map[string]interface{}{"cmd": "echo"}},
-		},
-		{
-			name: "bad blocking type",
-			args: []interface{}{map[string]interface{}{"cmd": "echo", "blocking": "yes"}},
-		},
-		{
-			name: "bad args array type",
-			args: []interface{}{map[string]interface{}{
-				"cmd": "echo", "blocking": true, "args": "not-an-array",
-			}},
-		},
-		{
-			name: "bad timeout type",
-			args: []interface{}{map[string]interface{}{
-				"cmd": "echo", "blocking": false, "timeout": "soon",
-			}},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run("rejects "+tc.name, func(t *testing.T) {
-			// No Container/Privilege needed: parsing fails before any of them is used.
-			ex := &External{}
-
-			res, err := ex.codeExecutionHandler(context.Background(), messenger.Result{
-				Details:   systemDetails(),
-				Arguments: tc.args,
-			})
-
-			require.Error(t, err)
-			assert.Nil(t, res)
-		})
-	}
 }
 
 // =============================================================================
@@ -383,12 +328,8 @@ func TestStartTerminalSessHandlerParsing(t *testing.T) {
 		{name: "bad sessionID type", args: []interface{}{map[string]interface{}{
 			"sessionID": 1, "registrationID": uint64(7),
 		}}},
-		{name: "missing registrationID", args: []interface{}{map[string]interface{}{
-			"sessionID": "s",
-		}}},
-		{name: "bad registrationID type", args: []interface{}{map[string]interface{}{
-			"sessionID": "s", "registrationID": "seven",
-		}}},
+		// The registrationID is ignored, whatever it is or whether it is
+		// there: TestStartTerminalSessionIgnoresTheRegistrationID.
 	}
 
 	for _, tc := range cases {

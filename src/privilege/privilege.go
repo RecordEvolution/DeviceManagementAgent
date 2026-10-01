@@ -31,9 +31,12 @@ func (p *Privilege) Check(privilege string, details common.Dict) (bool, error) {
 		return true, nil
 	}
 
+	// Anyone else is asked about only as an account. A caller that is not one,
+	// such as a backend call whose requestor_account_key named no account, is
+	// refused, never trusted and never looked up.
 	requestorAccountKey, err := strconv.Atoi(caller_authid)
-	if err != nil {
-		return false, err
+	if err != nil || requestorAccountKey <= 0 {
+		return false, nil
 	}
 
 	payload := common.Dict{

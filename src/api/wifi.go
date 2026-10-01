@@ -54,6 +54,15 @@ func (ex *External) listWiFiNetworksHandler(ctx context.Context, response messen
 }
 
 func (ex *External) getCurrentIPAddresses(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
+	privileged, err := ex.Privilege.Check("READ", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to list ip addresses"))
+	}
+
 	ipv4Addresses, err := network.GetIPv4Addresses()
 	if err != nil {
 		return nil, err
@@ -91,7 +100,14 @@ func (ex *External) removeWifiHandler(ctx context.Context, response messenger.Re
 }
 
 func (ex *External) wifiScanHandler(ctx context.Context, response messenger.Result) (*messenger.InvokeResult, error) {
-	// TODO: privilege check
+	privileged, err := ex.Privilege.Check("NETWORK", response.Details)
+	if err != nil {
+		return nil, err
+	}
+
+	if !privileged {
+		return nil, errdefs.InsufficientPrivileges(errors.New("insufficient privileges to scan wifi networks"))
+	}
 
 	return &messenger.InvokeResult{}, ex.Network.Scan()
 }

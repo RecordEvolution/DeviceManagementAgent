@@ -18,6 +18,7 @@ import (
 	"reagent/config"
 	"reagent/container"
 	"reagent/diskguard"
+	"reagent/errdefs"
 	"reagent/messenger/topics"
 
 	"github.com/gammazero/nexus/v3/client"
@@ -144,6 +145,10 @@ type WampSession struct {
 	// onStall is what the watchdog does about a heartbeat that stopped
 	// completing rounds: Reconnect, unless a test injects something else.
 	onStall func()
+	// failureLogPeriod is the period of every registration's and
+	// subscription's failure log (see failureLog); zero means
+	// defaultFailureLogPeriod. A test shortens it.
+	failureLogPeriod time.Duration
 }
 
 // ErrStatusUpdateStuck is returned when a status push cannot get its turn
@@ -730,13 +735,98 @@ func (s *WampSession) currentClient() NexusClient {
 	return s.client
 }
 
+// A failure log lets failureLogBurst lines through per period, by default
+// defaultFailureLogPeriod, and counts the rest.
+const (
+	failureLogBurst         = 5
+	defaultFailureLogPeriod = time.Minute
+)
+
+// failureLog samples the log lines of one registration's or subscription's
+// failures. Whoever may call the procedure or publish to the topic decides how
+// often it fails, and on a released router that is anyone: logging every
+// failure would let them flood the device's log and rotate its history away.
+// The lines it drops are counted, and the count is logged once the period is
+// over, so a flood still shows.
+type failureLog struct {
+	sampler zerolog.BurstSampler
+	what    string // what failed, for the count: "refused calls of <topic>"
+
+	mu         sync.Mutex
+	suppressed int
+}
+
+func (s *WampSession) newFailureLog(what string) *failureLog {
+	period := s.failureLogPeriod
+	if period == 0 {
+		period = defaultFailureLogPeriod
+	}
+
+	return &failureLog{
+		sampler: zerolog.BurstSampler{Burst: failureLogBurst, Period: period},
+		what:    what,
+	}
+}
+
+// Sample implements zerolog.Sampler.
+func (l *failureLog) Sample(lvl zerolog.Level) bool {
+	if l.sampler.Sample(lvl) {
+		return true
+	}
+
+	l.mu.Lock()
+	l.suppressed++
+	first := l.suppressed == 1
+	l.mu.Unlock()
+
+	// The first line dropped since the last count schedules the next one, so
+	// an idle registration keeps no timer.
+	if first {
+		time.AfterFunc(l.sampler.Period, l.logSuppressed)
+	}
+
+	return false
+}
+
+func (l *failureLog) logSuppressed() {
+	l.mu.Lock()
+	suppressed := l.suppressed
+	l.suppressed = 0
+	l.mu.Unlock()
+
+	log.Warn().Int("suppressed", suppressed).Msgf("%d more %s were not logged in the last %s", suppressed, l.what, l.sampler.Period)
+}
+
+// logger is the global logger, sampled by l. It is taken per line so a line
+// goes wherever the global logger points by then.
+func (l *failureLog) logger() *zerolog.Logger {
+	sampled := log.Sample(l)
+	return &sampled
+}
+
 func (s *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, options common.Dict) error {
 	c := s.currentClient()
 	if c == nil {
 		return ErrNotConnected
 	}
 
+	// The callback runs once per event, so whoever may publish to the topic
+	// decides how often it fails: a terminal refuses every keystroke from
+	// someone who does not own it.
+	failed := s.newFailureLog(fmt.Sprintf("failed events of %s", topic))
+
 	handler := func(event *wamp.Event) {
+		// The client runs event handlers on its receive loop and recovers
+		// none of them: a callback that panics on a malformed event would
+		// take the agent down with it.
+		defer func() {
+			if r := recover(); r != nil {
+				if e := failed.logger().Error(); e.Enabled() {
+					e.Msgf("Recovered a panic during the subscribe result of %s: %v\n%s", topic, r, debug.Stack())
+				}
+			}
+		}()
+
 		cbEventMap := Result{
 			Subscription: uint64(event.Subscription),
 			Publication:  uint64(event.Publication),
@@ -745,7 +835,7 @@ func (s *WampSession) Subscribe(topic topics.Topic, cb func(Result) error, optio
 			ArgumentsKw:  common.Dict(event.ArgumentsKw),
 		}
 		if err := cb(cbEventMap); err != nil {
-			log.Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
+			failed.logger().Error().Stack().Err(err).Msgf("An error occured during the subscribe result of %s", topic)
 		}
 	}
 
@@ -820,8 +910,32 @@ func (s *WampSession) GetSessionID() uint64 {
 	return uint64(c.ID())
 }
 
+// errHandlerPanicked answers a call whose handler panicked.
+var errHandlerPanicked = errors.New("the device failed to handle the call")
+
 func (s *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, invocation Result) (*InvokeResult, error), options common.Dict) error {
-	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) client.InvokeResult {
+	// Whoever may call the procedure decides how often it fails: every
+	// privilege check refuses the callers it does not know. Refusals get a log
+	// of their own, so a flood of them hides no genuine failure.
+	refused := s.newFailureLog(fmt.Sprintf("refused calls of %s", topic))
+	failed := s.newFailureLog(fmt.Sprintf("failed calls of %s", topic))
+
+	invocationHandler := func(ctx context.Context, invocation *wamp.Invocation) (result client.InvokeResult) {
+		// The client runs the handler on a goroutine of its own and does not
+		// recover it: a handler that panics on a malformed call would take
+		// the agent down with it.
+		defer func() {
+			if r := recover(); r != nil {
+				if e := failed.logger().Error(); e.Enabled() {
+					e.Msgf("Recovered a panic during invocation of %s: %v\n%s", topic, r, debug.Stack())
+				}
+				result = client.InvokeResult{
+					Err:  wamp.URI("wamp.error.canceled"),
+					Args: wamp.List{wamp.Dict{"error": errHandlerPanicked.Error()}},
+				}
+			}
+		}()
+
 		cbInvocationMap := Result{
 			Request:      uint64(invocation.Request),
 			Registration: uint64(invocation.Registration),
@@ -832,7 +946,13 @@ func (s *WampSession) Register(topic topics.Topic, cb func(ctx context.Context, 
 
 		resultMap, invokeErr := cb(ctx, cbInvocationMap)
 		if invokeErr != nil {
-			log.Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
+			// A refusal is the check working, not the agent failing: no stack.
+			if errdefs.IsInsufficientPrivileges(invokeErr) {
+				refused.logger().Warn().Err(invokeErr).Interface("caller_authid", invocation.Details["caller_authid"]).
+					Msgf("Refused a call of %s", topic)
+			} else {
+				failed.logger().Error().Stack().Err(invokeErr).Msgf("An error occured during invocation of %s", topic)
+			}
 			return client.InvokeResult{
 				Err: wamp.URI("wamp.error.canceled"),
 				Args: wamp.List{
@@ -998,7 +1118,8 @@ func (s *WampSession) UpdateRemoteDeviceStatus(status DeviceStatus) error {
 		return err
 	}
 
-	if res.Arguments == nil || res.Arguments[0] == nil {
+	// The length, not only the nil-ness: an empty list indexes out of range.
+	if len(res.Arguments) == 0 || res.Arguments[0] == nil {
 		return nil
 	}
 
