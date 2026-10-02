@@ -3,6 +3,7 @@
 package apps
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -163,6 +164,44 @@ func composeITTwoServiceCompose() map[string]any {
 	}
 }
 
+// composeITOneShotCompose returns a compose document with a one-shot "migrate"
+// service that exits 0 and a long-running "web" service that only starts once
+// migrate has completed successfully — so `up -d` returns with migrate already
+// exited, the common init-job pattern.
+func composeITOneShotCompose() map[string]any {
+	return map[string]any{
+		"services": map[string]any{
+			"migrate": map[string]any{
+				"image":   composeITLongImage,
+				"command": []any{"true"},
+			},
+			"web": map[string]any{
+				"image":   composeITLongImage,
+				"command": []any{"sleep", "120"},
+				"depends_on": map[string]any{
+					"migrate": map[string]any{"condition": "service_completed_successfully"},
+				},
+			},
+		},
+	}
+}
+
+// composeITRequireStarted runs the run handlers' post-`up` start check against
+// the live project and fails the test unless it reports the project started.
+func composeITRequireStarted(t *testing.T, compose *container.Compose, composePath string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	runningC, errC := compose.WaitForRunning(ctx, composePath, 200*time.Millisecond)
+	select {
+	case err := <-errC:
+		require.NoError(t, err, "WaitForRunning should report the project started")
+	case <-runningC:
+	}
+}
+
 // composeITDrainUp drains a `compose` command's output channel and waits for the
 // process to finish, mirroring what LogManager.StreamLogsChannel + cmd.Wait do
 // in the production runProdComposeApp / runDevComposeApp handlers.
@@ -234,18 +273,8 @@ func TestIntegrationComposeUpAndObserverCorrection(t *testing.T) {
 	require.NoError(t, composeITDrainUp(outputChan, upCmd), "compose up should exit 0")
 
 	// --- Assert the containers are actually up, straight from the real client. ---
-	// Poll IsRunning briefly: `up -d` returns once started, but the daemon may
-	// take a beat to report all containers as running.
-	var running bool
-	for i := 0; i < 30; i++ {
-		running, err = compose.IsRunning(composePath)
-		require.NoError(t, err, "IsRunning (real `compose ps` + jq) should not error")
-		if running {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	require.True(t, running, "both compose services should be reported running")
+	// WaitForRunning is the start check the run handlers make after `up -d`.
+	composeITRequireStarted(t, compose, composePath)
 
 	statuses, err := compose.Status(composePath)
 	require.NoError(t, err, "Status (real `compose ps` piped through jq) should not error")
@@ -296,4 +325,49 @@ func TestIntegrationComposeUpAndObserverCorrection(t *testing.T) {
 		assert.NotEqual(t, composeName, e.Name,
 			"project %q should be gone after compose down", composeName)
 	}
+}
+
+// =============================================================================
+// Test 2: a one-shot service that exits 0 does not fail the start
+// =============================================================================
+
+func TestIntegrationComposeOneShotServiceStarts(t *testing.T) {
+	docker := composeITDocker(t)
+	sm, _, st, _ := composeITStateMachine(t, docker)
+
+	appName := composeITAppName(t)
+	const appKey = uint64(2)
+	const stage = common.DEV
+
+	payload := builders.BuildTransitionPayload(appName, common.RUNNING, stage)
+	payload.AppKey = appKey
+	payload.CurrentState = common.STARTING
+	payload.DockerCompose = composeITOneShotCompose()
+	payload.ContainerName = common.StageBasedResult{
+		Dev:  common.BuildContainerName(common.DEV, appKey, appName),
+		Prod: common.BuildContainerName(common.PROD, appKey, appName),
+	}
+
+	app, err := st.AddApp(payload)
+	require.NoError(t, err)
+
+	composePath, err := sm.SetupComposeFiles(payload, app, false)
+	require.NoError(t, err)
+	t.Cleanup(func() { composeITForceDown(composePath) })
+
+	compose := docker.Compose()
+	outputChan, upCmd, err := compose.Up(composePath)
+	require.NoError(t, err)
+	require.NoError(t, composeITDrainUp(outputChan, upCmd), "compose up should exit 0")
+
+	composeITRequireStarted(t, compose, composePath)
+
+	statuses, err := compose.Status(composePath)
+	require.NoError(t, err)
+	states := map[string]string{}
+	for _, s := range statuses {
+		states[s.Service] = s.State
+	}
+	assert.Equal(t, map[string]string{"migrate": "exited", "web": "running"}, states,
+		"the one-shot must have finished while web runs — the case the start used to fail on")
 }

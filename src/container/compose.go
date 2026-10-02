@@ -477,56 +477,39 @@ func (c *Compose) UpNoBuild(dockerComposePath string) (chan string, *ComposeCmd,
 	return c.composeCommand(dockerComposePath, "up", "--remove-orphans", "-d", "--no-build")
 }
 
+// WaitForRunning polls the project until it has started (see composeStarted).
+// Exactly one of the returned channels receives a value; neither is closed, so
+// a select over both can never read a failure as success.
 func (c *Compose) WaitForRunning(ctx context.Context, dockerComposePath string, pollingRate time.Duration) (<-chan struct{}, <-chan error) {
 	errC := make(chan error, 1)
 	runningC := make(chan struct{}, 1)
 
 	safe.Go(func() {
 		for {
+			statuses, err := c.Status(dockerComposePath)
+			if err != nil {
+				errC <- err
+				return
+			}
+
+			started, err := composeStarted(statuses)
+			if err != nil {
+				errC <- err
+				return
+			}
+
+			if started {
+				runningC <- struct{}{}
+				return
+			}
+
+			// Also on an empty status list (project not visible yet): every
+			// tick spawns a `compose ps`, so it must never spin.
 			select {
 			case <-ctx.Done():
 				errC <- errors.New("waiting for running canceled")
-				close(errC)
-				close(runningC)
 				return
-			default:
-				statuses, err := c.Status(dockerComposePath)
-				if err != nil {
-					errC <- err
-					close(errC)
-					close(runningC)
-					return
-				}
-
-				if len(statuses) == 0 {
-					continue
-				}
-
-				running, err := c.IsRunning(dockerComposePath)
-				if err != nil {
-					errC <- err
-					close(errC)
-					close(runningC)
-					return
-				}
-
-				if running {
-					runningC <- struct{}{}
-					close(errC)
-					close(runningC)
-					return
-				}
-
-				for _, status := range statuses {
-					if status.State == "exited" || status.State == "dead" {
-						errC <- errors.New("the container has exited")
-						close(errC)
-						close(runningC)
-						return
-					}
-				}
-
-				time.Sleep(pollingRate)
+			case <-time.After(pollingRate):
 			}
 		}
 	})
@@ -534,20 +517,52 @@ func (c *Compose) WaitForRunning(ctx context.Context, dockerComposePath string, 
 	return runningC, errC
 }
 
-func (c *Compose) IsRunning(dockerComposePath string) (bool, error) {
-	statuses, err := c.Status(dockerComposePath)
-	if err != nil {
-		return false, err
+// composeStarted reports whether a compose project has started: every
+// container is running or has exited with code 0, and at least one is
+// running. A clean exit is a one-shot service (an init job, a migration) that
+// finished its work — `up -d` has already waited for any such service other
+// services depend on via `depends_on: service_completed_successfully`, so it
+// is always exited by the first poll. This matches the state observer, which
+// keeps a project RUNNING while any of its containers runs.
+//
+// A container that exited non-zero or is dead fails the start. So does a
+// project in which every container exited: there is nothing left to run, and
+// reporting it RUNNING would only have the observer correct it and re-drive
+// the start right away, bypassing the crashloop backoff.
+//
+// Containers still on their way up (created, restarting) keep it waiting, as
+// does a project with no containers yet.
+func composeStarted(statuses []ComposeStatus) (bool, error) {
+	if len(statuses) == 0 {
+		return false, nil
 	}
 
-	allRunning := true
+	running := false
+	pending := false
 	for _, status := range statuses {
-		if status.State != "running" {
-			allRunning = false
+		switch status.State {
+		case "running":
+			running = true
+		case "exited":
+			if status.ExitCode != 0 {
+				return false, fmt.Errorf("service %q exited with code %d", status.Service, status.ExitCode)
+			}
+		case "dead":
+			return false, fmt.Errorf("service %q is dead", status.Service)
+		default:
+			pending = true
 		}
 	}
 
-	return allRunning, nil
+	if pending {
+		return false, nil
+	}
+
+	if !running {
+		return false, errors.New("all services have exited, at least one has to keep running")
+	}
+
+	return true, nil
 }
 
 func IsComposeSupported() bool {

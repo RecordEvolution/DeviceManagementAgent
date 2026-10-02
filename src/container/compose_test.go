@@ -178,13 +178,43 @@ func TestComposeUnsupportedShortCircuits(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, entries)
 	})
+}
 
-	t.Run("IsRunning is vacuously true over no statuses", func(t *testing.T) {
-		running, err := c.IsRunning("/tmp/does-not-matter.yml")
-		require.NoError(t, err)
-		// IsRunning starts allRunning=true and never flips it for an empty set.
-		assert.True(t, running)
-	})
+// composeStarted decides when WaitForRunning ends a start: a clean exit is a
+// one-shot service that finished, not a failure.
+func TestComposeStarted(t *testing.T) {
+	st := func(service, state string, exitCode int) ComposeStatus {
+		return ComposeStatus{Service: service, State: state, ExitCode: exitCode}
+	}
+
+	tests := []struct {
+		name     string
+		statuses []ComposeStatus
+		started  bool
+		errMsg   string
+	}{
+		{"no containers yet keeps waiting", nil, false, ""},
+		{"all running", []ComposeStatus{st("web", "running", 0), st("db", "running", 0)}, true, ""},
+		{"one-shot exited 0 next to a running service", []ComposeStatus{st("migrate", "exited", 0), st("web", "running", 0)}, true, ""},
+		{"exited non-zero fails", []ComposeStatus{st("migrate", "exited", 3), st("web", "running", 0)}, false, `service "migrate" exited with code 3`},
+		{"dead fails", []ComposeStatus{st("web", "dead", 0), st("db", "running", 0)}, false, `service "web" is dead`},
+		{"failure wins over a pending container", []ComposeStatus{st("web", "created", 0), st("db", "exited", 1)}, false, `service "db" exited with code 1`},
+		{"created keeps waiting", []ComposeStatus{st("web", "created", 0), st("db", "running", 0)}, false, ""},
+		{"restarting keeps waiting", []ComposeStatus{st("web", "restarting", 0), st("migrate", "exited", 0)}, false, ""},
+		{"everything exited 0 fails", []ComposeStatus{st("migrate", "exited", 0), st("seed", "exited", 0)}, false, "all services have exited, at least one has to keep running"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			started, err := composeStarted(tt.statuses)
+			if tt.errMsg != "" {
+				require.EqualError(t, err, tt.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.started, started)
+		})
+	}
 }
 
 // parseComposePSOutput must accept every output shape `docker compose ps -a
