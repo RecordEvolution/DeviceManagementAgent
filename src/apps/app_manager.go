@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reagent/common"
+	"reagent/diskguard"
 	"reagent/errdefs"
 	"reagent/messenger/topics"
 	"reagent/safe"
@@ -34,9 +35,13 @@ type AppManager struct {
 	crashLoops    map[*CrashLoop]struct{}
 	crashLoopLock sync.Mutex
 
-	// tunnelRebuilds paces the rebuild of a tunnel frps keeps refusing. See
-	// mayRebuildTunnel.
+	// tunnelRebuilds paces the retries of every tunnel that failed to come up:
+	// a proxy frps keeps refusing (see mayRebuildTunnel) or an add that failed
+	// (see noteTunnelAdd). portSyncRetries holds the one follow-up re-sync per
+	// app that drives those retries (see schedulePortSyncRetry). Both are
+	// guarded by tunnelRebuildLock.
 	tunnelRebuilds    map[string]*tunnelRebuildState
+	portSyncRetries   map[appStageKey]*portSyncRetry
 	tunnelRebuildLock sync.Mutex
 
 	// reservationNotes paces the user-visible "takes effect on next restart"
@@ -47,7 +52,9 @@ type AppManager struct {
 	reservationNoteLock sync.Mutex
 }
 
-// Rebuild pacing for a tunnel whose proxy frps will not accept.
+// Retry pacing for a tunnel that failed to come up: a proxy frps will not
+// accept, or an add that failed outright (REtunnel refusing the remote port,
+// frpc not reloading).
 //
 // A refusal is invisible to AddTunnel (it returns success on a successful frpc
 // config reload), so the next sync finds the proxy dead and rebuilds it, which
@@ -58,7 +65,11 @@ type AppManager struct {
 //
 // Retrying is still right — the condition usually clears on its own — so this
 // paces rather than stops: exponential backoff from rebuildBackoffBase to
-// rebuildBackoffMax, reset the moment the proxy comes up.
+// rebuildBackoffMax, reset the moment the proxy comes up. The agent also drives
+// those retries itself (schedulePortSyncRetry) instead of waiting for the next
+// sync: syncPortState otherwise runs only on a state push, a (re)connect, a
+// state correction, a crashloop retry or the end of a transition, and none of
+// those is tied to the failure clearing.
 const (
 	rebuildBackoffBase = 10 * time.Second
 	rebuildBackoffMax  = 5 * time.Minute
@@ -67,17 +78,58 @@ const (
 type tunnelRebuildState struct {
 	attempts int
 	last     time.Time
+	// loggedReservationFailure is the reserved-remote-port failure last
+	// written to the app log for this tunnel in this agent run. A retry
+	// re-reads the stored requested state, which never carries the
+	// reservation_error persisted upstream back, so without it every retry
+	// would write the same line again. Reset with the rest of the state once
+	// the tunnel serves (noteTunnelHealthy).
+	loggedReservationFailure string
 }
+
+// rebuildBackoff is how long a tunnel waits after its attempts-th failed
+// attempt before the next one: rebuildBackoffBase, doubling per attempt, capped
+// at rebuildBackoffMax.
+func rebuildBackoff(attempts int) time.Duration {
+	backoff := rebuildBackoffBase << (attempts - 1)
+	if backoff > rebuildBackoffMax || backoff <= 0 { // <= 0 guards the shift overflowing
+		backoff = rebuildBackoffMax
+	}
+	return backoff
+}
+
+// appStageKey identifies one installed app: an app key is installed at most
+// once per stage.
+type appStageKey struct {
+	AppKey uint64
+	Stage  common.Stage
+}
+
+// portSyncRetry is the follow-up re-sync pending for one app.
+type portSyncRetry struct {
+	timer *time.Timer
+	due   time.Time
+}
+
+// portSyncRetryAfterFunc arms the timer of a port-sync retry. A var, not a
+// direct time.AfterFunc call, so tests can capture retries and fire them by
+// hand.
+var portSyncRetryAfterFunc = time.AfterFunc
+
+// diskEmergency reports whether the device is in a disk emergency (see package
+// diskguard). A var so tests can put the device into one; only diskguard can.
+var diskEmergency = diskguard.IsEmergency
 
 func NewAppManager(sm *StateMachine, as *store.AppStore, so *StateObserver, tm tunnel.TunnelManager) *AppManager {
 	am := AppManager{
-		StateMachine:   sm,
-		StateObserver:  so,
-		AppStore:       as,
-		tunnelManager:  tm,
-		hostPorts:      NewHostPortRegistry(),
-		crashLoops:     make(map[*CrashLoop]struct{}),
-		tunnelRebuilds: make(map[string]*tunnelRebuildState),
+		StateMachine:    sm,
+		StateObserver:   so,
+		AppStore:        as,
+		tunnelManager:   tm,
+		hostPorts:       NewHostPortRegistry(),
+		crashLoops:      make(map[*CrashLoop]struct{}),
+		tunnelRebuilds:  make(map[string]*tunnelRebuildState),
+		portSyncRetries: make(map[appStageKey]*portSyncRetry),
 	}
 
 	am.StateObserver.AppManager = &am
@@ -160,6 +212,17 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 
 	newPorts := make([]common.PortForwardRule, 0)
 
+	// The earliest any tunnel of this app needs another look: one that failed
+	// to come up in this pass is retried by the agent itself (see "Retry
+	// pacing"), at most one re-sync per app.
+	var resyncIn time.Duration
+	resyncNeeded := false
+	needResync := func(after time.Duration) {
+		if !resyncNeeded || after < resyncIn {
+			resyncIn, resyncNeeded = after, true
+		}
+	}
+
 	for _, portRule := range portRules {
 		subdomain := tunnel.CreateSubdomain(tunnel.Protocol(portRule.Protocol), uint64(globalConfig.ReswarmConfig.DeviceKey), payload.AppName, portRule.Port)
 		tunnelID := tunnel.CreateTunnelID(subdomain, portRule.Protocol)
@@ -223,7 +286,7 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 					// the same way a wrong local port is: applying or changing
 					// a reservation must move a running tunnel (and drop the
 					// old frps bind promptly), so it takes the Remove+Add path.
-					alive, deferRebuild := false, false
+					alive, deferRebuild, rebuilding := false, false, false
 					if tnl != nil && tnl.Config.LocalPort == dialPort &&
 						(reservedRemote == 0 || tnl.Config.RemotePort == reservedRemote) {
 						var reason string
@@ -232,7 +295,12 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 							am.noteTunnelHealthy(tunnelID)
 						} else {
 							ok, retryIn := am.mayRebuildTunnel(tunnelID)
-							deferRebuild = !ok
+							deferRebuild, rebuilding = !ok, ok
+							if deferRebuild {
+								// Come back the moment the backoff allows the
+								// rebuild; no sync would otherwise.
+								needResync(retryIn)
+							}
 							log.Warn().Str("tunnelID", tunnelID).Str("reason", reason).
 								Bool("rebuilding", ok).Dur("retryIn", retryIn).
 								Msg("Tunnel bookkeeping says up but frpc has no live proxy")
@@ -261,6 +329,9 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 						}
 
 						added, addErr := am.tunnelManager.AddTunnel(tunnelConfig)
+						if after, ok := am.noteTunnelAdd(tunnelID, rebuilding, addErr != nil); ok {
+							needResync(after)
+						}
 						if addErr != nil {
 							// Keep the incoming rule as-is rather than
 							// persisting the zero config a failed add returns.
@@ -274,9 +345,13 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 								// pass, and a persisting frps refusal (already
 								// persisted on the incoming rule) must not
 								// write the same line into the user-visible
-								// app log once per pass forever.
+								// app log once per pass forever. The agent's
+								// own retries re-read the stored requested
+								// state, which never carries that persisted
+								// error back, so the failure last logged for
+								// this tunnel counts as already said too.
 								reservationFailure = addErr.Error()
-								if reservationFailure != portRule.ReservationError {
+								if reservationFailure != portRule.ReservationError && am.noteReservationFailure(tunnelID, reservationFailure) {
 									am.writeAppLog(payload.ContainerName.Prod, fmt.Sprintf("Reserved tunnel port %d for port %d could not be established: %v. Reserved ports are never reassigned automatically - free the port or change the reservation.", reservedRemote, portRule.Port, addErr))
 								}
 							}
@@ -346,6 +421,18 @@ func (am *AppManager) syncPortState(payload common.TransitionPayload, app *commo
 
 	}
 
+	// A pass that looked at the tunnels and found none needing another look
+	// makes a pending re-sync moot. While the device cannot tunnel nothing was
+	// looked at, so a pending one is left alone; the capability coming back
+	// reconciles every app anyway (SyncAllPortStates).
+	if tunnelsAvailable {
+		if resyncNeeded {
+			am.schedulePortSyncRetry(payload.AppKey, payload.Stage, resyncIn)
+		} else {
+			am.cancelPortSyncRetry(payload.AppKey, payload.Stage)
+		}
+	}
+
 	np, err := tunnel.PortForwardRuleToInterface(newPorts)
 	if err != nil {
 		log.Error().Stack().Err(err).Msg("Failed to convert newPorts to interface")
@@ -408,7 +495,8 @@ func (am *AppManager) tunnelProxyAlive(tunnelID string) (bool, string) {
 // mayRebuildTunnel reports whether a dead tunnel is due for another rebuild
 // attempt, recording the attempt when it says yes. Applies ONLY to the
 // rebuild-a-dead-proxy path: a brand-new tunnel and a tunnel whose local port
-// actually changed are real work and are never paced.
+// actually changed are real work and are never held off (their failures are
+// counted by noteTunnelAdd).
 func (am *AppManager) mayRebuildTunnel(tunnelID string) (bool, time.Duration) {
 	am.tunnelRebuildLock.Lock()
 	defer am.tunnelRebuildLock.Unlock()
@@ -419,10 +507,7 @@ func (am *AppManager) mayRebuildTunnel(tunnelID string) (bool, time.Duration) {
 		return true, 0
 	}
 
-	backoff := rebuildBackoffBase << (st.attempts - 1)
-	if backoff > rebuildBackoffMax || backoff <= 0 { // <= 0 guards the shift overflowing
-		backoff = rebuildBackoffMax
-	}
+	backoff := rebuildBackoff(st.attempts)
 	if waited := time.Since(st.last); waited < backoff {
 		return false, backoff - waited
 	}
@@ -432,12 +517,189 @@ func (am *AppManager) mayRebuildTunnel(tunnelID string) (bool, time.Duration) {
 	return true, 0
 }
 
+// noteTunnelAdd counts an add toward the tunnel's retry pacing and returns how
+// long until a follow-up re-sync should look at the tunnel again, or false
+// when it needs none.
+//
+// paced means mayRebuildTunnel already counted this attempt (the rebuild of a
+// dead proxy). Every other add — a brand-new tunnel, a moved local or dial
+// port, a live tunnel moved to its reserved remote port — is never held off by
+// the backoff (whatever asked for the sync gets the add at once) and is
+// counted here: always when it failed, and when it succeeded only for a tunnel
+// that failed before, because frps may still refuse the proxy and only a later
+// liveness check can tell. A first-time add that succeeds counts nothing, so a
+// normal boot schedules no extra syncs.
+func (am *AppManager) noteTunnelAdd(tunnelID string, paced bool, failed bool) (time.Duration, bool) {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	st := am.tunnelRebuilds[tunnelID]
+	if !paced {
+		if st == nil {
+			if !failed {
+				return 0, false
+			}
+			st = &tunnelRebuildState{}
+			am.tunnelRebuilds[tunnelID] = st
+		}
+		st.attempts++
+		st.last = time.Now()
+	}
+	if st == nil {
+		// A concurrent sync saw the proxy serving and cleared the pacing.
+		return 0, false
+	}
+	return rebuildBackoff(st.attempts), true
+}
+
+// noteReservationFailure reports whether a reserved tunnel's failure still has
+// to be written to the app log, and records it as written: false when it is
+// the failure last logged for this tunnel in this agent run.
+func (am *AppManager) noteReservationFailure(tunnelID string, failure string) bool {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	st := am.tunnelRebuilds[tunnelID]
+	if st == nil {
+		// A concurrent sync saw the proxy serving: nothing to compare against.
+		return true
+	}
+	if st.loggedReservationFailure == failure {
+		return false
+	}
+	st.loggedReservationFailure = failure
+	return true
+}
+
 // noteTunnelHealthy clears the backoff for a tunnel that is serving again, so
 // the next genuine failure starts from the base delay rather than a stale one.
 func (am *AppManager) noteTunnelHealthy(tunnelID string) {
 	am.tunnelRebuildLock.Lock()
 	defer am.tunnelRebuildLock.Unlock()
 	delete(am.tunnelRebuilds, tunnelID)
+}
+
+// schedulePortSyncRetry has the agent re-sync an app's tunnels by itself
+// within after: one pending re-sync per app, kept at the earliest time any of
+// its tunnels asked for.
+//
+// Nothing else would retry a tunnel that failed to come up: syncPortState
+// runs only when a state push arrives, the agent (re)connects, a state
+// observer corrects the app, a crashloop retries or a transition ends, and
+// none of those is tied to the failure clearing. On 2026-10-02, after an agent
+// update, REtunnel refused re.tunnel.expose_port for the tunnels' previous
+// remote ports ("not authorized": it had lost its port-owner record in a pod
+// restart). The refusal cleared within minutes, but the TCP/UDP tunnels on
+// devices 4749 and 4806 stayed down until their apps were restarted by hand.
+func (am *AppManager) schedulePortSyncRetry(appKey uint64, stage common.Stage, after time.Duration) {
+	key := appStageKey{AppKey: appKey, Stage: stage}
+	due := time.Now().Add(after)
+
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	if pending := am.portSyncRetries[key]; pending != nil {
+		if !pending.due.After(due) {
+			return
+		}
+		pending.timer.Stop()
+	}
+
+	retry := &portSyncRetry{due: due}
+	retry.timer = portSyncRetryAfterFunc(after, func() {
+		am.tunnelRebuildLock.Lock()
+		if am.portSyncRetries[key] == retry {
+			delete(am.portSyncRetries, key)
+		}
+		am.tunnelRebuildLock.Unlock()
+
+		log.Info().Uint64("app_key", appKey).Str("stage", string(stage)).Msg("Re-syncing an app's tunnels: one of them failed to come up")
+		// Outside tunnelRebuildLock: syncPortState takes it itself.
+		safe.Run(func() { am.retryPortSync(appKey, stage) })
+	})
+	am.portSyncRetries[key] = retry
+}
+
+// cancelPortSyncRetry drops an app's pending re-sync once a pass found none of
+// its tunnels needing another look.
+func (am *AppManager) cancelPortSyncRetry(appKey uint64, stage common.Stage) {
+	key := appStageKey{AppKey: appKey, Stage: stage}
+
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	if pending := am.portSyncRetries[key]; pending != nil {
+		pending.timer.Stop()
+		delete(am.portSyncRetries, key)
+	}
+}
+
+// retryPortSync re-runs syncPortState for one app from its locally stored
+// requested state: the latest the agent knows, so a rule that turned inactive,
+// or an app no longer wanted RUNNING, reconciles to that instead of being
+// re-added.
+//
+// It stands down during a disk emergency. diskguard then stops every app
+// container and InitTransition refuses to start one, so re-adding their tunnels
+// would only reload frpc and rewrite frpc.yaml on a critically full disk, for
+// apps that are not running: os.WriteFile truncates before it writes, so a
+// write that hits ENOSPC leaves the file short, and the next reload drops
+// tunnels that were up. A re-sync skipped here is not lost: leaving the
+// emergency reconciles every app's tunnels (diskguard's OnRecover runs
+// SyncAllPortStates).
+func (am *AppManager) retryPortSync(appKey uint64, stage common.Stage) {
+	if diskEmergency() {
+		log.Info().Uint64("app_key", appKey).Str("stage", string(stage)).
+			Msg("Not re-syncing an app's tunnels during the disk emergency; they are reconciled once it clears")
+		return
+	}
+
+	app, err := am.AppStore.GetApp(appKey, stage)
+	if err != nil || app == nil {
+		// Uninstalled or removed meanwhile: nothing left to retry.
+		return
+	}
+
+	payload, err := am.AppStore.GetRequestedState(appKey, stage)
+	if err != nil {
+		// A completed teardown deletes the row; the in-memory app outlives it.
+		return
+	}
+
+	err = am.syncPortState(payload, app)
+	if err != nil {
+		log.Error().Stack().Err(err).Str("app", payload.AppName).Msg("Failed to re-sync port state")
+	}
+}
+
+// SyncAllPortStates re-syncs the tunnels of every PROD app from its stored
+// requested state, one app after another. The tunnel manager runs it whenever
+// the device becomes able to tunnel (see tunnel.FrpTunnelManager.SetOnAvailable):
+// tunnels skipped while it could not, and adds that failed while frpc was
+// starting, are reconciled the moment it can tunnel again. Nothing else would
+// ask for them. diskguard's OnRecover runs it when a disk emergency clears,
+// for the re-syncs retryPortSync skipped during it.
+func (am *AppManager) SyncAllPortStates() {
+	if diskEmergency() {
+		// Leaving the emergency runs this again (diskguard's OnRecover).
+		log.Info().Msg("Not reconciling the apps' tunnels during the disk emergency; they are reconciled once it clears")
+		return
+	}
+
+	payloads, err := am.AppStore.GetRequestedStates()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to read requested states to reconcile tunnels")
+		return
+	}
+
+	log.Info().Msg("Reconciling the tunnels of every app")
+	for _, payload := range payloads {
+		// syncPortState never tunnels DEV apps.
+		if payload.Stage != common.PROD {
+			continue
+		}
+		am.retryPortSync(payload.AppKey, payload.Stage)
+	}
 }
 
 // tunnelInConfigFile reports whether the frpc config file still carries a

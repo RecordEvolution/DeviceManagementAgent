@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"reagent/common"
 	"reagent/errdefs"
@@ -795,4 +796,414 @@ func TestSyncPortStateReservationOnRunningAppKeepsLiveDialPort(t *testing.T) {
 	recovered, ok := am.hostPorts.Get(key)
 	require.True(t, ok)
 	assert.Equal(t, uint64(41234), recovered, "the assignment reverts to the live pool port")
+}
+
+// =============================================================================
+// Agent-driven tunnel retries
+// =============================================================================
+
+// spsPacing returns a copy of the tunnel's retry pacing state, if it has one.
+func spsPacing(am *AppManager, tunnelID string) (tunnelRebuildState, bool) {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	st := am.tunnelRebuilds[tunnelID]
+	if st == nil {
+		return tunnelRebuildState{}, false
+	}
+	return *st, true
+}
+
+// spsAgePacing moves the tunnel's last attempt back by d: the backoff elapsing,
+// without sleeping through it.
+func spsAgePacing(t *testing.T, am *AppManager, tunnelID string, d time.Duration) {
+	t.Helper()
+
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	st := am.tunnelRebuilds[tunnelID]
+	require.NotNil(t, st, "the tunnel has no pacing state to age")
+	st.last = st.last.Add(-d)
+}
+
+// spsPendingRetry returns the app's pending re-sync (nil when none) and how
+// many re-syncs are pending across all apps.
+func spsPendingRetry(am *AppManager, appKey uint64, stage common.Stage) (*portSyncRetry, int) {
+	am.tunnelRebuildLock.Lock()
+	defer am.tunnelRebuildLock.Unlock()
+
+	return am.portSyncRetries[appStageKey{AppKey: appKey, Stage: stage}], len(am.portSyncRetries)
+}
+
+// The 2026-10-02 outage: after an agent update REtunnel refused
+// re.tunnel.expose_port for the tunnels' previous remote ports ("not
+// authorized"). The refusal cleared within minutes, but no state push,
+// reconnect or transition re-ran the sync, so the TCP/UDP tunnels on devices
+// 4749 and 4806 stayed down until their apps were restarted by hand. The agent
+// must retry a failed add by itself, paced, from the stored requested state,
+// until frpc is seen serving the tunnel.
+func TestSyncPortStateRetriesFailedAddWithoutTrigger(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 50, "relayapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	rule := common.PortForwardRule{RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true, HostPort: 41600, RemotePort: 30777}
+	payload := amPayload(50, "relayapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, rule)
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 50, Protocol: "tcp", Port: 1883}, 41600)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "relayapp", 1883)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "tcp")
+	up := tunnel.TunnelConfig{Subdomain: subdomain, AppName: "relayapp", Protocol: tunnel.Protocol("tcp"), LocalPort: 41600, RemotePort: 30778}
+
+	// A failed add releases its claim, so every pass up to the successful add
+	// finds no tunnel; the last one finds the tunnel that came up.
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Times(3)
+	mockTunnel.EXPECT().Get(tunnelID).Return(&tunnel.Tunnel{Config: up}).Once()
+
+	var requestedRemotes []uint64
+	refusals := 2
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		requestedRemotes = append(requestedRemotes, conf.RemotePort)
+		if refusals > 0 {
+			refusals--
+			return tunnel.TunnelConfig{}, errors.New("not authorized")
+		}
+		return conf, nil
+	}).Times(3)
+	mockTunnel.EXPECT().Status(tunnelID).Return(tunnel.TunnelStatus{Name: tunnelID, Status: "running"}, nil).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Times(4)
+
+	// The only external trigger in this test.
+	require.NoError(t, am.syncPortState(payload, app))
+
+	scheduled := retries.all()
+	require.Len(t, scheduled, 1, "a failed add schedules exactly one re-sync")
+	assert.Equal(t, rebuildBackoffBase, scheduled[0].after)
+
+	// The retry works from the stored requested state, not from the payload
+	// the failed pass ran with: a push stored meanwhile wins.
+	rule.RemotePort = 30778
+	payload.Ports = spsPorts(t, rule)
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	scheduled[0].fire()
+	scheduled = retries.all()
+	require.Len(t, scheduled, 2, "a retry that fails again schedules the next one")
+	assert.Equal(t, 2*rebuildBackoffBase, scheduled[1].after, "backing off")
+
+	scheduled[1].fire()
+	scheduled = retries.all()
+	require.Len(t, scheduled, 3, "a tunnel that failed before is looked at once more after its add succeeded")
+	assert.Equal(t, 4*rebuildBackoffBase, scheduled[2].after)
+
+	// frpc serves the proxy: the chain ends and the pacing is cleared.
+	scheduled[2].fire()
+	assert.Len(t, retries.all(), 3, "a serving tunnel needs no further re-sync")
+	_, paced := spsPacing(am, tunnelID)
+	assert.False(t, paced, "a serving tunnel clears its pacing")
+	_, pending := spsPendingRetry(am, 50, common.PROD)
+	assert.Zero(t, pending)
+
+	assert.Equal(t, []uint64{30777, 30778, 30778}, requestedRemotes, "each retry re-reads the stored requested state")
+}
+
+// A dead proxy rebuilt once is held off by the backoff on the next pass. The
+// deferred rebuild then waited for some unrelated sync to come along after the
+// backoff expired; the agent must come back for it by itself.
+func TestSyncPortStateRetriesDeferredRebuild(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 51, "refusedapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(51, "refusedapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "vpn", Port: 51820, Protocol: "udp", Active: true, HostPort: 41700, RemotePort: 30801})
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 51, Protocol: "udp", Port: 51820}, 41700)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("udp"), uint64(cfg.ReswarmConfig.DeviceKey), "refusedapp", 51820)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "udp")
+	stale := tunnel.TunnelConfig{Subdomain: subdomain, AppName: "refusedapp", Protocol: tunnel.Protocol("udp"), LocalPort: 41700, RemotePort: 30801}
+
+	// Bookkeeping keeps the tunnel while frps keeps refusing its proxy.
+	mockTunnel.EXPECT().Get(tunnelID).Return(&tunnel.Tunnel{Config: stale})
+	mockTunnel.EXPECT().Status(tunnelID).Return(tunnel.TunnelStatus{Name: tunnelID, Status: "start error", Error: "authorization check failed"}, nil)
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil)
+
+	// Two rebuilds: the first pass's, and the one once the backoff elapsed.
+	mockTunnel.EXPECT().RemoveTunnel(stale).Return(nil).Times(2)
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		return conf, nil
+	}).Times(2)
+
+	require.NoError(t, am.syncPortState(payload, app))
+	scheduled := retries.all()
+	require.Len(t, scheduled, 1, "a rebuild is looked at again once the backoff would allow the next one")
+	assert.Equal(t, rebuildBackoffBase, scheduled[0].after)
+
+	// The re-sync lands with 4s of the backoff gone: the rebuild is deferred,
+	// and the agent must come back for the remaining 6s by itself.
+	spsAgePacing(t, am, tunnelID, 4*time.Second)
+	scheduled[0].fire()
+	scheduled = retries.all()
+	require.Len(t, scheduled, 2, "a deferred rebuild schedules its own re-sync")
+	assert.LessOrEqual(t, scheduled[1].after, rebuildBackoffBase-4*time.Second, "at the remaining backoff")
+	assert.Greater(t, scheduled[1].after, rebuildBackoffBase-5*time.Second, "at the remaining backoff")
+
+	// Fired once the backoff has elapsed, it rebuilds and paces the next look.
+	spsAgePacing(t, am, tunnelID, rebuildBackoffBase)
+	scheduled[1].fire()
+
+	st, paced := spsPacing(am, tunnelID)
+	require.True(t, paced)
+	assert.Equal(t, 2, st.attempts, "the re-sync rebuilt the proxy")
+	scheduled = retries.all()
+	require.Len(t, scheduled, 3)
+	assert.Equal(t, 2*rebuildBackoffBase, scheduled[2].after)
+}
+
+// The normal boot path: a tunnel added successfully for the first time costs
+// no follow-up re-sync.
+func TestSyncPortStateFirstAddSchedulesNoRetry(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 52, "freshtunnel", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(52, "freshtunnel", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true, HostPort: 41800, RemotePort: 30900})
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 52, Protocol: "tcp", Port: 1883}, 41800)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "freshtunnel", 1883)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "tcp")
+
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		return conf, nil
+	}).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+
+	assert.Empty(t, retries.all(), "a first add that succeeds schedules no re-sync")
+	_, paced := spsPacing(am, tunnelID)
+	assert.False(t, paced, "and leaves no pacing behind")
+}
+
+// A retry that fires after the app was uninstalled has nothing left to do and
+// must not bring the app's tunnels back.
+func TestPortSyncRetryStopsForRemovedApp(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	app := amSeed(t, appStore, 53, "goneapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(53, "goneapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true, HostPort: 41900, RemotePort: 30950})
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 53, Protocol: "tcp", Port: 1883}, 41900)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "goneapp", 1883)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "tcp")
+
+	// Exactly the first pass's calls: the strict mock fails the test on any
+	// tunnel call a retry makes.
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Once()
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).Return(tunnel.TunnelConfig{}, errors.New("not authorized")).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+	scheduled := retries.all()
+	require.Len(t, scheduled, 1)
+
+	// A completed teardown deletes both rows; the in-memory app entry stays.
+	require.NoError(t, appStore.DeleteAppState(53, common.PROD))
+	require.NoError(t, appStore.DeleteRequestedState(53, common.PROD))
+
+	scheduled[0].fire()
+	assert.Len(t, retries.all(), 1, "a retry for a removed app schedules nothing")
+
+	// Likewise for an app the agent does not know at all.
+	am.schedulePortSyncRetry(999, common.PROD, rebuildBackoffBase)
+	scheduled = retries.all()
+	require.Len(t, scheduled, 2)
+	scheduled[1].fire()
+	assert.Len(t, retries.all(), 2)
+}
+
+// A disk emergency stops every app container and refuses to start one. The
+// agent's own tunnel re-syncs must stand down meanwhile: re-adding tunnels for
+// apps that are not running only rewrites frpc.yaml and reloads frpc on a
+// critically full disk. Nothing skipped is lost: leaving the emergency
+// reconciles every app's tunnels.
+func TestPortSyncRetryStandsDownInDiskEmergency(t *testing.T) {
+	am, _, mockTunnel, appStore, _, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	app := amSeed(t, appStore, 55, "fullapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(55, "fullapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true, HostPort: 42000, RemotePort: 31000})
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	_, err := am.hostPorts.RecoverOrReserve(hostPortKey{Stage: common.PROD, AppKey: 55, Protocol: "tcp", Port: 1883}, 42000)
+	require.NoError(t, err)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "fullapp", 1883)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "tcp")
+
+	// The first pass's add fails and schedules a retry.
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Once()
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).Return(tunnel.TunnelConfig{}, errors.New("not authorized")).Once()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	require.NoError(t, am.syncPortState(payload, app))
+	scheduled := retries.all()
+	require.Len(t, scheduled, 1)
+
+	emergency := true
+	restore := diskEmergency
+	diskEmergency = func() bool { return emergency }
+	t.Cleanup(func() { diskEmergency = restore })
+
+	// In the emergency neither the retry nor a reconcile on the capability
+	// coming back touches the tunnels: the strict mock fails on any call.
+	scheduled[0].fire()
+	am.SyncAllPortStates()
+	mockTunnel.AssertExpectations(t)
+	assert.Len(t, retries.all(), 1, "a re-sync skipped in the emergency schedules nothing")
+
+	// Leaving it, diskguard's OnRecover reconciles the tunnel the emergency
+	// held back.
+	emergency = false
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Once()
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Once()
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).RunAndReturn(func(conf tunnel.TunnelConfig) (tunnel.TunnelConfig, error) {
+		return conf, nil
+	}).Once()
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).Return(nil).Maybe()
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Once()
+
+	am.SyncAllPortStates()
+	scheduled = retries.all()
+	require.Len(t, scheduled, 2, "the tunnel failed before, so its successful add gets a follow-up")
+	assert.Equal(t, 2*rebuildBackoffBase, scheduled[1].after)
+}
+
+// Retries re-read the stored requested state, which never carries back the
+// reservation_error the agent persisted upstream. Unless the agent remembers
+// what it already wrote, every retry of a refused reserved port writes the same
+// user-visible app-log line again.
+func TestSyncPortStateRetryLogsReservationFailureOnce(t *testing.T) {
+	am, mockContainer, mockTunnel, appStore, msg, cfg := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	mockTunnel.EXPECT().TunnelCapable().Return(true).Maybe()
+
+	app := amSeed(t, appStore, 54, "pinnedapp", common.RUNNING, common.PROD)
+	app.RequestedState = common.RUNNING
+
+	payload := amPayload(54, "pinnedapp", common.RUNNING, common.PROD)
+	payload.Ports = spsPorts(t, common.PortForwardRule{
+		RuleName: "mqtt", Port: 1883, Protocol: "tcp", Active: true,
+		HostPort: 15000, ReservedHostPort: 15000, ReservedRemotePort: 30500,
+	})
+	require.NoError(t, appStore.UpdateLocalRequestedState(payload))
+
+	mockContainer.EXPECT().GetContainerPortBindings(mock.Anything, mock.Anything).
+		Return(map[string]uint64{"1883/tcp": 15000}, nil).Times(3)
+
+	subdomain := tunnel.CreateSubdomain(tunnel.Protocol("tcp"), uint64(cfg.ReswarmConfig.DeviceKey), "pinnedapp", 1883)
+	tunnelID := tunnel.CreateTunnelID(subdomain, "tcp")
+
+	mockTunnel.EXPECT().Get(tunnelID).Return(nil).Times(3)
+	mockTunnel.EXPECT().AddTunnel(mock.Anything).Return(tunnel.TunnelConfig{}, errors.New("port 30500 is not authorized")).Times(3)
+	// Each pass surfaces the failure on a rule that, as stored, never carries
+	// it, so each one persists it upstream.
+	mockTunnel.EXPECT().SaveRemotePorts(mock.Anything).Return(nil).Times(3)
+	mockTunnel.EXPECT().GetState().Return([]tunnel.TunnelState{}, nil).Times(3)
+
+	countFailureLines := func() int {
+		count := 0
+		for _, call := range msg.GetPublishCalls() {
+			if len(call.Args) == 0 {
+				continue
+			}
+			if dict, ok := call.Args[0].(common.Dict); ok {
+				if chunk, ok := dict["chunk"].(string); ok && strings.Contains(chunk, "could not be established") {
+					count++
+				}
+			}
+		}
+		return count
+	}
+
+	require.NoError(t, am.syncPortState(payload, app))
+	require.Equal(t, 1, countFailureLines(), "the failure is written to the app log")
+
+	for retry := 0; retry < 2; retry++ {
+		scheduled := retries.all()
+		scheduled[len(scheduled)-1].fire()
+	}
+	require.Len(t, retries.all(), 3, "both retries ran and failed again")
+	assert.Equal(t, 1, countFailureLines(), "retries hitting the same failure do not write it again")
+}
+
+// One pending re-sync per app, at the earliest time any of its tunnels asked
+// for: a later request must not postpone it, an earlier one replaces it.
+func TestPortSyncRetryKeepsEarliest(t *testing.T) {
+	am, _, _, _, _, _ := amHarness(t)
+	retries := amCapturePortSyncRetries(t)
+
+	start := time.Now()
+	am.schedulePortSyncRetry(55, common.PROD, 2*rebuildBackoffBase)
+	am.schedulePortSyncRetry(55, common.PROD, rebuildBackoffBase)
+	am.schedulePortSyncRetry(55, common.PROD, 4*rebuildBackoffBase)
+	end := time.Now()
+
+	scheduled := retries.all()
+	require.Len(t, scheduled, 2, "only the earlier request arms a new timer")
+	assert.Equal(t, rebuildBackoffBase, scheduled[1].after)
+
+	pending, count := spsPendingRetry(am, 55, common.PROD)
+	require.Equal(t, 1, count, "one pending re-sync per app")
+	require.NotNil(t, pending)
+	assert.False(t, pending.due.Before(start.Add(rebuildBackoffBase)), "at the earlier due time")
+	assert.False(t, pending.due.After(end.Add(rebuildBackoffBase)), "at the earlier due time")
+
+	// The replaced timer firing anyway (it was already running when it was
+	// stopped) must not take the pending re-sync with it. The app is unknown
+	// here, so the re-sync itself does nothing.
+	scheduled[0].fire()
+	_, count = spsPendingRetry(am, 55, common.PROD)
+	assert.Equal(t, 1, count, "a replaced timer leaves its successor pending")
+
+	scheduled[1].fire()
+	_, count = spsPendingRetry(am, 55, common.PROD)
+	assert.Zero(t, count, "a fired re-sync is no longer pending")
 }

@@ -10,7 +10,9 @@ import (
 	"reagent/config"
 	"reagent/messenger"
 	"runtime"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -64,6 +66,46 @@ func TestMarkUnavailable(t *testing.T) {
 	assert.False(t, m.TunnelCapable())
 	_, lastErr := m.Capability()
 	assert.Equal(t, "tunnels are not yet supported on Windows", lastErr)
+}
+
+// Becoming able to tunnel is the moment the agent reconciles every app's
+// tunnels: those skipped while it could not, and adds that failed while frpc
+// was starting, have nothing else to bring them up. Only a transition INTO
+// Available may run it — the capability probe re-confirms Available every
+// minute, and each confirmation must not re-sync every app.
+func TestSetCapabilityRunsOnAvailableOnTransition(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := newCapabilityTestManager(t)
+		// Keep the capability publish off frpc's admin API: nothing listens
+		// there, and the refused connection would re-supervise frpc, which
+		// flips the capability behind the test's back.
+		m.configBuilder.yamlConfig.WebServer = nil
+
+		var calls atomic.Int32
+		m.SetOnAvailable(func() { calls.Add(1) })
+
+		// synctest.Wait returns once every goroutine setCapability spawned
+		// has finished or is durably blocked.
+		m.setCapability(CapabilityStarting, nil)
+		synctest.Wait()
+		assert.Zero(t, calls.Load(), "starting is not available yet")
+
+		m.setCapability(CapabilityAvailable, nil)
+		synctest.Wait()
+		assert.Equal(t, int32(1), calls.Load(), "becoming available runs the callback once")
+
+		m.setCapability(CapabilityAvailable, nil)
+		synctest.Wait()
+		assert.Equal(t, int32(1), calls.Load(), "staying available is not a transition")
+
+		m.setCapability(CapabilityUnavailable, errors.New("frps unreachable"))
+		synctest.Wait()
+		assert.Equal(t, int32(1), calls.Load(), "becoming unavailable must not run it")
+
+		m.setCapability(CapabilityAvailable, nil)
+		synctest.Wait()
+		assert.Equal(t, int32(2), calls.Load(), "coming back runs it again")
+	})
 }
 
 func TestBecomingAvailableClearsLastErr(t *testing.T) {

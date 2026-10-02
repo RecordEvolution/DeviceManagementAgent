@@ -143,6 +143,14 @@ type FrpTunnelManager struct {
 	// runtime (e.g. antivirus deleted it). Injected by the agent so the tunnel
 	// package need not import system; nil in tests means "do not re-acquire".
 	reacquireFrpc func() error
+	// onAvailable reconciles the apps' tunnels whenever the device becomes
+	// able to tunnel (see setCapability). Injected by the agent so the tunnel
+	// package need not import apps; nil in tests. Atomic rather than a plain
+	// field because the capability can flip before the agent wires it: the
+	// boot reconcile in NewAgent already syncs ports, and an AddTunnel whose
+	// Reload finds frpc not running re-supervises it while the WAMP session is
+	// still being established.
+	onAvailable atomic.Pointer[func()]
 }
 
 type UpdateType string
@@ -336,6 +344,13 @@ func (frpTm *FrpTunnelManager) SetReacquireFrpc(fn func() error) {
 	frpTm.reacquireFrpc = fn
 }
 
+// SetOnAvailable wires the callback run each time the device becomes able to
+// tunnel, i.e. the capability turns Available from any other value. Called
+// once by the agent after construction.
+func (frpTm *FrpTunnelManager) SetOnAvailable(fn func()) {
+	frpTm.onAvailable.Store(&fn)
+}
+
 // TunnelCapable reports whether tunnels can run on this device. It is true
 // while a device is bringing frpc up or has it running (Unknown/Starting/
 // Available) and only false once tunnels are definitively unavailable
@@ -509,6 +524,16 @@ func (frpTm *FrpTunnelManager) setCapability(c TunnelCapability, err error) {
 				log.Debug().Err(pubErr).Msg("failed to publish tunnel state on capability change")
 			}
 		})
+	}
+
+	// Becoming able to tunnel is when the tunnels syncPortState skipped while
+	// the device could not, and the adds that failed while frpc was starting,
+	// can finally come up — and no state push, reconnect or transition is
+	// tied to this moment to ask for them.
+	if prev != c && c == CapabilityAvailable {
+		if onAvailable := frpTm.onAvailable.Load(); onAvailable != nil {
+			safe.Go(*onAvailable)
+		}
 	}
 }
 

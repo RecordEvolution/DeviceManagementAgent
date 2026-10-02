@@ -419,11 +419,14 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 				return wanted, nil
 			},
 			// On recovery, reinstate the apps' requested states (which were
-			// stopped/blocked during the emergency).
+			// stopped/blocked during the emergency), and reconcile every app's
+			// tunnels: the agent's own tunnel re-syncs stood down meanwhile
+			// (see AppManager.retryPortSync).
 			OnRecover: func() {
 				if err := appManager.EnsureLocalRequestedStates(); err != nil {
 					log.Error().Stack().Err(err).Msg("diskguard recovery: failed to reinstate app states")
 				}
+				appManager.SyncAllPortStates()
 			},
 		})
 		// Synchronously evaluate disk BEFORE EnsureLocalRequestedStates below, so
@@ -560,6 +563,11 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 	// Let the tunnel manager re-fetch frpc if it is found missing at runtime
 	// (e.g. antivirus quarantined it) instead of crash-looping on a gone file.
 	tunnelManager.SetReacquireFrpc(systemAPI.DownloadFrpIfNotExists)
+	// Reconcile every app's tunnels whenever the device becomes able to
+	// tunnel: tunnels skipped while it could not, and adds that failed while
+	// frpc was starting, come up the moment it can tunnel again. Nothing else
+	// would ask for them.
+	tunnelManager.SetOnAvailable(appManager.SyncAllPortStates)
 	// Report per-device tunnel capability on the heartbeat, so the UI reflects
 	// it live without a dedicated get_agent_metadata call.
 	mainSession.SetTunnelCapableFunc(tunnelManager.TunnelCapable)

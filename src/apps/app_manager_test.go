@@ -3,6 +3,7 @@ package apps
 import (
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,10 +93,58 @@ func amHarness(t *testing.T) (*AppManager, *mocks.Container, *mocks.TunnelManage
 
 	am := NewAppManager(&sm, &appStore, &observer, mockTunnel)
 
+	// No test may arm a real port-sync retry timer: it could fire into a
+	// finished test's strict mocks. Tests that inspect or fire the retries
+	// install their own capture on top of this one.
+	amCapturePortSyncRetries(t)
+
 	// give any async log-history drains a moment before the DB closes
 	t.Cleanup(func() { time.Sleep(150 * time.Millisecond) })
 
 	return am, mockContainer, mockTunnel, &appStore, msg, cfg
+}
+
+// amPortSyncRetries records the port-sync retries an AppManager under test
+// schedules. None of them ever fires on its own; a test fires one by hand.
+// The package's tests do not run in parallel, so swapping the package-level
+// timer seam per test is safe.
+type amPortSyncRetries struct {
+	mu        sync.Mutex
+	scheduled []amPortSyncRetry
+}
+
+type amPortSyncRetry struct {
+	after time.Duration
+	fire  func()
+}
+
+// amCapturePortSyncRetries replaces the port-sync retry timer with a capture
+// for the rest of the test and returns it.
+func amCapturePortSyncRetries(t *testing.T) *amPortSyncRetries {
+	t.Helper()
+
+	captured := &amPortSyncRetries{}
+	restore := portSyncRetryAfterFunc
+	portSyncRetryAfterFunc = func(after time.Duration, fire func()) *time.Timer {
+		captured.mu.Lock()
+		captured.scheduled = append(captured.scheduled, amPortSyncRetry{after: after, fire: fire})
+		captured.mu.Unlock()
+
+		// A real timer the manager may Stop, already stopped: it never fires.
+		timer := time.AfterFunc(time.Hour, func() {})
+		timer.Stop()
+		return timer
+	}
+	t.Cleanup(func() { portSyncRetryAfterFunc = restore })
+
+	return captured
+}
+
+// all returns the retries scheduled so far, oldest first.
+func (r *amPortSyncRetries) all() []amPortSyncRetry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]amPortSyncRetry(nil), r.scheduled...)
 }
 
 // amSeed inserts an app row (non-compose) and returns the live pointer.
