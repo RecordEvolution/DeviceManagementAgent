@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 
 	"github.com/rs/zerolog/log"
 
@@ -176,39 +175,88 @@ func GetCliArguments() (*CommandLineArguments, error) {
 	return &cliArgs, nil
 }
 
+// SaveReswarmConfig writes the .flock atomically: the new content goes to a
+// temporary file beside the real one (symlinks resolved, so a link such as
+// /opt/reagent/device-config.flock -> /boot/<name>.flock stays a link), is
+// synced, and is renamed over it. A power cut mid-save leaves the old or the
+// new file, never a truncated one — the .flock usually lives on the FAT /boot
+// partition of a device that can lose power at any moment (a car's AutoPi).
 func SaveReswarmConfig(path string, reswarmConfig *ReswarmConfig) error {
-	file, err := json.MarshalIndent(reswarmConfig, "", " ")
+	data, err := json.MarshalIndent(reswarmConfig, "", " ")
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(path, file, os.ModePerm)
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(target); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".flock-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // gone already after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// Best effort: FAT ignores per-file modes and may refuse the call.
+	_ = os.Chmod(tmpName, mode)
+	if err := os.Rename(tmpName, target); err != nil {
+		return err
+	}
+	if dir, err := os.Open(filepath.Dir(target)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
 }
 
-// LoadReswarmConfig populates a ReswarmConfig struct from a given path
+// LoadReswarmConfig reads the device's .flock. A file that cannot be parsed
+// or carries no device_endpoint_url is an error and is left on disk exactly
+// as found: writing back what was read from a truncated file is how a power
+// cut used to turn into a device that dials an empty URL forever. Only a
+// migration of a legacy URL is written back.
 func LoadReswarmConfig(path string) (*ReswarmConfig, error) {
-	jsonFile, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	defer jsonFile.Close()
-	byteValue, _ := ioutil.ReadAll(jsonFile)
-
 	var reswarmConfig ReswarmConfig
-	json.Unmarshal(byteValue, &reswarmConfig)
+	if err := json.Unmarshal(raw, &reswarmConfig); err != nil {
+		return nil, fmt.Errorf("%s is not a valid .flock (%d bytes): %w; download the device configuration from IronFlock again", path, len(raw), err)
+	}
+	if reswarmConfig.DeviceEndpointURL == "" {
+		return nil, fmt.Errorf("%s has no device_endpoint_url; download the device configuration from IronFlock again", path)
+	}
 
+	migrated := false
 	if reswarmConfig.DockerRegistryURL == "registry.reswarm.io/" {
 		reswarmConfig.DockerRegistryURL = "registry.ironflock.com/"
+		migrated = true
 	}
-
 	if reswarmConfig.DeviceEndpointURL == "wss://cbw.record-evolution.com/ws-re-dev" {
 		reswarmConfig.DeviceEndpointURL = "wss://cbw.ironflock.com/ws-re-dev"
+		migrated = true
 	}
-
-	err = SaveReswarmConfig(path, &reswarmConfig)
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to save .flock config file")
+	if migrated {
+		if err := SaveReswarmConfig(path, &reswarmConfig); err != nil {
+			log.Warn().Err(err).Msg("could not persist the migrated .flock; continuing with the migrated values")
+		}
 	}
 
 	return &reswarmConfig, nil

@@ -219,10 +219,10 @@ func TestSaveReswarmConfig_OverwritesExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "overwrite.flock")
 
-	first := &config.ReswarmConfig{Name: "first", SwarmKey: 1}
+	first := &config.ReswarmConfig{Name: "first", SwarmKey: 1, DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev"}
 	require.NoError(t, config.SaveReswarmConfig(path, first))
 
-	second := &config.ReswarmConfig{Name: "second", SwarmKey: 2}
+	second := &config.ReswarmConfig{Name: "second", SwarmKey: 2, DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev"}
 	require.NoError(t, config.SaveReswarmConfig(path, second))
 
 	reloaded, err := config.LoadReswarmConfig(path)
@@ -238,4 +238,72 @@ func TestLoadReswarmConfig_MissingFile(t *testing.T) {
 	cfg, err := config.LoadReswarmConfig(path)
 	require.Error(t, err)
 	assert.Nil(t, cfg)
+}
+
+// A .flock cut short by a power loss, emptied, or without its endpoint must
+// fail loudly and stay on disk exactly as found. Loading used to ignore the
+// parse error and write the empty result back, so the device dialled an empty
+// URL ("invalid url: ") on every start from then on.
+func TestLoadReswarmConfig_DamagedFileIsRefusedAndLeftUntouched(t *testing.T) {
+	full := sampleReswarmJSON(t)
+	cases := map[string][]byte{
+		"truncated":   full[:len(full)/2],
+		"empty":       {},
+		"no endpoint": []byte(`{"name":"d","device_key":7,"swarm_key":42}`),
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "device.flock")
+			require.NoError(t, os.WriteFile(path, content, 0o644))
+
+			cfg, err := config.LoadReswarmConfig(path)
+			require.Error(t, err)
+			assert.Nil(t, cfg)
+
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, content, after, "a .flock that failed to load must not be rewritten")
+		})
+	}
+}
+
+// A current .flock needs no migration and must not be rewritten on every
+// start: each rewrite is a window in which a power cut damages the file.
+func TestLoadReswarmConfig_CurrentFileIsNotRewritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "device.flock")
+	content := sampleReswarmJSON(t)
+	require.NoError(t, os.WriteFile(path, content, 0o644))
+
+	_, err := config.LoadReswarmConfig(path)
+	require.NoError(t, err)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, content, after)
+}
+
+// Devices reach their .flock through a symlink into /boot. Saving replaces
+// the file the link points at, never the link itself.
+func TestSaveReswarmConfig_KeepsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "boot", "device.flock")
+	require.NoError(t, os.MkdirAll(filepath.Dir(real), 0o755))
+	require.NoError(t, os.WriteFile(real, sampleReswarmJSON(t), 0o644))
+	link := filepath.Join(dir, "device-config.flock")
+	require.NoError(t, os.Symlink(real, link))
+
+	updated := &config.ReswarmConfig{Name: "updated", DeviceEndpointURL: "wss://cbw.ironflock.com/ws-re-dev"}
+	require.NoError(t, config.SaveReswarmConfig(link, updated))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must still be a symlink")
+
+	reloaded, err := config.LoadReswarmConfig(real)
+	require.NoError(t, err)
+	assert.Equal(t, "updated", reloaded.Name)
+
+	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(real), ".flock-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, leftovers, "no temporary file may be left behind")
 }

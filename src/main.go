@@ -80,6 +80,9 @@ func main() {
 
 	agent, err := runAgent(cliArgs)
 	if err != nil {
+		// Also on stderr: the journal is where an operator looks first, and
+		// the log file only shows up once they know to look for it.
+		fmt.Fprintln(os.Stderr, "failed to start agent:", err)
 		log.Fatal().Stack().Err(err).Msg("failed to start agent")
 	}
 
