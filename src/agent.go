@@ -633,7 +633,14 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 		if reconnect {
 			err := agent.OnConnect(true)
 			if err != nil {
-				log.Fatal().Stack().Err(err).Msg("failed to run on connect handler after reconnection")
+				// Not fatal: the error is the closing CONNECTED status update,
+				// which fails when the connection dropped again mid-handler (a
+				// rolling router restart). The next reconnect runs this
+				// handler again and the heartbeat reports CONNECTED every
+				// interval; exiting only turned a router restart into an agent
+				// restart, which reagent-manager reverts to the previous
+				// binary when it lands within a minute of an agent update.
+				log.Error().Stack().Err(err).Msg("failed to run on connect handler after reconnection")
 			}
 		}
 	})

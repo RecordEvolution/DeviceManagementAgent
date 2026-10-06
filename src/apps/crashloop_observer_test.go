@@ -170,3 +170,63 @@ func TestCrashLoopWakeReArmsWhenTheRetryCannotStart(t *testing.T) {
 	app.StateLock.Unlock()
 	assert.Equal(t, common.FAILED, state)
 }
+
+// A FRESH request that cannot start for want of a registry token — the agent
+// re-drives its apps right after a router restart, before RESWARM has
+// re-registered — has no loop behind it. An app that crashed in that window
+// stayed FAILED until the next push; now a crashloop owns the retry.
+func TestAFreshRequestThatCannotStartIsHandedToACrashLoop(t *testing.T) {
+	am, _, mt, st, msg, _ := amHarness(t)
+
+	app := amSeed(t, st, 85, "reconnect", common.FAILED, common.PROD)
+	run := amPayload(85, "reconnect", common.RUNNING, common.PROD)
+	crashSeedTeardownRow(t, am, app, run)
+
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	msg.SetCallError(string(topics.GetRegistryToken), errors.New("wamp.error.no_such_procedure"))
+
+	require.Error(t, am.RequestAppState(run))
+	defer am.clearCrashLoop(85, common.PROD) // the backoff goroutine exits at its wake
+
+	assert.True(t, am.hasActiveCrashLoop(85, common.PROD), "a crashloop owns the retry")
+	assert.Equal(t, 1, loopCount(am))
+}
+
+// The crashloop's own retry re-arms through driveRetry; arming here as well
+// would run two backoff goroutines for one loop.
+func TestARetryThatCannotStartDoesNotArmASecondTime(t *testing.T) {
+	am, _, mt, st, msg, _ := amHarness(t)
+
+	app := amSeed(t, st, 86, "rearm", common.FAILED, common.PROD)
+	run := amPayload(86, "rearm", common.RUNNING, common.PROD)
+	crashSeedTeardownRow(t, am, app, run)
+	task := activeLoop(am, run, 2)
+
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	msg.SetCallError(string(topics.GetRegistryToken), errors.New("offline"))
+
+	retry := run
+	retry.Retrying = true
+	require.Error(t, am.RequestAppState(retry))
+
+	retries, alive := loopRetries(am, task)
+	assert.True(t, alive)
+	assert.Equal(t, uint(2), retries, "left to driveRetry")
+	assert.Equal(t, 1, loopCount(am))
+}
+
+// DEV apps are driven by their developer, never by a crashloop.
+func TestADevRequestThatCannotStartIsNotRetried(t *testing.T) {
+	am, _, mt, st, msg, _ := amHarness(t)
+
+	app := amSeed(t, st, 87, "devtoken", common.FAILED, common.DEV)
+	run := amPayload(87, "devtoken", common.RUNNING, common.DEV)
+	crashSeedTeardownRow(t, am, app, run)
+
+	mt.EXPECT().TunnelCapable().Return(false).Maybe()
+	msg.SetCallError(string(topics.GetRegistryToken), errors.New("offline"))
+
+	_ = am.RequestAppState(run)
+
+	assert.Equal(t, 0, loopCount(am))
+}

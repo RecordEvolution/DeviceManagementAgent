@@ -881,6 +881,15 @@ func (am *AppManager) RequestAppState(payload common.TransitionPayload) error {
 	if err != nil {
 		app.UnlockTransition()
 		log.Error().Stack().Err(err).Msg("Failed to get registry token")
+		// The token comes from the backend, which can be unreachable or not
+		// registered yet: after a router restart the agent reconnects and
+		// re-drives its apps before RESWARM has re-registered. A crashloop
+		// retry re-arms itself (driveRetry), but a fresh request has no loop
+		// behind it, so an app that crashed in that window stayed FAILED until
+		// the next push. Hand it to a crashloop like a failed transition.
+		if !payload.Retrying && shouldEnterCrashLoop(payload.Stage, err) {
+			am.incrementCrashLoop(payload)
+		}
 		return err
 	}
 
