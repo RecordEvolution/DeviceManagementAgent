@@ -1424,6 +1424,16 @@ func (am *AppManager) UpdateCurrentAppState(payload common.TransitionPayload) er
 		app.Version = payload.PresentVersion
 	}
 
+	// The backend owns the name behind an app key. A local entry left over from
+	// another backend (a reset or a re-registered device reusing the key) keeps
+	// the old name otherwise, so the observer looks for a container that does
+	// not exist and every restart's orphan sweep removes the real one.
+	if payload.AppName != "" && payload.AppName != app.AppName {
+		log.Info().Str("from", app.AppName).Str("to", payload.AppName).Uint64("app_key", app.AppKey).
+			Str("stage", string(app.Stage)).Msg("Backend renamed the app behind this key, adopting the new name")
+		app.AppName = payload.AppName
+	}
+
 	app.StateLock.Unlock()
 
 	log.Debug().Str("app", payload.AppName).Msg("Updating local app state")

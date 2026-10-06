@@ -1,6 +1,6 @@
 package persistence
 
-const QuerySelectCurrentAppStateByKeyAndStage = `SELECT state, version, release_key FROM AppStates WHERE app_key = ? AND stage = ?`
+const QuerySelectCurrentAppStateByKeyAndStage = `SELECT app_name, state, version, release_key FROM AppStates WHERE app_key = ? AND stage = ?`
 
 const QuerySelectAllDeviceState = `SELECT interface_type, device_status FROM DeviceStates`
 const QuerySelectAllAppStates = `SELECT app_name, app_key, version, release_key, stage, state, timestamp FROM AppStates`
@@ -13,7 +13,7 @@ const QuerySelectAppStateByAppKeyAndStage = `SELECT app_name, app_key, version, 
 const QuerySelectLogHistoryByAppKeyStageAndType = `SELECT log FROM LogHistory WHERE app_key = ? AND stage = ?`
 
 const QueryUpdateRequestedAppStateCurrentStateByAppKeyAndStage = `UPDATE RequestedAppStates SET current_state = ?, present_version = ?, release_key = ?, manually_requested_state = ? WHERE app_key = ? AND stage = ?`
-const QueryUpdateAppStateByAppKeyAndStage = `UPDATE AppStates SET state = ?, version = ?, release_key = ? WHERE app_key = ? AND stage = ?`
+const QueryUpdateAppStateByAppKeyAndStage = `UPDATE AppStates SET app_name = ?, state = ?, version = ?, release_key = ? WHERE app_key = ? AND stage = ?`
 const QueryUpdateDeviceState = `UPDATE DeviceStates SET device_status = ?, interface_type = ?`
 
 const QueryInsertAppStateEntry = `INSERT INTO AppStates(app_name, app_key, version, release_key, stage, state, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`

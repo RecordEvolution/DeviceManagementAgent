@@ -78,6 +78,35 @@ func TestUpsertAppStateNoChangeIsNoop(t *testing.T) {
 	assert.Empty(t, string(ts))
 }
 
+// A name change alone must reach the row: the orphan sweep derives the
+// expected container name from it, so a stale name removed the app's real
+// container on every agent restart.
+func TestUpsertAppStateRenamePersistsWithoutStateChange(t *testing.T) {
+	db := newTestDB(t)
+
+	app := builders.BuildApp("old-name", common.RUNNING, common.PROD)
+	app.AppKey = 250
+
+	_, err := db.UpsertAppState(app, common.RUNNING)
+	require.NoError(t, err)
+
+	app.AppName = "new-name"
+	ts, err := db.UpsertAppState(app, common.RUNNING)
+	require.NoError(t, err)
+	assert.NotEmpty(t, string(ts))
+
+	got, err := db.GetAppState(250, common.PROD)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "new-name", got.AppName)
+	assert.Equal(t, common.RUNNING, got.CurrentState)
+
+	all, err := db.GetAppStates()
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	assert.Equal(t, "new-name", all[0].AppName)
+}
+
 func TestUpsertAppStateTransitionUpdatesCurrentState(t *testing.T) {
 	db := newTestDB(t)
 

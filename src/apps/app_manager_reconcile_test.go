@@ -155,6 +155,25 @@ func TestUpdateCurrentAppState(t *testing.T) {
 		assert.Equal(t, common.RUNNING, cur, "a BUILT app adopts the payload's current state")
 		assert.Equal(t, "9.9.9", ver, "the present version is applied")
 	})
+
+	t.Run("adopts the backend's name for a reused app key, in memory and on disk", func(t *testing.T) {
+		am, _, _, st, _, _ := amHarness(t)
+
+		app := amSeed(t, st, 22, "stale-name", common.RUNNING, common.PROD)
+
+		require.NoError(t, am.UpdateCurrentAppState(amPayload(22, "backend-name", common.RUNNING, common.PROD)))
+
+		app.StateLock.Lock()
+		name := app.AppName
+		app.StateLock.Unlock()
+		assert.Equal(t, "backend-name", name, "the observer and transitions must use the backend's name")
+
+		// The orphan sweep reads the names from the database.
+		all, err := st.GetAllApps()
+		require.NoError(t, err)
+		require.Len(t, all, 1)
+		assert.Equal(t, "backend-name", all[0].AppName)
+	})
 }
 
 func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {

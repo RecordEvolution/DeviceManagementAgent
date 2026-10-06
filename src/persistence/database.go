@@ -133,16 +133,20 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 		return ast.insertAppState(app)
 	}
 
+	var curName string
 	var curState string
 	var curVersion string
 	var curReleaseKey uint64
-	err = rows.Scan(&curState, &curVersion, &curReleaseKey)
+	err = rows.Scan(&curName, &curState, &curVersion, &curReleaseKey)
 	if err != nil {
 		app.StateLock.Unlock()
 		return "", rows.Close()
 	}
 
-	if curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
+	// The name counts too: the backend renamed the app behind this key (a
+	// reused key after a backend reset), and the orphan sweep derives the
+	// expected container name from this row.
+	if curName == app.AppName && curState == string(newState) && curVersion == app.Version && curReleaseKey == app.ReleaseKey {
 		err := rows.Close()
 		if err != nil {
 			app.StateLock.Unlock()
@@ -186,7 +190,7 @@ func (ast *AppStateDatabase) UpsertAppState(app *common.App, newState common.App
 		app.StateLock.Unlock()
 		return "", err
 	}
-	_, err = updateStatement.Exec(newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
+	_, err = updateStatement.Exec(app.AppName, newState, app.Version, app.ReleaseKey, app.AppKey, app.Stage)
 	if err != nil {
 		app.StateLock.Unlock()
 		return "", err

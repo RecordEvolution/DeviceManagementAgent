@@ -675,16 +675,6 @@ func (s *WampSession) dial() (NexusClient, error) {
 		}
 		dupRegisterFailures = 0
 
-		onDestroyListener := func(_ *wamp.Event) {
-			if s.container != nil {
-				s.container.PruneSystem()
-			}
-			os.Exit(1)
-		}
-		if subErr := c.Subscribe(fmt.Sprintf("%s/ondestroy", topics.ReswarmDeviceList), onDestroyListener, wamp.Dict{}); subErr != nil {
-			log.Debug().Err(subErr).Msg("ondestroy Subscribe failed (non-fatal)")
-		}
-
 		log.Debug().Msgf("Successfully established a connection (duration: %s)", time.Since(requestStart))
 		return c, nil
 	}
