@@ -9,7 +9,7 @@ import (
 
 	"reagent/config"
 
-	"github.com/gammazero/nexus/v3/wamp"
+	"github.com/ironflock/nexus/v3/wamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

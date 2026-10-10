@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/gammazero/nexus/v3/client"
-	"github.com/gammazero/nexus/v3/wamp"
+	"github.com/ironflock/nexus/v3/client"
+	"github.com/ironflock/nexus/v3/wamp"
 )
 
 // =============================================================================

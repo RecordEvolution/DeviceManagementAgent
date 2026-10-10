@@ -3,11 +3,11 @@ package messenger
 import (
 	"context"
 
-	"github.com/gammazero/nexus/v3/client"
-	"github.com/gammazero/nexus/v3/wamp"
+	"github.com/ironflock/nexus/v3/client"
+	"github.com/ironflock/nexus/v3/wamp"
 )
 
-// NexusClient defines the interface for the gammazero/nexus WAMP client.
+// NexusClient defines the interface for the nexus WAMP client (IronFlock fork, github.com/ironflock/nexus/v3).
 // This interface allows for mocking the nexus client in tests.
 type NexusClient interface {
 	// Connection management

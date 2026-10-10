@@ -21,10 +21,10 @@ import (
 	"reagent/errdefs"
 	"reagent/messenger/topics"
 
-	"github.com/gammazero/nexus/v3/client"
-	"github.com/gammazero/nexus/v3/transport"
-	"github.com/gammazero/nexus/v3/wamp"
-	"github.com/gammazero/nexus/v3/wamp/crsign"
+	"github.com/ironflock/nexus/v3/client"
+	"github.com/ironflock/nexus/v3/transport"
+	"github.com/ironflock/nexus/v3/wamp"
+	"github.com/ironflock/nexus/v3/wamp/crsign"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
