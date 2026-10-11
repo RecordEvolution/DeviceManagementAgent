@@ -173,7 +173,7 @@ func TestHandleRegistryLoginsWithDefaultLogsInToApplianceAliasReferencedByCompos
 		ReswarmConfig: &config.ReswarmConfig{
 			DockerRegistryURL: "localhost:15001/",
 			ApplianceDomain:   "tls-sf015.corp.trumpf.com",
-			Secret:            "ironflock-appliance-default-secret",
+			Secret:            "test-secret",
 		},
 	}
 	mockContainer.EXPECT().GetConfig().Return(cfg)
@@ -194,7 +194,7 @@ func TestHandleRegistryLoginsWithDefaultLogsInToApplianceAliasReferencedByCompos
 
 	require.NoError(t, sm.HandleRegistryLoginsWithDefault(payload))
 
-	storeCredential := common.DockerCredential{Username: "store-jwt", Password: "ironflock-appliance-default-secret"}
+	storeCredential := common.DockerCredential{Username: "store-jwt", Password: "test-secret"}
 	require.NotNil(t, loggedIn)
 	assert.Equal(t, storeCredential, loggedIn["localhost:15001"], "configured registry must still be logged in")
 	assert.Equal(t, storeCredential, loggedIn["registry.tls-sf015.corp.trumpf.com"], "the domain alias the compose references must be logged in with the same store credential")
@@ -211,7 +211,7 @@ func TestHandleRegistryLoginsWithDefaultSkipsUnreferencedApplianceAlias(t *testi
 		ReswarmConfig: &config.ReswarmConfig{
 			DockerRegistryURL: "localhost:15001/",
 			ApplianceDomain:   "tls-sf015.corp.trumpf.com",
-			Secret:            "ironflock-appliance-default-secret",
+			Secret:            "test-secret",
 		},
 	}
 	mockContainer.EXPECT().GetConfig().Return(cfg)
@@ -248,7 +248,7 @@ func TestAuthConfigForImageCoversApplianceAlias(t *testing.T) {
 		ReswarmConfig: &config.ReswarmConfig{
 			DockerRegistryURL: "localhost:15001/",
 			ApplianceDomain:   "tls-sf015.corp.trumpf.com",
-			Secret:            "ironflock-appliance-default-secret",
+			Secret:            "test-secret",
 		},
 	}
 	mockContainer.EXPECT().GetConfig().Return(cfg)
@@ -259,7 +259,7 @@ func TestAuthConfigForImageCoversApplianceAlias(t *testing.T) {
 	// platform host never reaches it anyway.
 	authConfig := sm.authConfigForImage(payload, "registry.tls-sf015.corp.trumpf.com/apps/prod_amd64_1953_trumpfsmartview_1:0.4b", "")
 	assert.Equal(t, "store-jwt", authConfig.Username)
-	assert.Equal(t, "ironflock-appliance-default-secret", authConfig.Password)
+	assert.Equal(t, "test-secret", authConfig.Password)
 
 	authConfig = sm.authConfigForImage(payload, "localhost:15001/apps/prod_amd64_7_local_1:1.0.0", "")
 	assert.Equal(t, "store-jwt", authConfig.Username)

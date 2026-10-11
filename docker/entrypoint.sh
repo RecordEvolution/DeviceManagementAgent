@@ -8,6 +8,11 @@
 # admin account, default swarm, fixed ironflock-instance device
 # identity. Override the AGENT_* env vars to connect the agent to a
 # different device/swarm (e.g. the dev "device-a" in "demo_swarm").
+#
+# AGENT_SECRET has NO default and must be set. The seed generates the
+# device secret per install (an appliance takes it from
+# APPLIANCE_DEVICE_SECRET in its .env); the static default this file
+# used to carry was the same on every install.
 
 set -e
 
@@ -18,15 +23,16 @@ if [ -f "${CONFIG_PATH}" ]; then
 else
     # ------------------------------------------------------------------
     # Agent config defaults (must stay in sync with create_init_data.sql).
-    # The secret here is the plaintext secret the agent presents to
-    # Crossbar for WAMP-CRA; it is stored raw in device.t_device.secret.
+    # The secret is the plaintext secret the agent presents to the router
+    # for WAMP-CRA; it is stored raw in device.t_device.secret. Required,
+    # no default (see the header).
     # ------------------------------------------------------------------
     AGENT_DEVICE_NAME="${AGENT_DEVICE_NAME:-ironflock-instance}"
     AGENT_DEVICE_KEY="${AGENT_DEVICE_KEY:-1}"
     AGENT_SWARM_KEY="${AGENT_SWARM_KEY:-1}"
     AGENT_SWARM_NAME="${AGENT_SWARM_NAME:-default}"
     AGENT_SWARM_OWNER="${AGENT_SWARM_OWNER:-admin}"
-    AGENT_SECRET="${AGENT_SECRET:-ironflock-appliance-default-secret}"
+    AGENT_SECRET="${AGENT_SECRET:?AGENT_SECRET is required: the secret stored for this device in device.t_device.secret}"
     AGENT_SERIAL_NUMBER="${AGENT_SERIAL_NUMBER:-00000000-0000-0000-0000-000000000001}"
     AGENT_DEVICE_ENDPOINT_URL="${AGENT_DEVICE_ENDPOINT_URL:-ws://ironflock_router:8080/ws-re-dev}"
     AGENT_DOCKER_REGISTRY_URL="${AGENT_DOCKER_REGISTRY_URL:-appstore-registry:5000/}"
