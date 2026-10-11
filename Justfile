@@ -223,11 +223,11 @@ download-frpc:
     fi
 
 # Refresh all Go module dependencies. Re-pins the nexus fork
-# (github.com/ironflock/nexus/v3, branch v4-contrib) to its current tip and bumps
+# (github.com/ironflock/nexus/v3, branch main) to its current tip and bumps
 # everything else to the latest compatible versions. Go modules pin to a
 # pseudo-version, so the nexus fork only moves when this recipe runs.
 update-dependencies:
-    cd src && go get github.com/ironflock/nexus/v3@v4-contrib && go get -u ./... && go mod tidy
+    cd src && go get github.com/ironflock/nexus/v3@main && go get -u ./... && go mod tidy
 
 run:
     cd src && sudo go run -ldflags="-linkmode=external" . -config test-config.flock -prettyLogging -env=local
