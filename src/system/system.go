@@ -21,6 +21,7 @@ import (
 	"reagent/messenger/topics"
 	"reagent/release"
 	"reagent/safe"
+	"reagent/updatesig"
 	"runtime"
 	"strings"
 	"sync"
@@ -86,10 +87,24 @@ func buildBinaryDownloadURL(base, bucketName, goos, arch, versionString, fileNam
 	return url
 }
 
-func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, progressCallback func(filesystem.DownloadProgress)) error {
+// downloadBinary fetches a published binary, verifies it and moves it into
+// AgentDir. The file only gets there with a valid signature for
+// signatureContext (updatesig.ContextAgentUpdate / ContextFrpcDownload) and
+// exactly the os/arch/version/file it is downloaded as; see
+// verifyRemoteSignature.
+func (sys *System) downloadBinary(fileName string, bucketName string, versionString string, includeVersionString bool, signatureContext string, progressCallback func(filesystem.DownloadProgress)) error {
 	isWindows := runtime.GOOS == "windows"
 	agentHomedir := sys.config.CommandLineArguments.AgentDir
-	agentURL := buildBinaryDownloadURL(sys.updateBaseURL(), bucketName, runtime.GOOS, release.GetBuildArch(), versionString, fileName)
+	goos, arch := runtime.GOOS, release.GetBuildArch()
+	agentURL := buildBinaryDownloadURL(sys.updateBaseURL(), bucketName, goos, arch, versionString, fileName)
+
+	// What the signature must name, built from what this agent asked for (the
+	// URL comes from the same values), never from what the server answered.
+	publishedName := fileName
+	if isWindows {
+		publishedName += ".exe"
+	}
+	signatureTarget := updatesig.Target{Context: signatureContext, OS: goos, Arch: arch, Version: versionString, FileName: publishedName}
 
 	var actualFileDestination string
 	if includeVersionString {
@@ -122,9 +137,22 @@ func (sys *System) downloadBinary(fileName string, bucketName string, versionStr
 		return err
 	}
 
-	// Authenticode: the .sha256 manifest is same-origin, so it is not an
-	// authenticity anchor — the pinned signature is. Warn-only during the
-	// pre-signing transition; rejected once enforcement is on (codesign.Enforcing).
+	// The .sha256 manifest is same-origin, so it is not an authenticity
+	// anchor. The Ed25519 signature is: on Linux, reagent-manager.sh
+	// activates any reagent-v<version> it finds in AgentDir, and the tunnel
+	// manager runs whatever frpc is there, so nothing unverified may be
+	// renamed into it.
+	err = verifyRemoteSignature(tmpFilePath, agentURL, signatureTarget)
+	if err != nil {
+		removeErr := os.Remove(tmpFilePath)
+		if removeErr != nil {
+			log.Error().Err(removeErr).Msg("failed to remove download that failed signature verification")
+		}
+		return err
+	}
+
+	// Authenticode (Windows): warn-only during the pre-signing transition;
+	// rejected once enforcement is on (codesign.Enforcing).
 	err = codesign.Verify(tmpFilePath)
 	if err != nil {
 		if codesign.Enforcing() {
@@ -208,6 +236,75 @@ func verifyRemoteChecksum(filePath string, binaryURL string) error {
 
 	log.Debug().Msgf("checksum verified for %s", binaryURL)
 	return nil
+}
+
+// trustedUpdateKeys supplies the keys downloaded binaries must be signed
+// with. A variable so tests can sign with a key generated at test time.
+var trustedUpdateKeys = updatesig.TrustedKeys
+
+// verifyRemoteSignature checks filePath against the Ed25519 signature
+// published at <binaryURL>.sig (format: package updatesig) and refuses the
+// binary unless one of the compiled-in keys signed it as target: this kind of
+// binary, for this os/arch/version/file. A signature for another version or
+// platform therefore fails, which is what stops a mirror from serving an old
+// signed release as the new one. Unlike the .sha256 manifest, a signature that
+// is absent or cannot be fetched is not tolerated: an origin able to serve a
+// forged binary can just as well withhold the signature.
+//
+// Releases published before signing existed carry no .sig, so an agent that
+// verifies can never install one of them again, not even as a downgrade (nor
+// the frpc published alongside them). That is accepted: updates only ever
+// move to a newer version (compareVersion), and every release from the first
+// signed one on publishes a .sig for the agent and for frpc.
+//
+// AGENT_UPDATE_ALLOW_UNSIGNED=true turns the refusal into a warning; it exists
+// for a broken signing key only.
+func verifyRemoteSignature(filePath string, binaryURL string, target updatesig.Target) error {
+	keyID, err := fetchAndVerifySignature(filePath, binaryURL, target)
+	if err == nil {
+		log.Info().Str("key_id", keyID).Msgf("signature verified for %s (%s)", binaryURL, target)
+		return nil
+	}
+
+	if updatesig.AllowUnsigned() {
+		log.Warn().Err(err).
+			Msgf("WARNING: %s is set; installing %s although its signature did not verify. Anyone who controls the download server can push a binary this way. Unset it once the agent trusts the current signing key", updatesig.AGENT_UPDATE_ALLOW_UNSIGNED, binaryURL)
+		return nil
+	}
+
+	log.Error().Err(err).
+		Msgf("Refusing %s: it is not signed by a trusted IronFlock release key as %s (%s=true bypasses this check, for a broken signing key only)", binaryURL, target, updatesig.AGENT_UPDATE_ALLOW_UNSIGNED)
+	return fmt.Errorf("refusing %s: %w", binaryURL, err)
+}
+
+// fetchAndVerifySignature returns the ID of the key that signed filePath as
+// target.
+func fetchAndVerifySignature(filePath string, binaryURL string, target updatesig.Target) (string, error) {
+	keys, err := trustedUpdateKeys()
+	if err != nil {
+		return "", err
+	}
+
+	signatureURL := binaryURL + ".sig"
+	body, statusCode, err := filesystem.GetRemoteFileWithStatus(signatureURL)
+	if err != nil {
+		return "", fmt.Errorf("could not fetch update signature %s: %w", signatureURL, err)
+	}
+	defer body.Close()
+
+	if statusCode == http.StatusNotFound {
+		return "", fmt.Errorf("%w: nothing published at %s", updatesig.ErrMissingSignature, signatureURL)
+	}
+	if statusCode != http.StatusOK {
+		return "", fmt.Errorf("update signature %s returned status %d", signatureURL, statusCode)
+	}
+
+	signature, err := io.ReadAll(io.LimitReader(body, 1024))
+	if err != nil {
+		return "", fmt.Errorf("could not read update signature %s: %w", signatureURL, err)
+	}
+
+	return updatesig.VerifyFile(keys, target, filePath, signature)
 }
 
 func GetOSReleaseCurrent() (map[string]string, error) {
@@ -401,12 +498,18 @@ func (system *System) DownloadFrpIfNotExists() error {
 	// binary. It rides the existing re-agent bucket + appliance /dl proxy via
 	// the "re-agent/frpc" sub-path. The download lands at frpcPath exactly.
 	log.Info().Msgf("Downloading frpc v%s to %s", embedded.FRP_VERSION, frpcPath)
-	err = system.downloadBinary("frpc", "re-agent/frpc", embedded.FRP_VERSION, false, nil)
+	err = system.downloadFrpc()
 	if err != nil {
 		return fmt.Errorf("failed to download frpc: %w", err)
 	}
 
 	return nil
+}
+
+// downloadFrpc downloads the pinned frpc, which must carry a valid
+// frpc-download signature for exactly that version and this platform.
+func (system *System) downloadFrpc() error {
+	return system.downloadBinary("frpc", "re-agent/frpc", embedded.FRP_VERSION, false, updatesig.ContextFrpcDownload, nil)
 }
 
 func (system *System) updateFrpIfRequired(progressCallback func(filesystem.DownloadProgress)) (UpdateResult, error) {
@@ -654,7 +757,7 @@ func (system *System) updateAgentIfRequired(progressCallback func(filesystem.Dow
 	}
 
 	log.Info().Msgf("Agent not up to date, downloading: %s", latestVersion)
-	err = system.downloadBinary("reagent", "re-agent", latestVersion, true, progressCallback)
+	err = system.downloadBinary("reagent", "re-agent", latestVersion, true, updatesig.ContextAgentUpdate, progressCallback)
 	if err != nil {
 		if errdefs.IsInProgress(err) {
 			return UpdateResult{

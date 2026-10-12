@@ -377,7 +377,7 @@ release: _require-clean
     echo "Pushed v${version}; the release workflow will build + publish. Adjust availableVersions.json and promote with: just promote"
 
 # Do everything in one step
-rollout: build-all-docker publish promote
+rollout: build-all-docker sign-binaries publish promote
 
 clean:
     docker rm -f agent_builder
@@ -391,11 +391,16 @@ promote: publish-latest-alias publish-version publish-latestVersions
 
 # Docs and manual (Windows) installs need a link that never goes stale — there is no reswarmify
 # on Windows to resolve availableVersions.json for the user. Server-side copy, so the
-# Authenticode signature and the .sha256 sidecar carry over byte-for-byte.
+# Authenticode signature, the .sha256 sidecar and the .sig update signature carry over
+# byte-for-byte (the glob copies every object of the version, sidecars included). The .sig
+# names the concrete version, not "latest": agents never download latest/ (they resolve a
+# version), and a human checks a latest/ copy with `sign-update verify -version <version>`.
 #
 # Runs FIRST in `promote`: it reads the local availableVersions.json and fails when nothing is
-# staged for that version, so a version the release CI never published is caught here — before
-# the live availableVersions.json flips and agents start chasing it.
+# staged for that version, or when a staged binary has no .sig next to it, so a version the
+# release CI never published (or published unsigned) is caught here — before the live
+# availableVersions.json flips and agents start chasing it. Agents refuse an update without a
+# valid signature, so an unsigned version would only strand the fleet where it is.
 #
 # Alias the production version's binaries to gs://re-agent/<os>/<arch>/latest/
 publish-latest-alias:
@@ -412,6 +417,16 @@ publish-latest-alias:
     objects=$(gsutil ls "gs://re-agent/*/*/${version}/*" 2>/dev/null || true)
     if [[ -z "$objects" ]]; then
         echo "no binaries staged at gs://re-agent/*/*/${version}/ — did the release CI run?" >&2
+        exit 1
+    fi
+    unsigned=""
+    while IFS= read -r obj; do
+        case "$obj" in ""|*.sha256|*.sig) continue ;; esac
+        grep -qxF "${obj}.sig" <<< "$objects" || unsigned="${unsigned}    ${obj}"$'\n'
+    done <<< "$objects"
+    if [[ -n "$unsigned" ]]; then
+        echo "not promoting ${version}: no update signature (.sig) next to" >&2
+        printf '%s' "$unsigned" >&2
         exit 1
     fi
     echo "==> aliasing ${version} -> latest"
@@ -437,6 +452,40 @@ publish-latest-alias:
     fi
     echo "==> aliased ${count} object(s) to latest"
 
+# Needs the private key as PKCS#8 PEM in AGENT_UPDATE_SIGNING_KEY (how release CI
+# passes its secret); format and key handling: src/updatesig, src/cmd/sign-update.
+# Each signature names what the agent installs: build/reagent-<os>-<arch> as
+# <os>/<arch>/<version.txt>/reagent[.exe], build/frpc-<os>-<arch> as
+# <os>/<arch>/<FRP_VERSION>/frpc[.exe] — the paths publish.sh and
+# publish-frpc.sh upload them to.
+# Write the Ed25519 signature (<binary>.sig) next to every agent and frpc binary in build/.
+sign-binaries:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ROOT_DIR}}
+    version=$(cat src/release/version.txt)
+    frp_version=$(grep -oE 'FRP_VERSION = "[^"]+"' src/embedded/frpc.go | cut -d'"' -f2)
+    agents=()
+    frpcs=()
+    for path in build/reagent-* build/frpc-*; do
+        name=$(basename "$path")
+        if [[ "$name" =~ ^reagent-[a-z]+-[a-z0-9]+$ ]]; then
+            agents+=("../$path")
+        elif [[ "$name" =~ ^frpc-[a-z]+-[a-z0-9]+$ ]]; then
+            frpcs+=("../$path")
+        fi
+    done
+    if [ "${#agents[@]}" -eq 0 ]; then
+        echo "no agent binaries (build/reagent-<os>-<arch>) to sign" >&2
+        exit 1
+    fi
+    cd src
+    go run ./cmd/sign-update sign -version "$version" "${agents[@]}"
+    if [ "${#frpcs[@]}" -gt 0 ]; then
+        go run ./cmd/sign-update sign -version "$frp_version" "${frpcs[@]}"
+    fi
+
+# Every binary must be signed first (`just sign-binaries`); publish.sh refuses otherwise.
 # Publish the binaries from the build folder
 publish:
     scripts/publish.sh

@@ -5,6 +5,8 @@
 *.tar
 *.priv
 *.pub
+# agent update signing key (cmd/sign-update keygen); never commit it
+agent-update-signing*.pem
 *.png
 *.log
 *.dat

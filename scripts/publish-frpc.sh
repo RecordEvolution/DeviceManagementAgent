@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Publish a (already built and, in release CI, signed) frpc binary to the
-# re-agent bucket under a /frpc/ sub-path, with a SHA-256 manifest next to it.
+# Publish a (already built and, in release CI, Authenticode-signed) frpc binary
+# to the re-agent bucket under a /frpc/ sub-path, with a SHA-256 manifest and
+# its Ed25519 signature (<binary>.sig from `just sign-binaries`) next to it.
+# The agent refuses an frpc without a valid frpc-download signature for exactly
+# <goos>/<goarch>/<FRP_VERSION>/frpc[.exe] (system.verifyRemoteSignature), so
+# nothing is uploaded unless the .sig verifies for that path.
 #
 # It rides the EXISTING re-agent bucket + appliance /dl/re-agent/* proxy route
 # (the proxy forwards everything after the first path segment verbatim), so no
@@ -29,6 +33,13 @@ sha256_of() {
     fi
 }
 
+if [ ! -s "${binary}.sig" ]; then
+    echo "${binary}.sig is missing: sign it first (just sign-binaries, needs AGENT_UPDATE_SIGNING_KEY)" >&2
+    exit 1
+fi
+binary_abs="$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")"
+(cd src && go run ./cmd/sign-update verify -kind frpc -os "$goos" -arch "$goarch" -version "$FRP_VERSION" "$binary_abs")
+
 dest="gs://re-agent/frpc/${goos}/${goarch}/${FRP_VERSION}/${remote_name}"
 gsutil cp "$binary" "$dest"
 
@@ -36,6 +47,8 @@ sha256_of "$binary" > "${binary}.sha256"
 gsutil cp "${binary}.sha256" "${dest}.sha256"
 rm -f "${binary}.sha256"
 
+gsutil cp "${binary}.sig" "${dest}.sig"
+
 gsutil -m setmeta -r -h "Cache-control:public, max-age=0" "gs://re-agent/frpc"
 
-echo "Published $dest (+ .sha256)"
+echo "Published $dest (+ .sha256, .sig)"

@@ -24,6 +24,7 @@ running in containers on the device and retrieve their result and logs.
   - [Build, Publish and Release](#build-publish-and-release)
     - [Release via CI (tag push)](#release-via-ci-tag-push)
     - [Promote a version (manual release)](#promote-a-version-manual-release)
+    - [Update signatures (Ed25519)](#update-signatures-ed25519)
     - [One-time CI setup (Workload Identity Federation)](#one-time-ci-setup-workload-identity-federation)
     - [Targets](#targets)
     - [Target platform and architecture limitations](#target-platform-and-architecture-limitations)
@@ -216,7 +217,7 @@ Agents read `availableVersions.json` to determine the latest version, so this pu
 ```text
 gs://re-agent/windows/amd64/<version>/reagent.exe  ->  gs://re-agent/windows/amd64/latest/reagent.exe
 gs://re-agent/linux/arm64/<version>/reagent        ->  gs://re-agent/linux/arm64/latest/reagent
-...  (every os/arch in `targets`, plus the .sha256 sidecar for each)
+...  (every os/arch in `targets`, plus the .sha256 and .sig sidecars for each)
 ```
 
 This exists for the **manual install surface only**. Linux devices resolve the version themselves through `availableVersions.json` (`reswarmify`), but Windows has no such installer — the user downloads `reagent.exe` from a link in the docs and the platform UI, so that link must not carry a version. Those links point at:
@@ -228,11 +229,27 @@ https://instance-registry.ironflock.com/dl/re-agent/linux/<arch>/latest/reagent
 
 (`/dl/re-agent/*` is the RESWARM registry-proxy route; it forwards verbatim to `https://storage.googleapis.com/re-agent/*`, so the raw GCS URL works identically.)
 
-The copy is byte-for-byte, so the Authenticode signature applied by `scripts/sign-windows.sh` and the `.sha256` sidecar published by `scripts/publish.sh` both stay valid. The alias objects are written with `Cache-Control: public, max-age=0` so they are always revalidated.
+The copy is byte-for-byte, so the Authenticode signature applied by `scripts/sign-windows.sh`, the `.sha256` sidecar and the `.sig` update signature published by `scripts/publish.sh` all stay valid. The alias objects are written with `Cache-Control: public, max-age=0` so they are always revalidated.
 
-Because it runs before `publish-latestVersions`, it also acts as a preflight guard: promoting a version whose binaries the release CI never published fails here, leaving the live `availableVersions.json` untouched.
+Because it runs before `publish-latestVersions`, it also acts as a preflight guard: promoting a version whose binaries the release CI never published, or published without a `.sig`, fails here, leaving the live `availableVersions.json` untouched.
 
 > **Never put `"latest"` into `availableVersions.json`.** The agent's OTA path feeds that value to `compareVersion()` ([`src/system/system.go`](src/system/system.go)) as a semver constraint, which would fail to parse. The alias is for humans; agents always resolve a concrete version.
+
+### Update signatures (Ed25519)
+
+The agent installs an OTA update, and on Windows the frpc it downloads, only if `<binary>.sig`, published next to the binary and its `.sha256`, verifies against a public key compiled into the running agent (`AGENT_UPDATE_PUBLIC_KEYS` in [`src/updatesig/updatesig.go`](src/updatesig/updatesig.go)). The `.sig` holds the standard base64 of the raw 64-byte Ed25519 signature over
+
+```text
+reagent-update:v1            (frpc: frpc-download:v1)
+<os>/<arch>/<version>/<file> e.g. linux/armv7/1.2.6/reagent, windows/amd64/0.71.0/frpc.exe
+<sha256 of the binary, lowercase hex>
+```
+
+joined by `\n`, no trailing newline. The agent builds the middle line from what it is downloading (the version it resolved, its own platform, the file name), so a server cannot pass an old signed release off as a new one, or one platform's binary as another's. Release CI writes the signatures with `just sign-binaries` (after Authenticode, so the published `.exe` bytes are what is signed) from the `AGENT_UPDATE_SIGNING_KEY` secret (PKCS#8 PEM) and fails without that secret; `publish.sh` and `publish-frpc.sh` re-verify each `.sig` for the path they upload to. Every server that hands out agent or frpc downloads, including an appliance's agent mirror, must serve the `.sig` at the same path as the `.sha256`.
+
+One-time key setup (and rotation) is described at `AGENT_UPDATE_PUBLIC_KEYS`: `cd src && go run ./cmd/sign-update keygen -out <file>` writes the private key to `<file>` and prints only the public key line to add there. Until the placeholder is replaced, `TestProductionUpdateKeysConfigured` fails; locally, `AGENT_SIGNING_KEY_PLACEHOLDER_OK=1` skips it. To check a published binary by hand: `cd src && go run ./cmd/sign-update verify -version <version> [-kind reagent|frpc -os <os> -arch <arch>] <file>` (with `<file>.sig` next to it).
+
+Emergency only (broken signing key): `AGENT_UPDATE_ALLOW_UNSIGNED=true` in the agent's service environment installs agent updates and frpc downloads whose signature is missing or invalid, with a warning each time. Releases published before signing existed have no `.sig`, so a verifying agent never installs them again.
 
 ### One-time CI setup (Workload Identity Federation)
 
@@ -320,9 +337,10 @@ Once built the version of a binary can be verified with:
 CI (above) is the primary path. The original local recipes still work for ad-hoc builds and manual recovery, but require local `gcloud`/`docker` auth:
 
 - `just build-all-docker` — cross-compile every target inside the builder image into `build/`.
-- `just publish` — upload the `build/` binaries to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) bucket.
+- `just sign-binaries` — write the `.sig` signature next to each agent (and frpc) binary in `build/` (needs `AGENT_UPDATE_SIGNING_KEY`).
+- `just publish` — upload the `build/` binaries with their `.sha256` and `.sig` to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) bucket; refuses unsigned binaries.
 - `just push-docker-image` — build + push the multi-arch agent images.
-- `just rollout` — **!!! USE WITH CAUTION !!!** build + publish + promote (incl. `availableVersions.json`) in one local step; make sure `src/release/version.txt` and `availableVersions.json` are correct first.
+- `just rollout` — **!!! USE WITH CAUTION !!!** build + sign + publish + promote (incl. `availableVersions.json`) in one local step; make sure `src/release/version.txt` and `availableVersions.json` are correct first.
 
 
 ## Implementation
