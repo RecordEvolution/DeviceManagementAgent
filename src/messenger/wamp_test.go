@@ -485,8 +485,10 @@ func TestWampSession_Reconnection(t *testing.T) {
 
 		require.Eventually(t, session.Connected, time.Second, 5*time.Millisecond,
 			"session must stay reconnectable even when callback panics")
-		assert.GreaterOrEqual(t, atomic.LoadInt32(&panicCount), int32(2),
-			"callback should have been invoked for each reconnect")
+		// connect() runs onConnect in its own goroutine, so the callback for the
+		// last reconnect may still be pending when Connected() turns true.
+		require.Eventually(t, func() bool { return atomic.LoadInt32(&panicCount) >= 2 },
+			time.Second, 5*time.Millisecond, "callback should have been invoked for each reconnect")
 	})
 
 	t.Run("Close stops the reconnect loop even mid-dial", func(t *testing.T) {
