@@ -21,8 +21,15 @@ login='read -r JWT && BAO_TOKEN="$(printf %s "$JWT" | bao write -field=token aut
 export BAO_TOKEN; unset JWT
 '
 
+# `kubectl create token` prints the token WITHOUT a trailing newline: piped
+# straight in, `read -r JWT` would take the first line of the caller's input
+# with it and OpenBao refuses the login (403). Capture it, end it with a newline.
+jwt="$(kubectl --context "$context" -n openbao create token openbao-admin --duration=10m)"
+[ -n "$jwt" ] || { echo "openbao-admin.sh: could not create a token for openbao-admin" >&2; exit 1; }
+
 {
-    kubectl --context "$context" -n openbao create token openbao-admin --duration=10m
+    printf '%s\n' "$jwt"
+    unset jwt
     # Forward the caller's input, if any; a terminal has none to give.
     if [ ! -t 0 ]; then
         cat
