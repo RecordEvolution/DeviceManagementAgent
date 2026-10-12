@@ -204,6 +204,15 @@ func reachableFrps(t *testing.T, m *FrpTunnelManager) {
 
 	m.configBuilder.yamlConfig.ServerAddr = "127.0.0.1"
 	m.configBuilder.yamlConfig.ServerPort = ln.Addr().(*net.TCPAddr).Port
+	plainProbe(m)
+}
+
+// plainProbe drops certificate verification from the manager's config, so the
+// probe checks reachability alone against these plain listeners. The verified
+// probe has its own tests (TestProbeCapabilityReportsUntrustedTunnelServer).
+func plainProbe(m *FrpTunnelManager) {
+	m.configBuilder.yamlConfig.Transport.TLS.TrustedCaFile = ""
+	m.configBuilder.yamlConfig.Transport.TLS.ServerName = ""
 }
 
 // unreachableFrps points the manager at a port nothing is listening on, standing
@@ -217,6 +226,7 @@ func unreachableFrps(t *testing.T, m *FrpTunnelManager) {
 
 	m.configBuilder.yamlConfig.ServerAddr = "127.0.0.1"
 	m.configBuilder.yamlConfig.ServerPort = port
+	plainProbe(m)
 }
 
 // The capability verdict comes from dialling frps, because frpc logs to a file

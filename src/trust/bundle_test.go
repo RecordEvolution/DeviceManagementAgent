@@ -61,7 +61,7 @@ func TestBuildPEMKeepsOnlyUsableCAs(t *testing.T) {
 
 	corporateRoot := testCert(t, "CA-TRUMPF-SUB-01", true, future)
 	publicRoot := testCert(t, "Public Root", true, future)
-	leaf := testCert(t, "registry.example.com", false, future)
+	leaf := testIssuedLeaf(t, "registry.example.com")
 	expired := testCert(t, "Expired Root", true, time.Now().Add(-time.Hour))
 
 	bundle := buildPEM([][]byte{publicRoot, leaf, expired}, [][]byte{corporateRoot})

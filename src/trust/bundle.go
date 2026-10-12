@@ -130,10 +130,10 @@ func Build(appsDirectory, endpointURL string) (string, error) {
 	return path, nil
 }
 
-// buildPEM turns raw DER inputs into a stable PEM bundle: CA certificates
-// only, expired ones dropped, deduplicated, and ordered by fingerprint so that
-// two runs over the same trust set produce byte-identical output (which lets
-// writeBundle skip a needless rewrite).
+// buildPEM turns raw DER inputs into a stable PEM bundle: trust anchors only
+// (see isTrustAnchor), expired ones dropped, deduplicated, and ordered by
+// fingerprint so that two runs over the same trust set produce byte-identical
+// output (which lets writeBundle skip a needless rewrite).
 func buildPEM(derSets ...[][]byte) []byte {
 	type entry struct {
 		fingerprint [32]byte
@@ -147,7 +147,7 @@ func buildPEM(derSets ...[][]byte) []byte {
 	for _, ders := range derSets {
 		for _, der := range ders {
 			cert, err := x509.ParseCertificate(der)
-			if err != nil || !cert.IsCA || !cert.NotAfter.After(now) {
+			if err != nil || !isTrustAnchor(cert) || !cert.NotAfter.After(now) {
 				continue
 			}
 
@@ -171,27 +171,46 @@ func buildPEM(derSets ...[][]byte) []byte {
 	return out
 }
 
+// isTrustAnchor reports whether cert can anchor a chain: a CA certificate, or
+// a self-signed one that is not marked as a CA. Go (and OpenSSL) accept the
+// latter as a root, and it is how a v1 corporate root or an operator's
+// explicitly trusted self-signed server certificate sits in a store; dropping
+// it would leave the bundle trusting less than the device itself does. A leaf
+// issued by someone else is not an anchor and stays out.
+func isTrustAnchor(cert *x509.Certificate) bool {
+	if cert.IsCA {
+		return true
+	}
+	return bytes.Equal(cert.RawSubject, cert.RawIssuer) &&
+		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
+}
+
 // writeBundle publishes the bundle atomically and world-readable: an app
 // container runs as whatever UID its image declares, and an unreadable bundle
 // is indistinguishable from the failure this package exists to fix.
 func writeBundle(appsDirectory string, bundle []byte) (string, error) {
-	dir := HostDir(appsDirectory)
+	return writeFileAtomic(HostDir(appsDirectory), fileName, bundle)
+}
+
+// writeFileAtomic writes data to dir/name with mode 0644 via a temp file and a
+// rename, and leaves an unchanged file alone.
+func writeFileAtomic(dir, name string, data []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil && !os.IsExist(err) {
 		return "", err
 	}
 
-	path := HostPath(appsDirectory)
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, bundle) {
+	path := filepath.Join(dir, name)
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return path, nil
 	}
 
-	tmp, err := os.CreateTemp(dir, fileName+".*")
+	tmp, err := os.CreateTemp(dir, name+".*")
 	if err != nil {
 		return "", err
 	}
 	tmpName := tmp.Name()
 
-	if _, err := tmp.Write(bundle); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return "", err
@@ -298,6 +317,63 @@ func decodePEMCertificates(data []byte) [][]byte {
 			ders = append(ders, block.Bytes)
 		}
 	}
+}
+
+// hostRootsFromFiles reads certificates the way Go's own system pool does on
+// Linux (crypto/x509 root_unix.go), so the bundle trusts at least what the
+// agent's WAMP connection trusts: the first bundle file in bundles that can be
+// read, PLUS every file in every directory in dirs. A root an administrator
+// dropped into /etc/ssl/certs without running update-ca-certificates is
+// therefore included, just as Go includes it. Like Go, directory entries are
+// not filtered by extension (PEM decoding skips what is not a certificate)
+// and a symlink to a file in the same directory, which is how the hashed
+// names point at the real files, is not read twice.
+//
+// Platform-neutral so tests can point it at fixture paths.
+func hostRootsFromFiles(bundles, dirs []string) ([][]byte, error) {
+	var ders [][]byte
+
+	for _, path := range bundles {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		ders = append(ders, decodePEMCertificates(data)...)
+		break
+	}
+
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || isSameDirSymlink(dir, entry) {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			ders = append(ders, decodePEMCertificates(data)...)
+		}
+	}
+
+	if len(ders) == 0 {
+		return nil, errNoHostStore
+	}
+	return ders, nil
+}
+
+// isSameDirSymlink mirrors Go's readUniqueDirectoryEntries: a symlink whose
+// target has no directory component points into the same directory.
+func isSameDirSymlink(dir string, entry os.DirEntry) bool {
+	if entry.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Readlink(filepath.Join(dir, entry.Name()))
+	return err == nil && !strings.Contains(target, "/")
 }
 
 var errNoHostStore = errors.New("no host CA store could be read")

@@ -12,6 +12,7 @@ import (
 	"reagent/common"
 	"reagent/config"
 	"reagent/messenger"
+	"reagent/trust"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -98,6 +99,12 @@ type Transport struct {
 
 type TLSConfig struct {
 	Enable bool `yaml:"enable"`
+	// TrustedCaFile is the PEM bundle frpc verifies the frps certificate
+	// against; empty makes frpc skip verification entirely (see
+	// tunnelTLSServerName). ServerName is the name the certificate must carry
+	// and doubles as SNI; frpc falls back to serverAddr when it is empty.
+	TrustedCaFile string `yaml:"trustedCaFile,omitempty"`
+	ServerName    string `yaml:"serverName,omitempty"`
 }
 
 type WebServer struct {
@@ -148,6 +155,15 @@ const REMOTE_PORT FrpcVariable = "remote_port"
 
 const PROD_SERVER_ADDR = "app.ironflock.com"
 const TEST_SERVER_ADDR = "app.ironflock.dev"
+
+// TUNNEL_TLS_INSECURE_SKIP_VERIFY is the escape hatch for frps certificate
+// verification: set to "true" in the agent's service environment (the same
+// systemd drop-in or Windows service environment that carries the proxy
+// variables), frpc.yaml is written without trustedCaFile and frpc goes back to
+// accepting any certificate, as every agent before this check did. Meant for a
+// site whose network intercepts TLS with a CA the device does not trust. A
+// warning is logged every time the config is built while it is set.
+const TUNNEL_TLS_INSECURE_SKIP_VERIFY = "TUNNEL_TLS_INSECURE_SKIP_VERIFY"
 
 // Matches "{deviceKey}-{appName}-{declaredPort}" (with an optional "secure-"
 // prefix and, in TCP/UDP proxy names, a "-{protocol}" suffix — both ignored
@@ -334,6 +350,20 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	// NO_PROXY matching is host- and port-sensitive.
 	frpcConfig.Transport.ProxyURL = resolveTunnelProxy(controlAddr, frpcConfig.ServerPort, wssMode)
 
+	// The CA bundle itself is (re)written by SaveConfig, next to frpc.yaml.
+	if serverName := tunnelTLSServerName(cfg.ReswarmConfig, wssMode, controlAddr); serverName != "" {
+		if tunnelTLSVerifyDisabled() {
+			log.Warn().Str("server", serverName).
+				Msgf("WARNING: %s is set; the tunnel client will NOT verify the tunnel server's certificate, so anyone on the network path can impersonate it. Unset it once the device trusts the server's CA", TUNNEL_TLS_INSECURE_SKIP_VERIFY)
+		} else {
+			frpcConfig.Transport.TLS.TrustedCaFile = trust.TunnelCAPath(cfg.CommandLineArguments.AgentDir)
+			frpcConfig.Transport.TLS.ServerName = serverName
+		}
+	} else {
+		log.Debug().Str("target", controlAddr).
+			Msg("Tunnel control connection is not certificate-verified (local or plain-mode appliance server)")
+	}
+
 	configBuilder := TunnelConfigBuilder{
 		yamlConfig:    frpcConfig,
 		appConfig:     cfg,
@@ -344,6 +374,121 @@ func initialize(cfg *config.Config) TunnelConfigBuilder {
 	configBuilder.SaveConfig()
 
 	return configBuilder
+}
+
+// tunnelTLSServerName returns the name frpc must verify the frps certificate
+// against, or "" when the control connection stays unverified.
+//
+//   - cloud device: the frps behind app.<domain> presents a publicly trusted
+//     Let's Encrypt certificate for exactly the name dialed (serverAddr is
+//     derived from the device endpoint or the environment default).
+//   - domain-mode appliance (wss): the control connection rides the
+//     appliance's TLS ingress, which presents the operator's corporate-PKI
+//     certificate for the appliance domain. The device already trusts that CA
+//     through its OS store, for WAMP and the registry alike, and the host store
+//     is what goes into the bundle. controlAddr is the appliance domain here:
+//     applianceDirectHost never substitutes an address in wss mode.
+//   - plain-mode appliance: deliberately unverified. Its frps serves a
+//     self-signed certificate baked into the appliance image, no CA a device
+//     could hold vouches for it, and the mode is plaintext overall (ws://
+//     WAMP), so verification here would only break tunnels without protecting
+//     anything the plaintext session does not already expose.
+//   - a cloud-shaped config with a plain ws:// endpoint, an IP literal, or a
+//     local dev stack (localhost, host.docker.internal) is unverified for the
+//     same reason: no certificate there can name what is being dialed.
+func tunnelTLSServerName(reswarm *config.ReswarmConfig, wssMode bool, controlAddr string) string {
+	switch controlAddr {
+	case "", "localhost", "127.0.0.1", "host.docker.internal":
+		return ""
+	}
+	if net.ParseIP(controlAddr) != nil {
+		return ""
+	}
+	if wssMode {
+		return controlAddr
+	}
+	if reswarm.ApplianceDomain != "" {
+		return ""
+	}
+	if strings.HasPrefix(reswarm.DeviceEndpointURL, "ws://") || strings.HasPrefix(reswarm.DeviceEndpointURL, "http://") {
+		return ""
+	}
+	return controlAddr
+}
+
+// tunnelTLSVerifyDisabled reports whether TUNNEL_TLS_INSECURE_SKIP_VERIFY asks
+// for the unverified control connection. A value that is not a boolean keeps
+// verification on rather than guessing.
+func tunnelTLSVerifyDisabled() bool {
+	value := strings.TrimSpace(os.Getenv(TUNNEL_TLS_INSECURE_SKIP_VERIFY))
+	if value == "" {
+		return false
+	}
+	disabled, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Warn().Str("value", value).
+			Msgf("Ignoring %s: not a boolean, tunnel server verification stays on", TUNNEL_TLS_INSECURE_SKIP_VERIFY)
+		return false
+	}
+	return disabled
+}
+
+// tunnelHostRoots and tunnelEndpointCAs supply the tunnel CA bundle's inputs.
+// Variables so the test binary can keep the endpoint probe off the network:
+// several tests carry real production endpoint URLs.
+var (
+	tunnelHostRoots   = trust.HostRoots
+	tunnelEndpointCAs = trust.EndpointCAs
+)
+
+// writeTunnelCA regenerates the bundle frpc.yaml's trustedCaFile points at, if
+// it points at one.
+func (builder *TunnelConfigBuilder) writeTunnelCA() {
+	transport := builder.yamlConfig.Transport
+	if transport == nil || transport.TLS == nil || transport.TLS.TrustedCaFile == "" {
+		return
+	}
+
+	var endpointURL string
+	if builder.appConfig != nil && builder.appConfig.ReswarmConfig != nil {
+		endpointURL = builder.appConfig.ReswarmConfig.DeviceEndpointURL
+	}
+
+	refreshTunnelCA(transport.TLS.TrustedCaFile, tunnelHostRoots, func() ([][]byte, error) {
+		return tunnelEndpointCAs(endpointURL)
+	})
+}
+
+// refreshTunnelCA rewrites the tunnel CA bundle at caPath from the host store,
+// the device endpoint's verified chain and the embedded Let's Encrypt roots.
+//
+// A host store that cannot be read keeps the bundle already on disk: it was
+// built from that store when it could be read, and replacing it with the
+// embedded roots alone would drop the corporate root a domain-mode appliance
+// needs. Only when there is no earlier bundle is one built without the store.
+// A failed write is logged and otherwise left alone: frpc then refuses the
+// connection instead of silently going back to an unverified one.
+func refreshTunnelCA(caPath string, hostRoots func() ([][]byte, error), endpointCAs func() ([][]byte, error)) {
+	roots, err := hostRoots()
+	if err != nil {
+		if _, statErr := os.Stat(caPath); statErr == nil {
+			log.Warn().Err(err).Str("path", caPath).Msg("Could not read the host CA store; keeping the existing tunnel CA bundle")
+			return
+		}
+		log.Warn().Err(err).Msg("Could not read the host CA store and there is no earlier tunnel CA bundle; it carries only the device endpoint's chain and the embedded Let's Encrypt roots")
+	}
+
+	chain, err := endpointCAs()
+	if err != nil {
+		log.Debug().Err(err).Msg("Could not read the device endpoint's CA chain for the tunnel CA bundle")
+	}
+
+	path, err := trust.WriteTunnelCA(filepath.Dir(caPath), roots, chain)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to write the tunnel CA bundle; the tunnel client cannot verify the tunnel server")
+		return
+	}
+	log.Debug().Str("path", path).Msg("Tunnel CA bundle written")
 }
 
 // applianceDirectHost returns the appliance's own address out of
@@ -686,6 +831,9 @@ func (builder *TunnelConfigBuilder) RemoveTunnelConfig(port TunnelConfig) {
 }
 
 func (builder *TunnelConfigBuilder) SaveConfig() {
+	// Every config frpc reads must find the bundle it names, current.
+	builder.writeTunnelCA()
+
 	data, err := yaml.Marshal(builder.yamlConfig)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal frpc config to YAML")

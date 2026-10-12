@@ -3,6 +3,8 @@ package tunnel
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -391,18 +393,60 @@ func (frpTm *FrpTunnelManager) Capability() (TunnelCapability, string) {
 // reachable-but-rejecting frps still reads as capable. That is the safe
 // direction to be wrong in, and it matches the pre-existing behaviour of
 // treating a device as capable unless proven otherwise.
+//
+// The one exception is the server certificate. Where frpc verifies it, the
+// probe completes a TLS handshake with the very trust frpc gets (same CA file,
+// same server name), because a certificate frpc refuses leaves the device
+// without tunnels just as surely as a closed port, and "available" would hide
+// the reason.
 func (frpTm *FrpTunnelManager) frpsReachable() error {
-	addr := net.JoinHostPort(
-		frpTm.configBuilder.yamlConfig.ServerAddr,
-		strconv.Itoa(frpTm.configBuilder.yamlConfig.ServerPort),
-	)
+	yamlConfig := frpTm.configBuilder.yamlConfig
+	addr := net.JoinHostPort(yamlConfig.ServerAddr, strconv.Itoa(yamlConfig.ServerPort))
 
 	conn, err := net.DialTimeout("tcp", addr, frpsProbeTimeout)
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
-	return conn.Close()
+	if yamlConfig.Transport == nil || yamlConfig.Transport.TLS == nil || yamlConfig.Transport.TLS.TrustedCaFile == "" {
+		return nil
+	}
+
+	serverName := yamlConfig.Transport.TLS.ServerName
+	if serverName == "" {
+		serverName = yamlConfig.ServerAddr // frpc's own fallback
+	}
+	return verifyTunnelServer(conn, yamlConfig.Transport.TLS.TrustedCaFile, serverName)
+}
+
+// verifyTunnelServer runs a TLS handshake on conn against the CA bundle at
+// caFile and serverName. A certificate the bundle does not vouch for comes
+// back as a *tls.CertificateVerificationError carrying the x509 reason, and
+// names the escape hatch: the usual cause in the field is a network that
+// intercepts TLS with a CA the device does not hold (on Windows, also a root
+// the platform installs only on demand and the exported store therefore
+// lacks).
+func verifyTunnelServer(conn net.Conn, caFile, serverName string) error {
+	bundle, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("tunnel CA bundle unreadable: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(bundle) {
+		return fmt.Errorf("tunnel CA bundle %s holds no certificates", caFile)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), frpsProbeTimeout)
+	defer cancel()
+
+	err = tls.Client(conn, &tls.Config{RootCAs: pool, ServerName: serverName}).HandshakeContext(ctx)
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return fmt.Errorf("tunnel server certificate for %s is not trusted (set %s=true in the agent's environment to skip verification): %w",
+			serverName, TUNNEL_TLS_INSECURE_SKIP_VERIFY, err)
+	}
+	return err
 }
 
 // probeCapability sets the capability from a live reachability check. It is a
@@ -415,6 +459,11 @@ func (frpTm *FrpTunnelManager) probeCapability() {
 	}
 
 	err := frpTm.frpsReachable()
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		frpTm.setCapability(CapabilityUnavailable, err)
+		return
+	}
 	if err != nil {
 		frpTm.setCapability(CapabilityUnavailable, fmt.Errorf("frps unreachable: %w", err))
 		return
@@ -657,6 +706,11 @@ func (frpTm *FrpTunnelManager) Start() error {
 		log.Error().Err(err).Msg("cannot start tunnel client")
 		return err
 	}
+
+	// frpc loads its CA bundle once, at startup. Rebuilding it here hands a
+	// restarted client whatever the host store has gained since the config
+	// was last written (a renewed corporate root, say).
+	frpTm.configBuilder.writeTunnelCA()
 
 	frpTm.setCapability(CapabilityStarting, nil)
 
