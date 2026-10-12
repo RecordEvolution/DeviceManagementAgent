@@ -237,6 +237,21 @@ func TestDownloadSignatureVerification(t *testing.T) {
 				assert.Equal(t, genuine, installed)
 			})
 
+			// What OpenBao transit signs: the documented message, spelled out
+			// here rather than built by updatesig, signed as raw bytes.
+			t.Run("accepts a raw signature over the documented message", func(t *testing.T) {
+				t.Setenv(updatesig.AGENT_UPDATE_ALLOW_UNSIGNED, "")
+				trustUpdateKey(t, pub)
+				digest := sha256.Sum256(genuine)
+				documented := a.context + "\n" + runtime.GOOS + "/" + release.GetBuildArch() + "/" + a.version + "/" + a.fileName + exeSuffix() + "\n" + hex.EncodeToString(digest[:])
+				origin := newUpdateOrigin(t)
+				origin.publish(a, genuine, updatesig.EncodeSignature(ed25519.Sign(priv, []byte(documented))))
+				sys, cfg := newUpdateSystem(t, origin)
+
+				require.NoError(t, a.download(sys))
+				assert.FileExists(t, a.installed(cfg))
+			})
+
 			// A build that still holds the key placeholder trusts nothing, so
 			// even a correctly signed binary is refused rather than waved through.
 			t.Run("refuses everything without a configured key", func(t *testing.T) {

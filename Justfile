@@ -377,17 +377,17 @@ release: _require-clean
     echo "Pushed v${version}; the release workflow will build + publish. Adjust availableVersions.json and promote with: just promote"
 
 # Do everything in one step
-rollout: build-all-docker sign-binaries publish promote
+rollout: build-all-docker publish promote
 
 clean:
     docker rm -f agent_builder
     rm -f build/*
     rm -f src/embedded/frpc_binary
 
-# Promote a staged version to live: republish the `latest` alias, then publish
-# version.txt + availableVersions.json.
+# Promote a staged version to live: sign it through OpenBao (sign-release), republish
+# the `latest` alias, then publish version.txt + availableVersions.json.
 # This is the manual release gate — agents read availableVersions.json.
-promote: publish-latest-alias publish-version publish-latestVersions
+promote: sign-release publish-latest-alias publish-version publish-latestVersions
 
 # Docs and manual (Windows) installs need a link that never goes stale — there is no reswarmify
 # on Windows to resolve availableVersions.json for the user. Server-side copy, so the
@@ -452,49 +452,28 @@ publish-latest-alias:
     fi
     echo "==> aliased ${count} object(s) to latest"
 
-# Needs the private key as PKCS#8 PEM in AGENT_UPDATE_SIGNING_KEY (how release CI
-# passes its secret); format and key handling: src/updatesig, src/cmd/sign-update.
-# Each signature names what the agent installs: build/reagent-<os>-<arch> as
-# <os>/<arch>/<version.txt>/reagent[.exe], build/frpc-<os>-<arch> as
-# <os>/<arch>/<FRP_VERSION>/frpc[.exe] — the paths publish.sh and
-# publish-frpc.sh upload them to.
-# Write the Ed25519 signature (<binary>.sig) next to every agent and frpc binary in build/.
-sign-binaries:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd {{ROOT_DIR}}
-    version=$(cat src/release/version.txt)
-    frp_version=$(grep -oE 'FRP_VERSION = "[^"]+"' src/embedded/frpc.go | cut -d'"' -f2)
-    agents=()
-    frpcs=()
-    for path in build/reagent-* build/frpc-*; do
-        name=$(basename "$path")
-        if [[ "$name" =~ ^reagent-[a-z]+-[a-z0-9]+$ ]]; then
-            agents+=("../$path")
-        elif [[ "$name" =~ ^frpc-[a-z]+-[a-z0-9]+$ ]]; then
-            frpcs+=("../$path")
-        fi
-    done
-    if [ "${#agents[@]}" -eq 0 ]; then
-        echo "no agent binaries (build/reagent-<os>-<arch>) to sign" >&2
-        exit 1
-    fi
-    cd src
-    go run ./cmd/sign-update sign -version "$version" "${agents[@]}"
-    if [ "${#frpcs[@]}" -gt 0 ]; then
-        go run ./cmd/sign-update sign -version "$frp_version" "${frpcs[@]}"
-    fi
+# Needs kubectl access to the production OpenBao (OPENBAO_KUBE_CONTEXT) and gsutil.
+# The private key never leaves OpenBao; see scripts/sign-release.sh and README
+# "Update signatures". `promote` runs this first, so a version cannot go live unsigned.
+# Sign every agent binary availableVersions.json names, and the pinned frpc, through OpenBao transit.
+sign-release:
+    scripts/sign-release.sh
 
-# Every binary must be signed first (`just sign-binaries`); publish.sh refuses otherwise.
+# Paste the output into AGENT_UPDATE_PUBLIC_KEYS (src/updatesig/updatesig.go).
+# Print the public key of every version of the OpenBao transit key agent-update.
+agent-update-pubkeys:
+    scripts/openbao-admin.sh 'bao read -format=json transit/keys/agent-update' | (cd src && go run ./cmd/sign-update pubkey-from-openbao)
+
+# Stages them unsigned; `just promote` signs them (sign-release) before they go live.
 # Publish the binaries from the build folder
 publish:
     scripts/publish.sh
 
-publish-version:
+publish-version: sign-release
     gsutil cp "src/release/version.txt" gs://re-agent
     gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/version.txt
 
-publish-latestVersions:
+publish-latestVersions: sign-release
     gsutil cp "availableVersions.json" gs://re-agent
     gsutil setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent/availableVersions.json
 

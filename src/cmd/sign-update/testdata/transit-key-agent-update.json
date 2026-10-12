@@ -1,0 +1,40 @@
+{
+  "request_id": "00000000-0000-0000-0000-000000000000",
+  "lease_id": "",
+  "lease_duration": 0,
+  "renewable": false,
+  "data": {
+    "allow_plaintext_backup": false,
+    "auto_rotate_period": 0,
+    "deletion_allowed": false,
+    "derived": false,
+    "exportable": false,
+    "imported_key": false,
+    "keys": {
+      "1": {
+        "certificate_chain": "",
+        "creation_time": "2026-10-12T12:51:37.576590796Z",
+        "name": "ed25519",
+        "public_key": "CYJjWyOf1b1SAJXGHBQJoGcetaXDApxl0mDYkJ0qWhk="
+      },
+      "2": {
+        "certificate_chain": "",
+        "creation_time": "2026-10-12T12:51:37.709642129Z",
+        "name": "ed25519",
+        "public_key": "HWxenIQYOyLYEgrBGRf6BhQNnBEmdKl5XFScrmUCy/E="
+      }
+    },
+    "latest_version": 2,
+    "min_available_version": 0,
+    "min_decryption_version": 1,
+    "min_encryption_version": 0,
+    "name": "agent-update",
+    "soft_deleted": false,
+    "supports_decryption": false,
+    "supports_derivation": true,
+    "supports_encryption": false,
+    "supports_signing": true,
+    "type": "ed25519"
+  },
+  "warnings": null
+}

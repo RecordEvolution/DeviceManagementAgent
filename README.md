@@ -205,7 +205,7 @@ gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagemen
 Making a staged version **live** is a deliberate manual step. Update `availableVersions.json` for the target environment(s), then:
 
 ```Shell
-just promote   # republishes the `latest` alias, then src/release/version.txt + availableVersions.json to gs://re-agent
+just promote   # signs through OpenBao (sign-release), republishes the `latest` alias, then src/release/version.txt + availableVersions.json to gs://re-agent
 ```
 
 Agents read `availableVersions.json` to determine the latest version, so this publish **is** the release gate. (To promote only the available-versions list: `just publish-latestVersions`.)
@@ -245,9 +245,25 @@ reagent-update:v1            (frpc: frpc-download:v1)
 <sha256 of the binary, lowercase hex>
 ```
 
-joined by `\n`, no trailing newline. The agent builds the middle line from what it is downloading (the version it resolved, its own platform, the file name), so a server cannot pass an old signed release off as a new one, or one platform's binary as another's. Release CI writes the signatures with `just sign-binaries` (after Authenticode, so the published `.exe` bytes are what is signed) from the `AGENT_UPDATE_SIGNING_KEY` secret (PKCS#8 PEM) and fails without that secret; `publish.sh` and `publish-frpc.sh` re-verify each `.sig` for the path they upload to. Every server that hands out agent or frpc downloads, including an appliance's agent mirror, must serve the `.sig` at the same path as the `.sha256`.
+joined by `\n`, no trailing newline. The agent builds the middle line from what it is downloading (the version it resolved, its own platform, the file name), so a server cannot pass an old signed release off as a new one, or one platform's binary as another's. Every server that hands out agent or frpc downloads, including an appliance's agent mirror, must serve the `.sig` at the same path as the `.sha256`.
 
-One-time key setup (and rotation) is described at `AGENT_UPDATE_PUBLIC_KEYS`: `cd src && go run ./cmd/sign-update keygen -out <file>` writes the private key to `<file>` and prints only the public key line to add there. Until the placeholder is replaced, `TestProductionUpdateKeysConfigured` fails; locally, `AGENT_SIGNING_KEY_PLACEHOLDER_OK=1` skips it. To check a published binary by hand: `cd src && go run ./cmd/sign-update verify -version <version> [-kind reagent|frpc -os <os> -arch <arch>] <file>` (with `<file>.sig` next to it).
+**Where the key lives.** The signing key is the OpenBao transit key `agent-update` (ed25519, `exportable=false`): no private key exists in GitHub or on a laptop. CI stages binaries **unsigned**; `just promote` signs them before anything goes live. The maintainer reaches OpenBao through kubectl only; [`scripts/openbao-admin.sh`](scripts/openbao-admin.sh) runs `bao` in `openbao-0` as role `admin` (context `OPENBAO_KUBE_CONTEXT`, default `gke_record-1283_europe-west1-b_ironflock-prod`).
+
+**One-time setup** (fresh installs of the ironflock chart create the mount and key themselves):
+
+```Shell
+scripts/openbao-admin.sh 'bao secrets enable transit'
+scripts/openbao-admin.sh 'bao write -f transit/keys/agent-update type=ed25519 exportable=false allow_plaintext_backup=false'
+just agent-update-pubkeys    # paste the printed line(s) into AGENT_UPDATE_PUBLIC_KEYS
+```
+
+**Signing** happens in `just promote` (also in `just publish-version` / `just publish-latestVersions`, so the manifest cannot flip unsigned), via `just sign-release` ([`scripts/sign-release.sh`](scripts/sign-release.sh)): for every version `availableVersions.json` names and for the pinned frpc it downloads each binary from GCS, hashes it locally, builds the message (`sign-update message`), signs all messages in one `kubectl exec` session (`transit/sign/agent-update`), converts each `vault:vN:…` answer into a `.sig`, verifies every `.sig` against the keys compiled into this tree, and only then uploads them. A published `.sig` that already verifies is kept. A staged version that is already signed is never restaged by `publish.sh`; a signed frpc is never overwritten by `publish-frpc.sh` (bump `FRP_VERSION` instead).
+
+**Rotation:** `scripts/openbao-admin.sh 'bao write -f transit/keys/agent-update/rotate'`, then keep signing with the old version (`OPENBAO_TRANSIT_KEY_VERSION=<old> just promote`) while a release that lists both lines from `just agent-update-pubkeys` reaches the fleet; then sign with the new version (no variable) and drop the old line in a later release. A new key version's public key only exists after the rotate, which is why signing stays pinned to the old one meanwhile.
+
+**Backup:** the key is in OpenBao's Raft storage, so the OpenBao snapshots plus the seal key cover it; there is nothing else to back up.
+
+`AGENT_UPDATE_PUBLIC_KEYS` holds the production key's version 1 (key ID `2b040fcf`). Should it ever hold the `TODO-AGENT-UPDATE-PUBLIC-KEY` placeholder, `TestProductionUpdateKeysConfigured` fails and blocks the release gate (locally, `AGENT_SIGNING_KEY_PLACEHOLDER_OK=1` skips it). To check a published binary by hand: `cd src && go run ./cmd/sign-update verify -version <version> [-kind reagent|frpc -os <os> -arch <arch>] <file>` (with `<file>.sig` next to it). `sign-update keygen` / `sign` work with a local key file for development and tests only.
 
 Emergency only (broken signing key): `AGENT_UPDATE_ALLOW_UNSIGNED=true` in the agent's service environment installs agent updates and frpc downloads whose signature is missing or invalid, with a warning each time. Releases published before signing existed have no `.sig`, so a verifying agent never installs them again.
 
@@ -337,10 +353,9 @@ Once built the version of a binary can be verified with:
 CI (above) is the primary path. The original local recipes still work for ad-hoc builds and manual recovery, but require local `gcloud`/`docker` auth:
 
 - `just build-all-docker` — cross-compile every target inside the builder image into `build/`.
-- `just sign-binaries` — write the `.sig` signature next to each agent (and frpc) binary in `build/` (needs `AGENT_UPDATE_SIGNING_KEY`).
-- `just publish` — upload the `build/` binaries with their `.sha256` and `.sig` to the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) bucket; refuses unsigned binaries.
+- `just publish` — stage the `build/` binaries with their `.sha256` in the [re-agent](https://console.cloud.google.com/storage/browser/re-agent) bucket (unsigned; `just promote` signs them).
 - `just push-docker-image` — build + push the multi-arch agent images.
-- `just rollout` — **!!! USE WITH CAUTION !!!** build + sign + publish + promote (incl. `availableVersions.json`) in one local step; make sure `src/release/version.txt` and `availableVersions.json` are correct first.
+- `just rollout` — **!!! USE WITH CAUTION !!!** build + publish + promote (which signs) (incl. `availableVersions.json`) in one local step; make sure `src/release/version.txt` and `availableVersions.json` are correct first.
 
 
 ## Implementation

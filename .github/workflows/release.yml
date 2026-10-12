@@ -1,8 +1,10 @@
 # Build + publish the reagent agent (binaries to GCS, multi-arch images to
-# Artifact Registry) and record a signed SBOM attestation per binary. Every
-# published agent binary and the Windows frpc get an Ed25519 signature (.sig)
-# that agents verify before installing them; that needs the
-# AGENT_UPDATE_SIGNING_KEY secret.
+# Artifact Registry) and record a signed SBOM attestation per binary.
+#
+# The binaries are staged WITHOUT the Ed25519 signature (.sig) agents require
+# before installing an update or frpc: that key lives only in IronFlock's
+# OpenBao (non-exportable transit key), and GitHub holds no signing material.
+# `just promote` signs them (scripts/sign-release.sh) before they go live.
 #
 # This STAGES a version: binaries land at gs://re-agent/<os>/<arch>/<version>/
 # and images are pushed, but agents do NOT pick it up until the version is
@@ -147,25 +149,6 @@ jobs:
           WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: scripts/sign-windows.sh build/reagent-windows-amd64 build/frpc-windows-amd64
 
-      # Ed25519 signatures (build/reagent-*.sig and build/frpc-windows-amd64.sig,
-      # published next to reagent[.exe] and frpc.exe): agents refuse an OTA update
-      # or an frpc download without a valid one for exactly the
-      # <os>/<arch>/<version>/<file> they fetch. It signs the exact bytes that
-      # get published, so it runs AFTER Authenticode rewrote the .exe files.
-      # Unlike Authenticode this never no-ops: a release without the key would
-      # be refused by every verifying agent. The helper also refuses a key that
-      # is not in this build's AGENT_UPDATE_PUBLIC_KEYS, and publish.sh /
-      # publish-frpc.sh re-verify each .sig for the path they upload to.
-      - name: Sign agent and frpc binaries for OTA verification (Ed25519)
-        env:
-          AGENT_UPDATE_SIGNING_KEY: ${{ secrets.AGENT_UPDATE_SIGNING_KEY }}
-        run: |
-          if [ -z "${AGENT_UPDATE_SIGNING_KEY}" ]; then
-            echo "::error::The AGENT_UPDATE_SIGNING_KEY secret is not set; refusing to publish agent binaries agents would reject."
-            exit 1
-          fi
-          just sign-binaries
-
       - name: Publish agent binaries to gs://re-agent
         run: scripts/publish.sh
 
@@ -182,4 +165,4 @@ jobs:
 
       - name: Release reminder
         run: |
-          echo "::notice::Version staged. Promote it manually with: just promote  (publishes version.txt + availableVersions.json)"
+          echo "::notice::Version staged UNSIGNED. Promote it manually with: just promote  (signs through OpenBao, then publishes version.txt + availableVersions.json)"

@@ -1,17 +1,17 @@
 #!/bin/bash
-# Publish the built agent binaries (build/reagent-<os>-<arch>) to
-# gs://re-agent/<os>/<arch>/<version>/reagent[.exe], each with two sidecars:
+# Stage the built agent binaries (build/reagent-<os>-<arch>) at
+# gs://re-agent/<os>/<arch>/<version>/reagent[.exe], each with its .sha256
+# manifest: the agent verifies OTA downloads against it
+# (system.verifyRemoteChecksum) and the Windows service refuses to activate an
+# update that does not match.
 #
-#   .sha256  SHA-256 manifest: the agent verifies OTA downloads against it
-#            (system.verifyRemoteChecksum) and the Windows service refuses to
-#            activate an update that does not match.
-#   .sig     Ed25519 update signature, written by `cmd/sign-update sign`
-#            (release.yml, or `just sign-binaries`): agents refuse an update
-#            without a valid one for exactly <os>/<arch>/<version>/reagent[.exe]
-#            (system.verifyRemoteSignature).
+# Staged binaries carry no .sig: agents refuse them until `just promote` signs
+# them through OpenBao (scripts/sign-release.sh). A local build/<binary>.sig
+# (a development signature) is uploaded too, but only if it verifies, against
+# this tree's AGENT_UPDATE_PUBLIC_KEYS, for the path it goes to.
 #
-# Nothing is uploaded unless every binary carries a signature that verifies,
-# against this build's AGENT_UPDATE_PUBLIC_KEYS, for the path it goes to.
+# A version that is already signed in the bucket has been promoted; restaging
+# it would put new bytes under its live .sig, so that is refused.
 set -euo pipefail
 
 VERSION=$(cat src/release/version.txt)
@@ -38,39 +38,43 @@ if [ "${#binaries[@]}" -eq 0 ]; then
     exit 1
 fi
 
-unsigned=0
+remote_path() {
+    local os arch binary_name="reagent"
+    os=$(echo "$1" | cut -d "-" -f 2)
+    arch=$(echo "$1" | cut -d "-" -f 3)
+    if [ "$os" == "windows" ]; then
+        binary_name="reagent.exe"
+    fi
+    echo "gs://re-agent/${os}/${arch}/${VERSION}/${binary_name}"
+}
+
+signed=()
 for element in "${binaries[@]}"; do
-    if [ ! -s "build/$element.sig" ]; then
-        echo "build/$element.sig is missing" >&2
-        unsigned=1
+    if [ -e "build/$element.sig" ]; then
+        signed+=("../build/$element")
+    elif gsutil -q stat "$(remote_path "$element").sig"; then
+        echo "$(remote_path "$element") is already signed (promoted); bump the version instead of restaging it" >&2
+        exit 1
     fi
 done
-if [ "$unsigned" -ne 0 ]; then
-    echo "sign the binaries first: just sign-binaries (needs AGENT_UPDATE_SIGNING_KEY)" >&2
-    exit 1
+
+# Same <os>/<arch> derivation from the build name as remote_path, same
+# VERSION: a signature made for another version or platform fails.
+if [ "${#signed[@]}" -gt 0 ]; then
+    (cd src && go run ./cmd/sign-update verify -version "$VERSION" "${signed[@]}")
 fi
 
-# Same <os>/<arch> derivation from the build name as below, same VERSION: a
-# signature made for another version (version.txt bumped after signing) fails.
-(cd src && go run ./cmd/sign-update verify -version "$VERSION" "${binaries[@]/#/../build/}")
-
 for element in "${binaries[@]}"; do
-    OS=$(echo "$element" | cut -d "-" -f 2)
-    ARCH=$(echo "$element" | cut -d "-" -f 3)
-    BINARY_NAME="reagent"
-
-    if [ "$OS" == "windows" ]; then
-        BINARY_NAME="reagent.exe"
-    fi
-
-    GCLOUD="gs://re-agent/${OS}/${ARCH}/${VERSION}/${BINARY_NAME}"
+    GCLOUD=$(remote_path "$element")
     gsutil cp "build/$element" "$GCLOUD"
 
     sha256_of "build/$element" > "build/$element.sha256"
     gsutil cp "build/$element.sha256" "${GCLOUD}.sha256"
     rm -f "build/$element.sha256"
 
-    gsutil cp "build/$element.sig" "${GCLOUD}.sig"
+    if [ -e "build/$element.sig" ]; then
+        gsutil cp "build/$element.sig" "${GCLOUD}.sig"
+    fi
 done
 
 gsutil -m setmeta -r -h "Cache-control:public, max-age=0" gs://re-agent

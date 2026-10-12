@@ -60,30 +60,29 @@ import (
 
 // AGENT_UPDATE_PUBLIC_KEYS lists the public keys agent updates and the frpc
 // downloads may be signed with: one per line, the standard base64 of the raw
-// 32-byte Ed25519 key, "#" starts a comment. It is a list so a rotation is an
-// edit: ship a release that carries both the old and the new key (still signed
-// with the old one), switch the signing secret, and drop the old key in a
-// later release. A running agent trusts only the keys compiled into ITSELF, so
-// the new key has to reach the fleet before the first release signed with it.
+// 32-byte Ed25519 key, "#" starts a comment. A running agent trusts only the
+// keys compiled into ITSELF.
 //
-// Until the TODO placeholder is replaced, this build trusts no key and refuses
-// every update and frpc download, and TestProductionUpdateKeysConfigured
+// The production key is the OpenBao transit key agent-update (ed25519, not
+// exportable): its private half never leaves OpenBao, and releases are signed
+// through it at promotion (scripts/sign-release.sh). `just agent-update-pubkeys`
+// prints the line of every key version, ready to paste here.
+//
+// Rotation, so that no agent ever meets a signature it cannot check:
+//  1. `bao write -f transit/keys/agent-update/rotate` creates version N+1;
+//     keep signing with version N (OPENBAO_TRANSIT_KEY_VERSION=N for
+//     sign-release) while
+//  2. a release that lists both keys here reaches the fleet;
+//  3. then sign with N+1 (unset OPENBAO_TRANSIT_KEY_VERSION), and drop the old
+//     line in a later release.
+//
+// The line below came from `just agent-update-pubkeys` (pubkey-from-openbao)
+// for the production key, version 1. Should the list ever hold the
+// TODO-AGENT-UPDATE-PUBLIC-KEY placeholder instead, the build trusts no key and
+// refuses every update and frpc download, and TestProductionUpdateKeysConfigured
 // fails, so CI does not ship it.
-//
-// Generating the production key (from src/, on a trusted machine):
-//
-//	go run ./cmd/sign-update keygen -out ~/agent-update-signing.pem
-//
-// keygen writes the PKCS#8 PEM private key to that file (mode 0600, never
-// overwritten) and prints only the public key, its key ID and the line to put
-// here. Store the PEM as the GitHub Actions secret AGENT_UPDATE_SIGNING_KEY of
-// this repository, e.g.
-//
-//	gh secret set AGENT_UPDATE_SIGNING_KEY < ~/agent-update-signing.pem
-//
-// keep an offline backup, and delete the file from the machine.
 const AGENT_UPDATE_PUBLIC_KEYS = `
-TODO-AGENT-UPDATE-PUBLIC-KEY
+MKstV0PZ93scIuBhtM8DCq0SfbsZR9UU7P9E+621ftU= # key 2b040fcf, OpenBao transit agent-update v1
 `
 
 // publicKeyPlaceholder marks AGENT_UPDATE_PUBLIC_KEYS as not yet configured.

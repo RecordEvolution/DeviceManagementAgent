@@ -22,8 +22,8 @@ import (
 const placeholderOKEnv = "AGENT_SIGNING_KEY_PLACEHOLDER_OK"
 
 // TestProductionUpdateKeysConfigured FAILS ON PURPOSE until the maintainer has
-// put the production public key into AGENT_UPDATE_PUBLIC_KEYS (see the comment
-// there for `go run ./cmd/sign-update keygen`). A build that still holds the
+// put the production public key into AGENT_UPDATE_PUBLIC_KEYS (`just
+// agent-update-pubkeys` prints it from OpenBao). A build that still holds the
 // placeholder trusts no key and would refuse every OTA update, so it must not
 // get through the release gate. With the real key in, it passes and
 // AGENT_SIGNING_KEY_PLACEHOLDER_OK no longer matters.

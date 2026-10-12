@@ -1,14 +1,25 @@
-// Command sign-update creates the Ed25519 signatures the agent requires on an
-// OTA update and on the frpc it downloads (format: package updatesig), and the
-// key that makes them. Run it from src/:
+// Command sign-update builds, converts and checks the Ed25519 signatures the
+// agent requires on an OTA update and on the frpc it downloads (format:
+// package updatesig). Run it from src/.
 //
-//	go run ./cmd/sign-update keygen -out <private-key.pem>
-//	go run ./cmd/sign-update sign -version <v> [target flags] [-key-file <pem>] <binary>...
-//	go run ./cmd/sign-update verify -version <v> [target flags] [-public-key <base64>] <binary>...
+// Release signing (the private key never leaves OpenBao; scripts/sign-release.sh
+// drives these):
 //
-// keygen writes a new PKCS#8 PEM private key to the chosen file (mode 0600,
-// never overwriting one) and prints only the public key, its key ID and the
-// line for updatesig.AGENT_UPDATE_PUBLIC_KEYS.
+//	message -version <v> [target flags] <binary>
+//	    prints the base64 of the exact bytes to sign, for transit/sign input=
+//	sig-from-openbao -version <v> [target flags] [-public-key <b64>] <binary>
+//	    reads OpenBao's "vault:v<N>:<base64>" from stdin and writes <binary>.sig,
+//	    but only once it verifies against the compiled-in keys
+//	verify -version <v> [target flags] [-public-key <b64>] <binary>...
+//	    checks <binary>.sig against the compiled-in keys (or -public-key)
+//	pubkey-from-openbao
+//	    reads `bao read -format=json transit/keys/agent-update` from stdin and
+//	    prints the AGENT_UPDATE_PUBLIC_KEYS line of every key version
+//
+// Development and tests only, with a local key file that never signs a release:
+//
+//	keygen -out <private-key.pem>
+//	sign -key-file <private-key.pem> -version <v> [target flags] <binary>...
 //
 // A signature names what it is for (updatesig.Target): the kind of binary and
 // the os/arch/version/file it is published as. -version is always required.
@@ -17,22 +28,17 @@
 // frpc) unless -kind, -os and -arch say otherwise. The file name follows: kind,
 // plus .exe on windows.
 //
-// sign writes <binary>.sig next to each binary. The private key is the PEM in
-// AGENT_UPDATE_SIGNING_KEY, which is how release CI hands over its secret,
-// unless -key-file names a PEM file. A key that is not in this build's
-// AGENT_UPDATE_PUBLIC_KEYS is refused: agents built from this tree would reject
-// what it signs.
-//
-// verify checks <binary>.sig for the same target against the compiled-in
-// keys, or against the one given with -public-key.
-//
-// No subcommand ever prints private key material.
+// sign refuses a key that is not in this build's AGENT_UPDATE_PUBLIC_KEYS:
+// agents built from this tree would reject what it signs. No subcommand ever
+// prints private key material.
 package main
 
 import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -41,17 +47,19 @@ import (
 	"os"
 	"path/filepath"
 	"reagent/updatesig"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// signingKeyEnv names the variable release CI passes the private key in.
-const signingKeyEnv = "AGENT_UPDATE_SIGNING_KEY"
-
-const usage = `usage:
-  sign-update keygen -out <private-key.pem>
-  sign-update sign -version <v> [-kind reagent|frpc] [-os <os>] [-arch <arch>] [-key-file <pem>] <binary>...
-  sign-update verify -version <v> [-kind reagent|frpc] [-os <os>] [-arch <arch>] [-public-key <base64>] <binary>...`
+const usage = `usage (target flags: -version <v> [-kind reagent|frpc] [-os <os>] [-arch <arch>]):
+  sign-update message <target flags> <binary>
+  sign-update sig-from-openbao <target flags> [-public-key <base64>] <binary>  < vault:v<N>:<base64>
+  sign-update verify <target flags> [-public-key <base64>] <binary>...
+  sign-update pubkey-from-openbao  < bao read -format=json transit/keys/agent-update
+  sign-update keygen -out <private-key.pem>                          (development only)
+  sign-update sign -key-file <pem> <target flags> <binary>...        (development only)`
 
 // signatureContexts maps a binary kind to the context its signatures carry.
 var signatureContexts = map[string]string{
@@ -109,24 +117,30 @@ func (f targetFlags) targetFor(binary string) (updatesig.Target, error) {
 var trustedKeys = updatesig.TrustedKeys
 
 func main() {
-	err := run(os.Args[1:], os.Stdout)
+	err := run(os.Args[1:], os.Stdin, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sign-update: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout io.Writer) error {
+func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
 	switch args[0] {
+	case "message":
+		return message(args[1:], stdout)
+	case "sig-from-openbao":
+		return sigFromOpenBao(args[1:], stdin, stdout)
+	case "verify":
+		return verify(args[1:], stdout)
+	case "pubkey-from-openbao":
+		return pubkeyFromOpenBao(args[1:], stdin, stdout)
 	case "keygen":
 		return keygen(args[1:], stdout)
 	case "sign":
 		return sign(args[1:], stdout)
-	case "verify":
-		return verify(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown subcommand %q\n%s", args[0], usage)
 }
@@ -168,27 +182,24 @@ func keygen(args []string, stdout io.Writer) error {
 
 	keyID := updatesig.KeyID(publicKey)
 	encoded := updatesig.EncodePublicKey(publicKey)
-	fmt.Fprintf(stdout, "Private key written to %s (mode 0600).\n", *out)
+	fmt.Fprintf(stdout, "DEVELOPMENT key written to %s (mode 0600). Releases are signed by OpenBao, never with a key file.\n", *out)
 	fmt.Fprintf(stdout, "Key ID:     %s\n", keyID)
 	fmt.Fprintf(stdout, "Public key: %s\n\n", encoded)
-	fmt.Fprintf(stdout, "Add this line to AGENT_UPDATE_PUBLIC_KEYS in src/updatesig/updatesig.go:\n\n")
-	fmt.Fprintf(stdout, "%s # key %s, created %s\n\n", encoded, keyID, time.Now().UTC().Format("2006-01-02"))
-	fmt.Fprintf(stdout, "Then store the private key as the GitHub Actions secret %s, keep an\n", signingKeyEnv)
-	fmt.Fprintf(stdout, "offline backup, and delete the file:\n\n")
-	fmt.Fprintf(stdout, "  gh secret set %s < %s\n", signingKeyEnv, *out)
+	fmt.Fprintf(stdout, "To test with it, add this line to AGENT_UPDATE_PUBLIC_KEYS in a local build (never commit it):\n\n")
+	fmt.Fprintf(stdout, "%s # DEVELOPMENT key %s, created %s\n", encoded, keyID, time.Now().UTC().Format("2006-01-02"))
 	return nil
 }
 
 func sign(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("sign", flag.ContinueOnError)
-	keyFile := flags.String("key-file", "", "PKCS#8 PEM private key file (default: the PEM in $"+signingKeyEnv+")")
+	keyFile := flags.String("key-file", "", "PKCS#8 PEM private key file of a DEVELOPMENT key (required)")
 	targets := addTargetFlags(flags)
 	err := flags.Parse(args)
 	if err != nil {
 		return err
 	}
-	if flags.NArg() == 0 {
-		return errors.New("sign needs at least one binary")
+	if flags.NArg() == 0 || *keyFile == "" {
+		return errors.New("sign needs -key-file <development key> and at least one binary; releases are signed through OpenBao (scripts/sign-release.sh)")
 	}
 
 	privateKey, err := loadPrivateKey(*keyFile)
@@ -254,12 +265,7 @@ func verify(args []string, stdout io.Writer) error {
 		return errors.New("verify needs at least one binary")
 	}
 
-	var keys []updatesig.PublicKey
-	if *publicKey != "" {
-		keys, err = updatesig.ParsePublicKeys(*publicKey)
-	} else {
-		keys, err = trustedKeys()
-	}
+	keys, err := verificationKeys(*publicKey)
 	if err != nil {
 		return err
 	}
@@ -282,24 +288,181 @@ func verify(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// loadPrivateKey reads the PKCS#8 PEM key from keyFile, or from the signing
-// key variable when keyFile is empty. Errors never quote the key material.
-func loadPrivateKey(keyFile string) (ed25519.PrivateKey, error) {
-	var data []byte
-	source := "$" + signingKeyEnv
-	if keyFile != "" {
-		var err error
-		data, err = os.ReadFile(keyFile)
-		if err != nil {
-			return nil, err
-		}
-		source = keyFile
-	} else {
-		data = []byte(strings.TrimSpace(os.Getenv(signingKeyEnv)))
-		if len(data) == 0 {
-			return nil, fmt.Errorf("%s is empty; pass the PKCS#8 PEM private key in it or use -key-file", signingKeyEnv)
-		}
+// verificationKeys returns the key given with -public-key, or else the keys
+// compiled into this build.
+func verificationKeys(publicKey string) ([]updatesig.PublicKey, error) {
+	if publicKey != "" {
+		return updatesig.ParsePublicKeys(publicKey)
 	}
+	return trustedKeys()
+}
+
+// message prints the base64 of the exact bytes a signature for binary is made
+// over, the input OpenBao's transit/sign takes. The digest is computed here,
+// from the file, never taken from a .sha256 sidecar.
+func message(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("message", flag.ContinueOnError)
+	targets := addTargetFlags(flags)
+	err := flags.Parse(args)
+	if err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("message needs exactly one binary")
+	}
+	binary := flags.Arg(0)
+
+	target, err := targets.targetFor(binary)
+	if err != nil {
+		return err
+	}
+	digest, err := updatesig.FileDigest(binary)
+	if err != nil {
+		return err
+	}
+	signed, err := target.Message(digest)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, base64.StdEncoding.EncodeToString(signed))
+	return nil
+}
+
+// parseTransitSignature splits what OpenBao transit/sign returns,
+// "vault:v<key version>:<base64 signature>", into the key version and the raw
+// 64-byte Ed25519 signature.
+func parseTransitSignature(text string) (int, []byte, error) {
+	malformed := errors.New(`not an OpenBao transit Ed25519 signature ("vault:v<N>:<base64 of 64 bytes>")`)
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), "vault:v")
+	if !ok {
+		return 0, nil, malformed
+	}
+	versionText, encoded, ok := strings.Cut(rest, ":")
+	if !ok {
+		return 0, nil, malformed
+	}
+	version, err := strconv.Atoi(versionText)
+	if err != nil || version < 1 || strconv.Itoa(version) != versionText {
+		return 0, nil, malformed
+	}
+	signature, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return 0, nil, malformed
+	}
+	return version, signature, nil
+}
+
+// sigFromOpenBao turns OpenBao's signature for binary into <binary>.sig, and
+// writes it only if it verifies for the target against the compiled-in keys
+// (or -public-key), so a signature the agents would refuse is never produced.
+func sigFromOpenBao(args []string, stdin io.Reader, stdout io.Writer) error {
+	flags := flag.NewFlagSet("sig-from-openbao", flag.ContinueOnError)
+	publicKey := flags.String("public-key", "", "base64 Ed25519 public key (default: the keys compiled into this build)")
+	targets := addTargetFlags(flags)
+	err := flags.Parse(args)
+	if err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("sig-from-openbao needs exactly one binary")
+	}
+	binary := flags.Arg(0)
+
+	target, err := targets.targetFor(binary)
+	if err != nil {
+		return err
+	}
+	keys, err := verificationKeys(*publicKey)
+	if err != nil {
+		return err
+	}
+	text, err := io.ReadAll(io.LimitReader(stdin, 1024))
+	if err != nil {
+		return err
+	}
+	keyVersion, raw, err := parseTransitSignature(string(text))
+	if err != nil {
+		return fmt.Errorf("%s: %w", binary, err)
+	}
+
+	signature := updatesig.EncodeSignature(raw)
+	keyID, err := updatesig.VerifyFile(keys, target, binary, signature)
+	if err != nil {
+		return fmt.Errorf("%s: OpenBao's signature (transit key version %d) does not verify: %w", binary, keyVersion, err)
+	}
+	err = os.WriteFile(binary+".sig", signature, 0o644)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s: signed as %s by transit key version %d (key %s) -> %s.sig\n", binary, target, keyVersion, keyID, binary)
+	return nil
+}
+
+// transitKey is the part of `bao read -format=json transit/keys/<name>` that
+// pubkeyFromOpenBao needs.
+type transitKey struct {
+	Data struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Keys map[string]struct {
+			PublicKey    string `json:"public_key"`
+			CreationTime string `json:"creation_time"`
+		} `json:"keys"`
+	} `json:"data"`
+}
+
+// pubkeyFromOpenBao prints the AGENT_UPDATE_PUBLIC_KEYS line of every version
+// of an OpenBao transit key, oldest first.
+func pubkeyFromOpenBao(args []string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) != 0 {
+		return errors.New("pubkey-from-openbao takes no arguments; pipe `bao read -format=json transit/keys/agent-update` into it")
+	}
+	var key transitKey
+	err := json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&key)
+	if err != nil {
+		return fmt.Errorf("not the JSON of `bao read -format=json transit/keys/<name>`: %w", err)
+	}
+	if key.Data.Type != "ed25519" {
+		return fmt.Errorf("transit key %q is of type %q, not ed25519", key.Data.Name, key.Data.Type)
+	}
+	if len(key.Data.Keys) == 0 {
+		return fmt.Errorf("transit key %q lists no key versions", key.Data.Name)
+	}
+
+	versions := make([]int, 0, len(key.Data.Keys))
+	for versionText := range key.Data.Keys {
+		version, err := strconv.Atoi(versionText)
+		if err != nil || version < 1 {
+			return fmt.Errorf("transit key %q has a key version %q", key.Data.Name, versionText)
+		}
+		versions = append(versions, version)
+	}
+	sort.Ints(versions)
+
+	for _, version := range versions {
+		entry := key.Data.Keys[strconv.Itoa(version)]
+		raw, err := base64.StdEncoding.DecodeString(entry.PublicKey)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return fmt.Errorf("transit key %q version %d has no base64 32-byte public key", key.Data.Name, version)
+		}
+		created, _, _ := strings.Cut(entry.CreationTime, "T")
+		line := fmt.Sprintf("%s # key %s, OpenBao transit %s v%d", updatesig.EncodePublicKey(raw), updatesig.KeyID(raw), key.Data.Name, version)
+		if created != "" {
+			line += ", created " + created
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	return nil
+}
+
+// loadPrivateKey reads a development PKCS#8 PEM key from keyFile. Errors never
+// quote the key material.
+func loadPrivateKey(keyFile string) (ed25519.PrivateKey, error) {
+	data, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, err
+	}
+	source := keyFile
 
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != "PRIVATE KEY" {
