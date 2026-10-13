@@ -74,6 +74,10 @@ jobs:
         run: just sbom-bin "build/${{ steps.bin.outputs.name }}"
 
       - name: Attest SBOM (sigstore-signed, bound to the binary digest)
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest@v4 # actions/attest-sbom is deprecated; attest takes sbom-path directly
         with:
           subject-path: build/${{ steps.bin.outputs.name }}
@@ -150,19 +154,39 @@ jobs:
         run: scripts/sign-windows.sh build/reagent-windows-amd64 build/frpc-windows-amd64
 
       - name: Publish agent binaries to gs://re-agent
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: scripts/publish.sh
 
       - name: Publish frpc to gs://re-agent/frpc
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: scripts/publish-frpc.sh windows amd64 build/frpc-windows-amd64
 
       - name: Configure Docker auth for Artifact Registry
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: gcloud auth configure-docker europe-docker.pkg.dev --quiet
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
       - name: Build + push multi-arch agent images
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: just push-docker-image
 
       - name: Release reminder
+        # Only a v* tag publishes; a manual run (workflow_dispatch) is a dry run of
+        # gate, builds, GCP login and signing. It builds whatever ref it is run on,
+        # which overwrote the unsigned 1.2.3 objects on 2026-10-13 (main was stale).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           echo "::notice::Version staged UNSIGNED. Promote it manually with: just promote  (signs through OpenBao, then publishes version.txt + availableVersions.json)"
