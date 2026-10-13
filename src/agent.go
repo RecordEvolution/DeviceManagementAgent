@@ -350,7 +350,7 @@ func NewAgent(generalConfig *config.Config) (agent *Agent) {
 			log.Error().Stack().Err(err).Msg("failed to set infinite autoconnect-retries")
 		}
 	} else {
-		// TODO: write implementations for other environments. (issue: https://github.com/RecordEvolution/DeviceManagementAgent/issues/41)
+		// TODO: write implementations for other environments. (issue: https://github.com/IronFlock/device-agent/issues/41)
 		networkInstance = network.NewDummyNetwork()
 	}
 

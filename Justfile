@@ -13,7 +13,7 @@ FRP_ARCH := if arch() == "x86_64" { "amd64" } else if arch() == "aarch64" { "arm
 FRP_CACHE_DIR := ROOT_DIR / ".cache" / "frp"
 FRP_CACHED_BINARY := FRP_CACHE_DIR / ("frpc_" + FRP_VERSION + "_" + FRP_OS + "_" + FRP_ARCH)
 
-AGENT_IMAGE_NAME := "europe-docker.pkg.dev/record-1283/eu.gcr.io/ironflock-agent"
+AGENT_IMAGE_NAME := "europe-docker.pkg.dev/record-1283/eu.gcr.io/device-agent"
 AGENT_IMAGE_VERSION := "v" + `cat src/release/version.txt`
 
 # Release contract — see REDeployments/docs/RELEASE.md. Sole project in this

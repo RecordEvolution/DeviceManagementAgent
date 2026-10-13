@@ -88,7 +88,9 @@ bound to the binary's digest (`actions/attest-sbom`), and then publishes that sa
 `gs://re-agent`. No GHAS required. Verify any published binary with:
 
 ```bash
-gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagementAgent
+gh attestation verify reagent-linux-amd64 --repo IronFlock/device-agent
+# releases up to v1.2.8 were attested before the repo moved from RecordEvolution:
+gh attestation verify reagent-linux-amd64 --owner IronFlock --signer-repo RecordEvolution/DeviceManagementAgent
 ```
 
 Because CI both attests and publishes the same bytes, the attestation matches what ships —

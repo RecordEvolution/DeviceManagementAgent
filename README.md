@@ -197,7 +197,9 @@ This **stages** the version — the binaries and images now exist, but **agents 
 
 Verify a published binary's provenance any time with:
 ```Shell
-gh attestation verify reagent-linux-amd64 --repo RecordEvolution/DeviceManagementAgent
+gh attestation verify reagent-linux-amd64 --repo IronFlock/device-agent
+# releases up to v1.2.8 were attested before the repo moved from RecordEvolution:
+gh attestation verify reagent-linux-amd64 --owner IronFlock --signer-repo RecordEvolution/DeviceManagementAgent
 ```
 
 ### Promote a version (manual release)
@@ -275,16 +277,17 @@ The release workflow authenticates to Google Cloud **keylessly** via Workload Id
 PROJECT=record-1283
 POOL=github-pool
 PROVIDER=github-provider
-REPO=RecordEvolution/DeviceManagementAgent
+REPO=IronFlock/device-agent
+REPO_ID=$(gh api repos/${REPO} --jq .id)   # 314514906 — immutable, survives renames and transfers
 SA=reagent-release@${PROJECT}.iam.gserviceaccount.com
 
-# 1. Workload Identity Pool + GitHub OIDC provider (locked to this repo)
+# 1. Workload Identity Pool + GitHub OIDC provider (locked to this repo by its numeric id)
 gcloud iam workload-identity-pools create $POOL --project=$PROJECT --location=global --display-name="GitHub Actions"
 gcloud iam workload-identity-pools providers create-oidc $PROVIDER \
   --project=$PROJECT --location=global --workload-identity-pool=$POOL \
   --display-name="GitHub" --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='${REPO}'"
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_id=assertion.repository_id" \
+  --attribute-condition="assertion.repository_id=='${REPO_ID}'"
 
 # 2. Service account with publish permissions
 gcloud iam service-accounts create reagent-release --project=$PROJECT --display-name="reagent release"
@@ -295,10 +298,10 @@ gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:${SA}" 
 PROJNUM=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
 gcloud iam service-accounts add-iam-policy-binding $SA --project=$PROJECT \
   --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJNUM}/locations/global/workloadIdentityPools/${POOL}/attribute.repository/${REPO}"
+  --member="principalSet://iam.googleapis.com/projects/${PROJNUM}/locations/global/workloadIdentityPools/${POOL}/attribute.repository_id/${REPO_ID}"
 ```
 
-Then add two **repository variables** (Settings → Secrets and variables → Actions → Variables):
+Then add two **organization variables** in `IronFlock` (Settings → Secrets and variables → Actions → Variables; the provider condition limits them to this repo anyway):
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER` = `projects/<projNum>/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
 - `GCP_SERVICE_ACCOUNT` = `reagent-release@record-1283.iam.gserviceaccount.com`
