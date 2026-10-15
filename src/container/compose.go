@@ -32,7 +32,10 @@ type Compose struct {
 	config    *config.Config
 	// binary is the CLI to invoke; empty means "docker". Swappable so tests can
 	// exercise the output/exit-code plumbing without a daemon.
-	binary                string
+	binary string
+	// paths rewrites Windows mount sources for a Linux engine outside Docker
+	// Desktop (engine_paths.go); nil, as in tests, leaves compose files as they are.
+	paths                 *enginePaths
 	logStreamMap          map[string]*ComposeLog
 	composeProcessesMap   map[string]context.CancelFunc
 	composeProcessesMutex sync.Mutex
@@ -336,7 +339,7 @@ func composeFileArgs(dockerComposePath string) []string {
 
 func (c *Compose) startComposeCommand(ctx context.Context, dockerComposePath string, streamed bool, providedArgs ...string) (chan string, *ComposeCmd, error) {
 	finalArgs := []string{"compose"}
-	finalArgs = append(finalArgs, composeFileArgs(dockerComposePath)...)
+	finalArgs = append(finalArgs, composeFileArgs(c.engineComposeFile(ctx, dockerComposePath))...)
 	finalArgs = append(finalArgs, providedArgs...)
 
 	binary := c.binary

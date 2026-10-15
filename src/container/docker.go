@@ -17,6 +17,7 @@ import (
 	"reagent/config"
 	"reagent/errdefs"
 	"reagent/safe"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ type Docker struct {
 	client         *client.Client
 	config         *config.Config
 	compose        *Compose
+	paths          *enginePaths
 	activeStreams  map[string]*DockerStream
 	streamMapMutex sync.Mutex
 }
@@ -59,8 +61,10 @@ func NewDocker(config *config.Config) (*Docker, error) {
 		return nil, err
 	}
 
+	paths := newEnginePaths(runtime.GOOS, client.Info)
 	compose := NewCompose(config)
-	return &Docker{client: client, config: config, activeStreams: activeBuilds, compose: compose}, nil
+	compose.paths = paths
+	return &Docker{client: client, config: config, activeStreams: activeBuilds, compose: compose, paths: paths}, nil
 }
 
 // For now stick only with Docker as implementation
@@ -860,6 +864,11 @@ func (docker *Docker) CreateContainer(ctx context.Context,
 	hConfig container.HostConfig,
 	nConfig network.NetworkingConfig,
 	containerName string) (string, error) {
+
+	// A Linux engine outside Docker Desktop cannot open Windows paths (engine_paths.go).
+	if docker.paths.wslDriveMounts(ctx) {
+		hConfig.Mounts = wslDriveMountsFor(hConfig.Mounts)
+	}
 
 	resp, err := docker.client.ContainerCreate(ctx, &cConfig, &hConfig, &nConfig, nil, containerName)
 	if err != nil {
