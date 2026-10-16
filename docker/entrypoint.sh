@@ -35,7 +35,7 @@ else
     AGENT_SECRET="${AGENT_SECRET:?AGENT_SECRET is required: the secret stored for this device in device.t_device.secret}"
     AGENT_SERIAL_NUMBER="${AGENT_SERIAL_NUMBER:-00000000-0000-0000-0000-000000000001}"
     AGENT_DEVICE_ENDPOINT_URL="${AGENT_DEVICE_ENDPOINT_URL:-ws://ironflock_router:8080/ws-re-dev}"
-    AGENT_DOCKER_REGISTRY_URL="${AGENT_DOCKER_REGISTRY_URL:-appstore-registry:5000/}"
+    AGENT_DOCKER_REGISTRY_URL="${AGENT_DOCKER_REGISTRY_URL:-app-registry:5000/}"
     AGENT_DOCKER_MAIN_REPOSITORY="${AGENT_DOCKER_MAIN_REPOSITORY:-apps/}"
 
     # Wifi (password / wlanssid) is intentionally left unset — the

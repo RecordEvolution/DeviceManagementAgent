@@ -9,18 +9,18 @@
 #     (from the agent's device.flock, plus $ExtraInsecureRegistries below)
 #     (proxy and corporate CAs for the engine are set up by setup-docker-wsl.ps1)
 #   - the cifs kernel module is loaded now and at every boot, so apps can use SMB volumes
-#   - a Windows docker.exe CLI is placed in C:\WSL-Setup\bin and added to the machine PATH
-#   - the Docker Compose plugin is installed to C:\Program Files\Docker\cli-plugins
 #   - the agent service gets DOCKER_HOST, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH and PATH in
 #     its own service environment (not machine-wide) and is restarted when that changed
+# It downloads nothing: the docker.exe CLI and the Compose plugin come from
+# setup-docker-wsl.ps1, which must have run first.
 #
 # Refuses to run while Docker Desktop is installed: the agent's apps live in Docker
 # Desktop's engine, and switching the agent to the WSL engine would start them twice.
 #
-# Run from the same SYSTEM/admin shell after setup-docker-wsl.ps1 succeeded:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\Windows\Temp\connect-agent-to-wsl-docker.ps1
-# or paste the whole file. Safe to re-run: existing certificates are kept, and Docker and
-# the agent are only restarted when their configuration actually changed.
+# Run as SYSTEM (IronFlock device terminal) or in an administrator PowerShell:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\IronFlock-Setup\connect-agent-to-wsl-docker.ps1
+# Safe to re-run: existing certificates are kept, and Docker and the agent are only
+# restarted when their configuration actually changed.
 #
 # Re-run it after every 'reagent.exe service install': the install recreates the service
 # and, with a proxy, overwrites its environment.
@@ -58,6 +58,11 @@ if ((Test-Path (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'))
     throw 'Docker Desktop is installed. Uninstall it first: the agent''s apps run in its engine and would be started a second time in the WSL engine (duplicate apps, port conflicts).'
 }
 if (-not (Test-Path $Helper)) { throw 'C:\WSL-Setup\run-as-wsl-user.ps1 not found - run setup-docker-wsl.ps1 first' }
+$docker  = Join-Path $BinDir 'docker.exe'
+$compose = Join-Path $PluginDir 'docker-compose.exe'
+foreach ($f in $docker, $compose) {
+    if (-not (Test-Path $f)) { throw "$f not found - run setup-docker-wsl.ps1 first" }
+}
 
 # Same normalization as the agent: no scheme, no path, lower case.
 function Get-RegistryHost([string]$Entry) {
@@ -74,7 +79,7 @@ function Get-ServiceArg([string]$CommandLine, [string]$Name) {
     return $null
 }
 
-Write-Host "`n== 1/6  Agent service and registries" -ForegroundColor Cyan
+Write-Host "`n== 1/5  Agent service and registries" -ForegroundColor Cyan
 $svc = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
 $AgentExe   = $null
 $FlockPath  = $null
@@ -103,7 +108,9 @@ if ($FlockPath -and (Test-Path $FlockPath)) {
         # a JSON-array string on backend-issued flocks, a bare host:port/ on appliance ones
         $listed = "$($flock.'insecure-registries')".Trim()
         if ($listed) {
-            try { $candidates += @($listed | ConvertFrom-Json) } catch { $candidates += $listed }
+            # Windows PowerShell hands a parsed JSON array down the pipeline as ONE object, so
+            # foreach takes it apart; a bare host:port/ is no JSON and stays whole
+            try { foreach ($entry in ($listed | ConvertFrom-Json)) { $candidates += "$entry" } } catch { $candidates += $listed }
         }
         # an explicit port marks the appliance's plain-HTTP registry (same rule as the agent)
         $registryHost = Get-RegistryHost "$($flock.docker_registry_url)"
@@ -115,6 +122,8 @@ if ($FlockPath -and (Test-Path $FlockPath)) {
 $registries = New-Object System.Collections.Generic.List[string]
 foreach ($c in $candidates) {
     $h = Get-RegistryHost "$c"
+    # dockerd refuses to start at all with an entry it cannot parse
+    if ($h -and $h -notmatch '^[a-z0-9._-]+(:\d+)?$') { Write-Warning "skipping registry entry '$h' - not a host[:port]"; continue }
     if ($h -and -not $registries.Contains($h)) { $registries.Add($h) }
 }
 if ($registries.Count) {
@@ -123,22 +132,7 @@ if ($registries.Count) {
     Write-Host '   no plain-HTTP registry needed (cloud / HTTPS registry)'
 }
 
-# The downloads below go through the proxy 'reagent.exe service install' put on the
-# service (the engine's own proxy comes from setup-docker-wsl.ps1). Never printed: the
-# value may hold credentials.
-$web = @{ UseBasicParsing = $true }
-$webProxy = $null
-foreach ($entry in $ServiceEnv) {
-    $name, $value = $entry -split '=', 2
-    if ($value -and ($name -eq 'HTTPS_PROXY' -or ($name -eq 'HTTP_PROXY' -and -not $webProxy))) { $webProxy = $value }
-}
-if ($webProxy) {
-    if ($webProxy -notmatch '^\w+://') { $webProxy = "http://$webProxy" }
-    $web.Proxy = $webProxy
-    Write-Host '   downloads use the agent service''s proxy'
-}
-
-Write-Host "`n== 2/6  WSL engine: certificates, TLS listener, registries, SMB" -ForegroundColor Cyan
+Write-Host "`n== 2/5  WSL engine: certificates, TLS listener, registries, SMB" -ForegroundColor Cyan
 $daemonB64 = ''
 if ($registries.Count) {
     $lines = @((& $Helper -Bash @'
@@ -155,12 +149,16 @@ echo "@@END@@"
     if ($currentB64) { $currentJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentB64)).TrimStart([char]0xFEFF) }
     try {
         $cfg = if ($currentJson.Trim()) { $currentJson | ConvertFrom-Json } else { New-Object PSObject }
-        $existing = @($cfg.'insecure-registries' | Where-Object { $_ })
-        $missing  = @($registries | Where-Object { $existing -notcontains $_ })
-        if ($missing.Count) {
+        # an entry with whitespace (e.g. two names joined into one) keeps dockerd from starting
+        $listedNow = @($cfg.'insecure-registries' | Where-Object { $_ })
+        $existing  = @($listedNow | Where-Object { "$_" -notmatch '\s' })
+        $invalid   = @($listedNow | Where-Object { "$_" -match '\s' })
+        $missing   = @($registries | Where-Object { $existing -notcontains $_ })
+        if ($missing.Count -or $invalid.Count) {
             $cfg | Add-Member -NotePropertyName 'insecure-registries' -NotePropertyValue ([string[]]($existing + $missing)) -Force
             $daemonB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cfg | ConvertTo-Json -Depth 20)))
-            Write-Host "   adding to daemon.json: $($missing -join ', ')"
+            if ($invalid.Count) { Write-Host "   removing invalid daemon.json entries: $($invalid -join ' | ')" }
+            if ($missing.Count) { Write-Host "   adding to daemon.json: $($missing -join ', ')" }
         } else {
             Write-Host '   daemon.json already lists them'
         }
@@ -208,8 +206,13 @@ else
   CHANGED=1
 fi
 
+# What docker ran with before this run - put back if it does not start with the new settings.
+D=/etc/docker/daemon.json
+O=/etc/systemd/system/docker.service.d/override.conf
+for f in "$D" "$O"; do rm -f "$f.before"; [ ! -f "$f" ] || cp -p "$f" "$f.before"; done
+
 # insecure registries, merged on the Windows side
-put /etc/docker/daemon.json '@@DAEMON_JSON_B64@@'
+put "$D" '@@DAEMON_JSON_B64@@'
 
 # SMB volumes: the WSL kernel ships cifs as a module - load it now and at every boot
 echo cifs > /etc/modules-load.d/cifs.conf
@@ -220,7 +223,6 @@ else
 fi
 
 # keep the distro's own ExecStart and add the TLS listener to it
-O=/etc/systemd/system/docker.service.d/override.conf
 BASE=$(systemctl cat docker | grep -m1 '^ExecStart=/' | cut -d= -f2-)
 [ -n "$BASE" ] || { echo "ERROR: could not read ExecStart of docker.service - override not written"; exit 1; }
 mkdir -p "$(dirname "$O")"
@@ -240,53 +242,34 @@ fi
 # only bounce docker when something changed - a restart restarts every running app
 if [ "$CHANGED" = 1 ] || ! systemctl is-active --quiet docker; then
   systemctl daemon-reload
-  systemctl restart docker
-  sleep 2
-  echo "docker restarted: $(systemctl is-active docker)"
+  systemctl reset-failed docker 2>/dev/null || true
+  if systemctl restart docker && sleep 3 && systemctl is-active --quiet docker; then
+    echo "docker restarted: active"
+  else
+    echo "ERROR: docker does not start with the new settings:"
+    journalctl -u docker --no-pager -n 6 -o cat | grep -i -E 'error|fail' | head -3 || true
+    for f in "$D" "$O"; do if [ -f "$f.before" ]; then mv -f "$f.before" "$f"; else rm -f "$f"; fi; done
+    systemctl daemon-reload
+    systemctl reset-failed docker 2>/dev/null || true
+    systemctl restart docker || true
+    echo "previous settings restored, docker: $(systemctl is-active docker)"
+    exit 1
+  fi
 else
   echo "docker configuration unchanged - not restarted"
 fi
+rm -f "$D.before" "$O.before"
 ss -lnt | grep ':2376' || echo "WARNING: nothing listening on 2376 inside WSL"
 '@
 $bash = $bash.Replace('@@DAEMON_JSON_B64@@', $daemonB64)
 $out = & $Helper -Bash $bash
 $out | ForEach-Object { Write-Host "   $_" }
+if (@($out | ForEach-Object { "$_".Trim() }) -match '^ERROR:') { throw 'Docker in WSL was not changed successfully - see the ERROR above. The agent was not touched.' }
 if (-not (Test-Path (Join-Path $CertDir 'key.pem'))) { throw "Client certificates missing in $CertDir - see output above" }
 
-Write-Host "`n== 3/6  Windows docker.exe CLI" -ForegroundColor Cyan
-$docker = Join-Path $BinDir 'docker.exe'
-if (Test-Path $docker) {
-    Write-Host '   already present'
-} else {
-    try {
-        $base = 'https://download.docker.com/win/static/stable/x86_64/'
-        $zip  = (Invoke-WebRequest $base @web).Links.href |
-                Where-Object { $_ -match '^docker-\d+\.\d+\.\d+\.zip$' } |
-                Sort-Object { [version]($_ -replace '^docker-|\.zip$', '') } |
-                Select-Object -Last 1
-        $tmp = Join-Path $env:TEMP 'docker-cli'
-        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $tmp, $BinDir -Force | Out-Null
-        Invoke-WebRequest ($base + $zip) -OutFile "$tmp\docker.zip" @web
-        Expand-Archive "$tmp\docker.zip" -DestinationPath $tmp
-        Copy-Item "$tmp\docker\docker.exe" $docker
-        Remove-Item $tmp -Recurse -Force
-        Write-Host "   $zip -> $docker"
-    } catch {
-        Write-Warning "Could not download the Windows Docker CLI: $($_.Exception.Message)"
-    }
-}
-
-# The agent runs 'docker' / 'docker compose' by name. Edit the raw value so %SystemRoot%-style
-# entries stay unexpanded (REG_EXPAND_SZ).
-$envKey  = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
-$rawPath = (Get-Item $envKey).GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-if (@($rawPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $BinDir) {
-    Set-ItemProperty -Path $envKey -Name Path -Value ($rawPath.TrimEnd(';') + ';' + $BinDir) -Type ExpandString
-    Write-Host "   added $BinDir to the machine PATH"
-} else {
-    Write-Host "   $BinDir already on the machine PATH"
-}
+Write-Host "`n== 3/5  Windows Docker CLI (installed by setup-docker-wsl.ps1)" -ForegroundColor Cyan
+Write-Host "   $docker"
+Write-Host "   $compose"
 if (@($env:Path -split ';') -notcontains $BinDir) { $env:Path = "$env:Path;$BinDir" }
 
 # The agent logs in with 'docker login' as SYSTEM. A credsStore left behind by Docker Desktop
@@ -307,30 +290,7 @@ if (Test-Path $sysDockerCfg) {
     }
 }
 
-Write-Host "`n== 4/6  Docker Compose plugin" -ForegroundColor Cyan
-$compose = Join-Path $PluginDir 'docker-compose.exe'
-if (Test-Path $compose) {
-    Write-Host '   already present'
-} else {
-    try {
-        $url = 'https://github.com/docker/compose/releases/latest/download/docker-compose-windows-x86_64.exe'
-        $tmp = Join-Path $env:TEMP 'docker-compose'
-        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $tmp, $PluginDir -Force | Out-Null
-        Invoke-WebRequest $url -OutFile "$tmp\docker-compose.exe" @web
-        Invoke-WebRequest "$url.sha256" -OutFile "$tmp\docker-compose.exe.sha256" @web
-        $expected = ((Get-Content "$tmp\docker-compose.exe.sha256" -Raw).Trim() -split '\s+')[0]
-        $actual   = (Get-FileHash "$tmp\docker-compose.exe" -Algorithm SHA256).Hash
-        if ($expected -ne $actual) { throw "checksum mismatch (expected $expected, got $actual)" }
-        Copy-Item "$tmp\docker-compose.exe" $compose
-        Remove-Item $tmp -Recurse -Force
-        Write-Host "   docker-compose.exe -> $compose"
-    } catch {
-        Write-Warning "Could not install the Docker Compose plugin: $($_.Exception.Message)"
-    }
-}
-
-Write-Host "`n== 5/6  Test from Windows" -ForegroundColor Cyan
+Write-Host "`n== 4/5  Test from Windows" -ForegroundColor Cyan
 Start-Sleep -Seconds 3
 if (-not (Test-NetConnection 127.0.0.1 -Port 2376 -WarningAction SilentlyContinue).TcpTestSucceeded) {
     Write-Warning '127.0.0.1:2376 does not answer on the Windows side. WSL localhost forwarding is not active for this VM.'
@@ -356,7 +316,7 @@ if (Test-Path $docker) {
     }
 }
 
-Write-Host "`n== 6/6  Agent service environment" -ForegroundColor Cyan
+Write-Host "`n== 5/5  Agent service environment" -ForegroundColor Cyan
 if (-not $svc) {
     Write-Host '   agent service not installed yet - re-run this script after "reagent.exe service install"'
     return

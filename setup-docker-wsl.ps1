@@ -1,27 +1,35 @@
 # setup-docker-wsl.ps1
 #
-# Installs Docker Engine inside WSL2 (Ubuntu 24.04) so that it starts at boot
-# without anyone logging in. Built to run from a SYSTEM shell (remote agent),
-# where wsl.exe itself refuses to run: all WSL steps are executed as a local
-# service account through Scheduled Tasks, and their output is shown here.
+# Installs Docker Engine inside WSL2 (Ubuntu 24.04) so that it starts at boot without anyone
+# logging in, plus the Windows docker.exe CLI and Compose plugin. All WSL steps run as a
+# local service account through Scheduled Tasks (wsl.exe refuses to run as SYSTEM); their
+# output is shown here.
 #
-# Corporate networks:
-#   - proxy: set $Proxy below, or install the IronFlock agent with its proxy first - the
-#     agent service's HTTP_PROXY/HTTPS_PROXY/NO_PROXY are then used for the downloads,
-#     apt and Docker itself
-#   - certificates: Windows' trusted root certificates are imported into Ubuntu, so
-#     corporate CAs (TLS-inspecting proxies, appliance registries) work for apt, curl and
-#     image pulls. Re-run after the Windows certificate store or the proxy changed.
+# Two runs, because corporate proxies often let only a signed-in person download:
 #
-# Refuses to run while Docker Desktop is installed: this would be a second engine next to it.
+#   1. Download, in a NORMAL PowerShell window of the person whose login the proxy accepts:
+#        powershell -NoProfile -ExecutionPolicy Bypass -File C:\IronFlock-Setup\setup-docker-wsl.ps1 -DownloadOnly
+#      Fetches every file listed in $Files into C:\IronFlock-Setup\downloads, sending that
+#      person's Windows login to the proxy, and checks each against its pinned SHA-256.
 #
-# Run (64-bit PowerShell, as SYSTEM or admin):
-#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\Windows\Temp\setup-docker-wsl.ps1
-# or paste the whole file into the shell. Then run connect-agent-to-wsl-docker.ps1.
+#   2. Install, in an ADMINISTRATOR PowerShell (or as SYSTEM):
+#        powershell -NoProfile -ExecutionPolicy Bypass -File C:\IronFlock-Setup\setup-docker-wsl.ps1
+#      Works only from those files, re-checked against the same hashes - nothing is
+#      downloaded. Docker's packages are installed into Ubuntu with dpkg.
+#
+# Corporate certificates: Windows' trusted root certificates are imported into Ubuntu, so
+# corporate CAs (TLS-inspecting proxies, appliance registries) work for image pulls. The
+# agent's proxy (HTTP_PROXY/HTTPS_PROXY/NO_PROXY of the reagent service) is set on dockerd.
+# Re-run the install after the Windows certificate store or the proxy changed.
+#
+# Refuses to install while Docker Desktop is installed: this would be a second engine next to it.
+# Then run connect-agent-to-wsl-docker.ps1 to connect the IronFlock agent.
 #
 # Safe to re-run: finished steps are skipped, and WSL and Docker are only restarted when
-# their configuration changed. The service account password is rotated and both tasks
-# are updated with it. Logs: C:\WSL-Setup\*.log
+# their configuration changed. The service account password is rotated and both tasks are
+# updated with it. Logs: C:\WSL-Setup\*.log
+
+param([switch]$DownloadOnly)
 
 & {
 $ErrorActionPreference = 'Stop'
@@ -30,28 +38,58 @@ try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ---- settings ---------------------------------------------------------------
-$User    = 'wsldocker'                 # local service account that owns the distro
-$Dir     = 'C:\WSL-Setup'              # helper scripts + logs (admins only)
-$VmDir   = 'C:\WSL\Ubuntu-24.04'       # virtual disk of the distro
-$ImgUrl  = 'https://releases.ubuntu.com/24.04.5/ubuntu-24.04.5-wsl-amd64.wsl'
-$ImgSha  = 'bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e'
-$MinWsl  = [version]'2.5.0'
-$Proxy   = ''                          # e.g. 'http://proxy.example.com:8080'; empty = the agent's proxy, if any
-$NoProxy = ''                          # with $Proxy: hosts that bypass it, e.g. 'localhost,127.0.0.1,.corp.example.com'
-$AllowDockerDesktop = $false           # continue although Docker Desktop is installed
-$Helper  = Join-Path $Dir 'run-as-wsl-user.ps1'
-$WslExe  = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
+$User      = 'wsldocker'                     # local service account that owns the distro
+$Dir       = 'C:\WSL-Setup'                  # helper scripts + logs (admins only)
+$VmDir     = 'C:\WSL\Ubuntu-24.04'           # virtual disk of the distro
+$Downloads = 'C:\IronFlock-Setup\downloads'  # filled by -DownloadOnly
+$MinWsl    = [version]'2.5.0'
+$Proxy     = ''                              # e.g. 'http://proxy.example.com:8080'; empty = the agent's proxy, if any
+$NoProxy   = ''                              # with $Proxy: hosts that bypass it, e.g. 'localhost,127.0.0.1,.corp.example.com'
+$AllowDockerDesktop = $false                 # continue although Docker Desktop is installed
+$Helper    = Join-Path $Dir 'run-as-wsl-user.ps1'
+$WslExe    = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
 # -----------------------------------------------------------------------------
+
+# Everything the installation needs, pinned by SHA-256 (from Ubuntu's and Docker's signed
+# package indexes and Docker Compose's release checksums). The Ubuntu image lacks only
+# iptables/nftables and their six libraries among Docker Engine's dependencies.
+$Files = @(
+    @{ Name = 'ubuntu-24.04.5-wsl-amd64.wsl'; Sha256 = 'bb415d824822c4b878125729af451a5d18fb13d1cf5cbed9a7393ad64ac6039e'
+       Url = 'https://releases.ubuntu.com/24.04.5/ubuntu-24.04.5-wsl-amd64.wsl' }
+    @{ Name = 'libip4tc2_1.8.10-3ubuntu2_amd64.deb'; Sha256 = 'eb381f8ff0469534df3f1b146c3eb8baa6e36f8cfcdf2e3e039398322930d0a4'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/i/iptables/libip4tc2_1.8.10-3ubuntu2_amd64.deb' }
+    @{ Name = 'libip6tc2_1.8.10-3ubuntu2_amd64.deb'; Sha256 = 'b98b88eb6aa14a902ea1aebc3b12ddd140572545ae1fc6428cb0868c31671d05'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/i/iptables/libip6tc2_1.8.10-3ubuntu2_amd64.deb' }
+    @{ Name = 'libnfnetlink0_1.0.2-2build1_amd64.deb'; Sha256 = 'f557a287af2ca00df5dbf632c6b77d77479139ffb51c83e3de9766eb609b5d63'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/libn/libnfnetlink/libnfnetlink0_1.0.2-2build1_amd64.deb' }
+    @{ Name = 'libnetfilter-conntrack3_1.0.9-6build1_amd64.deb'; Sha256 = '6d32a4c4618eb7d6c0d989591d28637a9acdfa86dfe22e42e9ac9cc25d882a97'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/libn/libnetfilter-conntrack/libnetfilter-conntrack3_1.0.9-6build1_amd64.deb' }
+    @{ Name = 'libnftnl11_1.2.6-2build1_amd64.deb'; Sha256 = 'e5bde5c9cbb95082700011f0b7ef2c0a41900b0a9fd7434f6e90448e2a7b4e50'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/libn/libnftnl/libnftnl11_1.2.6-2build1_amd64.deb' }
+    @{ Name = 'iptables_1.8.10-3ubuntu2_amd64.deb'; Sha256 = 'd341e8ffc42ca035f5aa0fd9a798c8d2b2edb019225dc11f4dac16edf9c57840'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/i/iptables/iptables_1.8.10-3ubuntu2_amd64.deb' }
+    @{ Name = 'libnftables1_1.0.9-1ubuntu0.1_amd64.deb'; Sha256 = 'fcaee001747a6adaa0cd9337fef437b3aa7a7a6d5246b62fbd4784d3d6a5009e'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/n/nftables/libnftables1_1.0.9-1ubuntu0.1_amd64.deb' }
+    @{ Name = 'nftables_1.0.9-1ubuntu0.1_amd64.deb'; Sha256 = 'd648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e'
+       Url = 'http://archive.ubuntu.com/ubuntu/pool/main/n/nftables/nftables_1.0.9-1ubuntu0.1_amd64.deb' }
+    @{ Name = 'containerd.io_2.4.2-2~ubuntu.24.04~noble_amd64.deb'; Sha256 = '7327ab23182425e94b46a91567e9ddf0183f9b3a5ed53d5e2489f000dbf9cfe2'
+       Url = 'https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/containerd.io_2.4.2-2~ubuntu.24.04~noble_amd64.deb' }
+    @{ Name = 'docker-ce-cli_29.9.1-1~ubuntu.24.04~noble_amd64.deb'; Sha256 = '961968342af4738eb5fb5fc03f9834106c1e454bd010d574cf1a6feae9905efc'
+       Url = 'https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/docker-ce-cli_29.9.1-1~ubuntu.24.04~noble_amd64.deb' }
+    @{ Name = 'docker-ce_29.9.1-1~ubuntu.24.04~noble_amd64.deb'; Sha256 = '463a666215797c9f9ea7d0ad1751de5b2b3806a1b539a3550e16822ef34ccbfd'
+       Url = 'https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/docker-ce_29.9.1-1~ubuntu.24.04~noble_amd64.deb' }
+    @{ Name = 'docker-buildx-plugin_0.38.0-1~ubuntu.24.04~noble_amd64.deb'; Sha256 = '7094f8b50bc6b239292d475620424a531f7fa0763e466c52ffc3a4037e72bfc5'
+       Url = 'https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/docker-buildx-plugin_0.38.0-1~ubuntu.24.04~noble_amd64.deb' }
+    @{ Name = 'docker-compose-plugin_5.6.0-1~ubuntu.24.04~noble_amd64.deb'; Sha256 = '132266d499d9873aafcbe5b515997b8abd714914fa32a62ccac705c1ede7ca81'
+       Url = 'https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/docker-compose-plugin_5.6.0-1~ubuntu.24.04~noble_amd64.deb' }
+    @{ Name = 'docker-29.9.1.zip'; Sha256 = '5d9b66509390553fd97d590ec2ff0ce10b04c2ac653fa52f2abf2f05c4c197ca'
+       Url = 'https://download.docker.com/win/static/stable/x86_64/docker-29.9.1.zip' }
+    @{ Name = 'docker-compose-windows-x86_64.exe'; Sha256 = '8aeaa0055e660e12cf07cd70680dc8333957fe6718528b91ec3da084eab62483'
+       Url = 'https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-windows-x86_64.exe' }
+)
 
 function Step($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
 function Show($lines) { $lines | ForEach-Object { Write-Host "   $_" } }
-
-if (-not [Environment]::Is64BitProcess) {
-    throw 'This is 32-bit PowerShell. Start C:\Windows\SysNative\WindowsPowerShell\v1.0\powershell.exe and run the script there.'
-}
-if ((Test-Path (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')) -and -not $AllowDockerDesktop) {
-    throw 'Docker Desktop is installed. Uninstall it first: this would be a second Docker engine next to it, and the agent''s apps run in Docker Desktop''s.'
-}
 
 # Proxy: $Proxy above, else what 'reagent.exe service install' put on the agent service.
 # Values may hold credentials - they are never printed.
@@ -75,14 +113,58 @@ function Get-ProxyUrl([string]$Value) {
 }
 $httpProxy  = Get-ProxyUrl $(if ($proxyVars['HTTP_PROXY'])  { $proxyVars['HTTP_PROXY'] }  else { $proxyVars['HTTPS_PROXY'] })
 $httpsProxy = Get-ProxyUrl $(if ($proxyVars['HTTPS_PROXY']) { $proxyVars['HTTPS_PROXY'] } else { $proxyVars['HTTP_PROXY'] })
-$web = @{ UseBasicParsing = $true }
-if ($httpsProxy) { $web.Proxy = $httpsProxy }
 
-# HTTP status of a HEAD request (through the proxy, if any); 0 when nothing answered. Only a
-# 2xx/3xx proves the site itself answered: 407 and 403 usually come from the proxy.
-function Get-UrlStatus([string]$Url) {
-    try { return [int](Invoke-WebRequest $Url -Method Head -TimeoutSec 20 @web).StatusCode }
-    catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } return 0 }
+function Test-Download($file) {
+    $path = Join-Path $Downloads $file.Name
+    return (Test-Path $path) -and ((Get-FileHash $path -Algorithm SHA256).Hash -eq $file.Sha256)
+}
+
+# =============================================================================
+if ($DownloadOnly) {
+    Write-Host "`n== Download into $Downloads" -ForegroundColor Cyan
+    if (-not (Test-Path $Downloads)) { throw "$Downloads does not exist - it is prepared together with this script." }
+    if ($httpsProxy) {
+        Write-Host "   proxy from ${proxySource}, with your Windows login"
+    } else {
+        Write-Host '   Windows proxy settings, with your Windows login'
+        [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials
+    }
+    $failed = 0
+    foreach ($file in $Files) {
+        if (Test-Download $file) { Write-Host "   ok          $($file.Name)"; continue }
+        $target = Join-Path $Downloads $file.Name
+        $part   = "$target.part"
+        try {
+            $req = @{ Uri = $file.Url; OutFile = $part; UseBasicParsing = $true }
+            $via = if ($file.Url -like 'https:*') { $httpsProxy } else { $httpProxy }
+            if ($via) { $req.Proxy = $via; $req.ProxyUseDefaultCredentials = $true }
+            Invoke-WebRequest @req
+            if ((Get-FileHash $part -Algorithm SHA256).Hash -ne $file.Sha256) { throw 'checksum does not match - file discarded' }
+            Move-Item $part $target -Force
+            Write-Host "   downloaded  $($file.Name)"
+        } catch {
+            Remove-Item $part -Force -ErrorAction SilentlyContinue
+            Write-Warning "$($file.Name): $($_.Exception.Message)"
+            $failed++
+        }
+    }
+    if ($failed) {
+        Write-Warning "$failed of $($Files.Count) files are missing. An error with (407) means the proxy did not accept this window's login: use a normal (not administrator) window of your own account. Running this again keeps what is already there."
+    } else {
+        Write-Host "`nAll $($Files.Count) files are downloaded and checked." -ForegroundColor Green
+    }
+    return
+}
+
+# =============================================================================
+if (-not [Environment]::Is64BitProcess) {
+    throw 'This is 32-bit PowerShell. Start C:\Windows\SysNative\WindowsPowerShell\v1.0\powershell.exe and run the script there.'
+}
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'The installation needs an administrator PowerShell (the download step does not).'
+}
+if ((Test-Path (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')) -and -not $AllowDockerDesktop) {
+    throw 'Docker Desktop is installed. Uninstall it first: this would be a second Docker engine next to it, and the agent''s apps run in Docker Desktop''s.'
 }
 
 # An appliance registry sits on the LAN, which the proxy cannot reach. Docker gets it on
@@ -113,34 +195,20 @@ if ($httpsProxy) {
 }
 
 # -----------------------------------------------------------------------------
-Step '1/8  Network'
+Step '1/9  Downloaded files'
+$missing = @($Files | Where-Object { -not (Test-Download $_) } | ForEach-Object { $_.Name })
+if ($missing.Count) {
+    $missing | ForEach-Object { Write-Warning "missing or changed: $_" }
+    throw "Run the download step first: setup-docker-wsl.ps1 -DownloadOnly, in a normal window of the person whose login the proxy accepts."
+}
+Write-Host "   all $($Files.Count) files present, checksums ok"
 if ($httpsProxy) {
-    Write-Host "   proxy from ${proxySource}: $($proxyVars.Keys -join ', ') (values not shown)"
+    Write-Host "   proxy for Docker from ${proxySource}: $($proxyVars.Keys -join ', ') (values not shown)"
     if ($directRegistry) { Write-Host "   registry $directRegistry answers directly - Docker reaches it without the proxy" }
-} else {
-    Write-Host '   no proxy (set $Proxy at the top if this site needs one)'
 }
-$required = @('http://archive.ubuntu.com/ubuntu/', 'http://security.ubuntu.com/ubuntu/', 'https://download.docker.com/linux/ubuntu/gpg')
-if (-not (Test-Path (Join-Path $VmDir 'ext4.vhdx'))) { $required += $ImgUrl }
-$blocked = @(foreach ($u in $required) {
-    $s = Get-UrlStatus $u
-    if ($s -lt 200 -or $s -ge 400) { "$u ($(if ($s) { "HTTP $s" } else { 'no answer' }))" }
-})
-if ($blocked.Count) {
-    $blocked | ForEach-Object { Write-Warning "Not reachable: $_" }
-    Write-Warning 'HTTP 407: the proxy wants credentials. HTTP 403: blocked by the proxy. No answer: no route - behind a proxy?'
-    Write-Warning 'Set $Proxy at the top of this script, or install the agent with its proxy first.'
-    return
-}
-# Docker Hub answers 401 to an anonymous request - that is the expected "reachable"
-$hub = Get-UrlStatus 'https://registry-1.docker.io/v2/'
-if ($hub -ne 401 -and ($hub -lt 200 -or $hub -ge 400)) {
-    Write-Warning 'Docker Hub is not reachable: fine for apps from your own registry, but Docker Hub images will not pull.'
-}
-Write-Host '   ok'
 
 # -----------------------------------------------------------------------------
-Step '2/8  Windows features'
+Step '2/9  Windows features'
 $reboot = $false
 foreach ($f in 'VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Linux') {
     if ((Get-WindowsOptionalFeature -Online -FeatureName $f).State -ne 'Enabled') {
@@ -156,30 +224,17 @@ if ($reboot) {
 Write-Host '   ok'
 
 # -----------------------------------------------------------------------------
-Step '3/8  WSL version'
+Step '3/9  WSL version'
 New-Item -ItemType Directory -Path $Dir, $VmDir -Force | Out-Null
 $ver = $null
 if (Test-Path $WslExe) { try { $ver = [version](Get-Item $WslExe).VersionInfo.ProductVersion } catch { } }
 if (-not $ver -or $ver -lt $MinWsl) {
-    Write-Host "   installed: $(if ($ver) { $ver } else { 'none / inbox' }) -> installing latest WSL release (x64 MSI)"
-    $rel   = Invoke-RestMethod 'https://api.github.com/repos/microsoft/WSL/releases/latest' @web
-    $asset = $rel.assets | Where-Object { $_.name -like '*x64.msi' } | Select-Object -First 1
-    if (-not $asset) { throw 'No x64 MSI found in the latest WSL release' }
-    $msi = Join-Path $Dir 'wsl.msi'
-    Invoke-WebRequest $asset.browser_download_url -OutFile $msi @web
-    $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait -PassThru
-    Remove-Item $msi -ErrorAction SilentlyContinue
-    if ($proc.ExitCode -eq 3010) {
-        Write-Warning 'WSL updated, reboot required: run Restart-Computer, reconnect, then run this script again.'
-        return
-    }
-    if ($proc.ExitCode -ne 0) { throw "WSL MSI install failed, exit code $($proc.ExitCode)" }
-    $ver = [version](Get-Item $WslExe).VersionInfo.ProductVersion
+    throw "WSL $(if ($ver) { $ver } else { '(inbox or none)' }) is older than $MinWsl. Update WSL (wsl --update, Microsoft Store or IT), then run this script again."
 }
 Write-Host "   WSL $ver"
 
 # -----------------------------------------------------------------------------
-Step '4/8  Service account, folders, runner task'
+Step '4/9  Service account, folders, runner task'
 $chars = [char[]]'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.!'
 $bytes = New-Object byte[] 24
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -243,7 +298,7 @@ $runAct = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfil
 $runSet = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName 'WSL-Runner' -Action $runAct -Settings $runSet `
     -User "$env:COMPUTERNAME\$User" -Password $Plain -RunLevel Highest -Force | Out-Null
-# The boot task needs the rotated password now, not only in step 8: a re-run that fails in
+# The boot task needs the rotated password now, not only in step 9: a re-run that fails in
 # between would otherwise leave it with a stale password and Docker without a start at boot.
 if (Get-ScheduledTask -TaskName 'WSL-Docker-KeepAlive' -ErrorAction SilentlyContinue) {
     Set-ScheduledTask -TaskName 'WSL-Docker-KeepAlive' -User "$env:COMPUTERNAME\$User" -Password $Plain | Out-Null
@@ -251,31 +306,26 @@ if (Get-ScheduledTask -TaskName 'WSL-Docker-KeepAlive' -ErrorAction SilentlyCont
 Write-Host "   account '$User' ready, runner task registered"
 
 # -----------------------------------------------------------------------------
-Step '5/8  Ubuntu 24.04'
+Step '5/9  Ubuntu 24.04'
 if (Test-Path (Join-Path $VmDir 'ext4.vhdx')) {
     Write-Host '   already imported, skipping'
 } else {
-    $img = Join-Path $Dir 'ubuntu-24.04.wsl'
-    if (-not (Test-Path $img) -or (Get-FileHash $img -Algorithm SHA256).Hash -ne $ImgSha) {
-        Write-Host '   downloading image (a few hundred MB)...'
-        Invoke-WebRequest $ImgUrl -OutFile $img @web
-        if ((Get-FileHash $img -Algorithm SHA256).Hash -ne $ImgSha) { throw 'SHA256 mismatch for the Ubuntu image' }
-    }
-    $out = & $Helper -PowerShell @'
-wsl --install --from-file 'C:\WSL-Setup\ubuntu-24.04.wsl' --name Ubuntu-24.04 --location 'C:\WSL\Ubuntu-24.04' --no-launch
+    $img = Join-Path $Downloads 'ubuntu-24.04.5-wsl-amd64.wsl'
+    Write-Host '   importing (a few minutes)...'
+    $out = & $Helper -PowerShell (@'
+wsl --install --from-file '@@IMG@@' --name Ubuntu-24.04 --location 'C:\WSL\Ubuntu-24.04' --no-launch
 if (-not ((wsl -l -q) -match 'Ubuntu-24.04')) {
-    wsl --import Ubuntu-24.04 'C:\WSL\Ubuntu-24.04' 'C:\WSL-Setup\ubuntu-24.04.wsl' --version 2
+    wsl --import Ubuntu-24.04 'C:\WSL\Ubuntu-24.04' '@@IMG@@' --version 2
 }
 wsl -l -v
-'@
+'@).Replace('@@IMG@@', $img)
     $out | Set-Content (Join-Path $Dir 'step5.log')
     Show $out
     if (-not (Test-Path (Join-Path $VmDir 'ext4.vhdx'))) { throw 'Import failed - see output above' }
-    Remove-Item $img -ErrorAction SilentlyContinue
 }
 
 # -----------------------------------------------------------------------------
-Step '6/8  WSL settings: systemd, no Windows interop, idle timeout'
+Step '6/9  WSL settings: systemd, no Windows interop, idle timeout'
 # Interop off: the VM runs as an elevated administrator, so a Windows program started from
 # Linux - e.g. by an app that escaped its container - would run with those rights. Nothing
 # here needs it: Windows starts wsl.exe, never the other way round.
@@ -327,7 +377,7 @@ wsl -d Ubuntu-24.04 -u root -- ps -p 1 -o comm=
 }
 
 # -----------------------------------------------------------------------------
-Step '7/8  Certificates, proxy, Docker Engine (first install takes a few minutes)'
+Step '7/9  Certificates, proxy, Docker Engine'
 # Windows' trusted roots for Ubuntu: covers the corporate CA of a TLS-inspecting proxy and of
 # an appliance registry, the way Docker Desktop would trust them through Windows.
 $trustDir = Join-Path $Dir 'trust'
@@ -342,19 +392,20 @@ foreach ($c in $roots) {
 }
 Write-Host "   $($roots.Count) Windows root certificates exported for Ubuntu"
 
+# dockerd pulls through the proxy (Docker Hub); systemd Environment= values: backslash and
+# double quote escaped, % doubled
 $dockerProxyB64 = ''
-$aptProxyB64    = ''
-$curlProxyB64   = ''
 if ($httpProxy -or $httpsProxy) {
-    # systemd Environment= values: backslash and double quote escaped, % doubled
     $envLines = $proxyVars.Keys | ForEach-Object {
         $v = $proxyVars[$_].Replace('\', '\\').Replace('"', '\"').Replace('%', '%%')
         "Environment=`"$_=$v`""
     }
     $dockerProxyB64 = [Convert]::ToBase64String($utf8.GetBytes("[Service]`n" + ($envLines -join "`n") + "`n"))
-    $aptProxyB64    = [Convert]::ToBase64String($utf8.GetBytes("Acquire::http::Proxy `"$httpProxy`";`nAcquire::https::Proxy `"$httpsProxy`";`n"))
-    $curlProxyB64   = [Convert]::ToBase64String($utf8.GetBytes($httpsProxy))
 }
+
+# the downloaded packages, as WSL sees them; dpkg orders their configuration itself
+$debDir = '/mnt/' + $Downloads.Substring(0, 1).ToLower() + ($Downloads.Substring(2) -replace '\\', '/')
+$debs   = ($Files | Where-Object { $_.Name -like '*.deb' } | ForEach-Object { "'$($_.Name)'" }) -join ' '
 
 $bash = @'
 set -eu
@@ -382,32 +433,15 @@ update-ca-certificates 2>/dev/null | grep -E 'added|removed' || true
 after=$(sha256sum /etc/ssl/certs/ca-certificates.crt | cut -d' ' -f1)
 [ "$before" = "$after" ] || CHANGED=1
 
-# proxy for apt, curl and dockerd
-put /etc/apt/apt.conf.d/95proxy '@@APT_PROXY_B64@@'
 put /etc/systemd/system/docker.service.d/http-proxy.conf '@@DOCKER_PROXY_B64@@'
 [ "$PUT_CHANGED" = 0 ] || CHANGED=1
-P=$(echo '@@CURL_PROXY_B64@@' | base64 -d)
-[ -z "$P" ] || export https_proxy="$P"
 
 if dpkg -s docker-ce >/dev/null 2>&1; then
   echo "Docker Engine already installed"
 else
-  APT="apt-get -y -o DPkg::Lock::Timeout=300"
-  $APT update
-  $APT install ca-certificates curl
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-  cat > /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-  $APT update
-  $APT install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  echo "installing Docker Engine from the downloaded packages"
+  cd '@@DEB_DIR@@'
+  dpkg -i @@DEBS@@
   CHANGED=1
 fi
 mkdir -p /etc/docker
@@ -429,14 +463,44 @@ else
   echo "WARNING: hello-world could not be pulled - the engine works, but Docker Hub images will not pull"
 fi
 '@
-$bash = $bash.Replace('@@APT_PROXY_B64@@', $aptProxyB64).Replace('@@DOCKER_PROXY_B64@@', $dockerProxyB64).Replace('@@CURL_PROXY_B64@@', $curlProxyB64)
+$bash = $bash.Replace('@@DOCKER_PROXY_B64@@', $dockerProxyB64).Replace('@@DEB_DIR@@', $debDir).Replace('@@DEBS@@', $debs)
 $out = & $Helper -TimeoutMin 45 -Bash $bash
 $out | Set-Content (Join-Path $Dir 'step7.log')
 Show ($out | Select-Object -Last 25)
 if (-not ($out -match '^\s*Engine \S+')) { throw 'Docker Engine is not running - full log in C:\WSL-Setup\step7.log' }
 
 # -----------------------------------------------------------------------------
-Step '8/8  Keep-alive at boot + power settings'
+Step '8/9  Docker CLI and Compose plugin for Windows'
+# The agent runs 'docker' / 'docker compose' by name; connect-agent-to-wsl-docker.ps1 points
+# it at this engine. Copied only when different, so a re-run never trips over a running CLI.
+function Install-IfChanged([string]$Source, [string]$Target) {
+    if ((Test-Path $Target) -and (Get-FileHash $Target).Hash -eq (Get-FileHash $Source).Hash) { return 'already there' }
+    New-Item -ItemType Directory -Force -Path (Split-Path $Target) | Out-Null
+    Copy-Item $Source $Target -Force
+    return 'installed'
+}
+$BinDir = Join-Path $Dir 'bin'
+$zip    = ($Files | Where-Object { $_.Name -like 'docker-*.zip' }).Name
+$tmp    = Join-Path $env:TEMP 'docker-cli'
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive (Join-Path $Downloads $zip) -DestinationPath $tmp
+Write-Host "   docker.exe ($zip): $(Install-IfChanged "$tmp\docker\docker.exe" (Join-Path $BinDir 'docker.exe'))"
+Remove-Item $tmp -Recurse -Force
+$plugin = Join-Path $env:ProgramFiles 'Docker\cli-plugins\docker-compose.exe'
+Write-Host "   Compose plugin: $(Install-IfChanged (Join-Path $Downloads 'docker-compose-windows-x86_64.exe') $plugin)"
+
+# machine PATH: edit the raw value so %SystemRoot%-style entries stay unexpanded
+$envKey  = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+$rawPath = (Get-Item $envKey).GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+if (@($rawPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $BinDir) {
+    Set-ItemProperty -Path $envKey -Name Path -Value ($rawPath.TrimEnd(';') + ';' + $BinDir) -Type ExpandString
+    Write-Host "   added $BinDir to the machine PATH"
+} else {
+    Write-Host "   $BinDir already on the machine PATH"
+}
+
+# -----------------------------------------------------------------------------
+Step '9/9  Keep-alive at boot + power settings'
 $kaAct = New-ScheduledTaskAction -Execute $WslExe -Argument '-d Ubuntu-24.04 -u root --exec /bin/sleep infinity'
 $kaTrg = @(
     New-ScheduledTaskTrigger -AtStartup
