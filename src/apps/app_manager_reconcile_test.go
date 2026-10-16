@@ -200,12 +200,74 @@ func TestUpdateLocalRequestedAppStatesWithRemote(t *testing.T) {
 		assert.Nil(t, gotDev, "dev payloads are not materialized by this method")
 	})
 
+	t.Run("applies a stop the cloud holds to a DEV app that still runs", func(t *testing.T) {
+		am, _, _, st, _, _ := amHarness(t)
+
+		// The stop was recorded in the cloud while the device was offline, so
+		// the push never arrived: locally the DEV app is still asked to run.
+		app := amSeed(t, st, 32, "dev-running", common.RUNNING, common.DEV)
+		app.StateLock.Lock()
+		app.RequestedState = common.RUNNING
+		app.StateLock.Unlock()
+
+		remote := amPayload(32, "dev-running", common.PRESENT, common.DEV)
+		require.NoError(t, am.UpdateLocalRequestedAppStatesWithRemote([]common.TransitionPayload{remote}))
+
+		app.StateLock.Lock()
+		reqState := app.RequestedState
+		app.StateLock.Unlock()
+		assert.Equal(t, common.PRESENT, reqState)
+		got, err := st.GetRequestedState(32, common.DEV)
+		require.NoError(t, err)
+		assert.Equal(t, common.PRESENT, got.RequestedState)
+	})
+
+	t.Run("leaves DEV run and build requests to the developer", func(t *testing.T) {
+		am, _, _, st, _, _ := amHarness(t)
+
+		stopped := amSeed(t, st, 33, "dev-stopped", common.PRESENT, common.DEV)
+		running := amSeed(t, st, 34, "dev-building", common.RUNNING, common.DEV)
+		running.StateLock.Lock()
+		running.RequestedState = common.RUNNING
+		running.StateLock.Unlock()
+
+		run := amPayload(33, "dev-stopped", common.RUNNING, common.DEV)
+		build := amPayload(34, "dev-building", common.BUILT, common.DEV)
+		require.NoError(t, am.UpdateLocalRequestedAppStatesWithRemote([]common.TransitionPayload{run, build}))
+
+		stopped.StateLock.Lock()
+		assert.Equal(t, common.PRESENT, stopped.RequestedState)
+		stopped.StateLock.Unlock()
+		running.StateLock.Lock()
+		assert.Equal(t, common.RUNNING, running.RequestedState)
+		running.StateLock.Unlock()
+	})
+
 	t.Run("empty remote list is a clean no-op", func(t *testing.T) {
 		am, _, _, _, _, _ := amHarness(t)
 
 		err := am.UpdateLocalRequestedAppStatesWithRemote([]common.TransitionPayload{})
 		require.NoError(t, err)
 	})
+}
+
+func TestDevStopOutstanding(t *testing.T) {
+	for _, tc := range []struct {
+		requested, current common.AppState
+		want               bool
+	}{
+		{common.PRESENT, common.RUNNING, true},
+		{common.REMOVED, common.RUNNING, true},
+		{common.UNINSTALLED, common.RUNNING, true},
+		{common.PRESENT, common.PRESENT, false},
+		{common.PRESENT, common.BUILDING, false},
+		{common.REMOVED, common.PRESENT, false},
+		{common.RUNNING, common.PRESENT, false},
+		{common.BUILT, common.RUNNING, false},
+		{common.PUBLISHED, common.RUNNING, false},
+	} {
+		assert.Equal(t, tc.want, devStopOutstanding(tc.requested, tc.current), "%s while %s", tc.requested, tc.current)
+	}
 }
 
 func TestHandleTransferFailure(t *testing.T) {

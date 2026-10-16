@@ -1499,9 +1499,22 @@ func (am *AppManager) EnsureRemoteRequestedStates() error {
 		payload := payloads[i]
 
 		// Do not auto-reconcile DEV apps on reconnect (they are driven by the
-		// developer's interactive actions), nor redo one-shot publishes/builds.
-		if payload.Stage == common.DEV || payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
-			log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for DEV/PUBLISHED/BUILT")
+		// developer's interactive actions) unless a stop never arrived, nor redo
+		// one-shot publishes/builds.
+		if payload.Stage == common.DEV {
+			app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+			if err != nil || app == nil {
+				continue
+			}
+			app.StateLock.Lock()
+			currentState := app.CurrentState
+			app.StateLock.Unlock()
+			if !devStopOutstanding(payload.RequestedState, currentState) {
+				log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for DEV")
+				continue
+			}
+		} else if payload.RequestedState == common.PUBLISHED || payload.RequestedState == common.BUILT {
+			log.Debug().Str("app", payload.AppName).Msg("Skipping reconnect reconcile for PUBLISHED/BUILT")
 			continue
 		}
 
@@ -1523,10 +1536,31 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote(newestPayloads []c
 	for i := range newestPayloads {
 		payload := newestPayloads[i]
 
-		// Only PROD apps are reconciled from the bulk sync. DEV apps are driven by
-		// the developer's interactive actions, not overwritten from the cloud sync
-		// (overwriting them races an active dev session: build/run/stop).
+		// PROD apps are reconciled from the bulk sync. DEV apps are driven by the
+		// developer's interactive actions, not overwritten from the cloud sync
+		// (overwriting them races an active dev session: build/run/stop), except
+		// for a stop that never arrived (devStopOutstanding).
 		if payload.Stage == common.PROD {
+			err := am.CreateOrUpdateApp(payload)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		app, err := am.AppStore.GetApp(payload.AppKey, payload.Stage)
+		if err != nil {
+			return err
+		}
+		if app == nil {
+			continue
+		}
+		app.StateLock.Lock()
+		currentState, requestedState := app.CurrentState, app.RequestedState
+		app.StateLock.Unlock()
+
+		if requestedState != payload.RequestedState && devStopOutstanding(payload.RequestedState, currentState) {
+			log.Info().Str("app", payload.AppName).Msgf("Applying %s requested in the cloud to the running DEV app", payload.RequestedState)
 			err := am.CreateOrUpdateApp(payload)
 			if err != nil {
 				return err
@@ -1535,4 +1569,17 @@ func (am *AppManager) UpdateLocalRequestedAppStatesWithRemote(newestPayloads []c
 	}
 
 	return nil
+}
+
+// devStopOutstanding reports whether a DEV app still runs although the
+// requested state is a stop or teardown. The cloud records a DEV stop before
+// pushing it, and the push is dropped while the device is offline; since DEV
+// apps are otherwise not reconciled on reconnect, the container would keep
+// running and every further stop would find nothing to change in the cloud.
+func devStopOutstanding(requestedState, currentState common.AppState) bool {
+	switch requestedState {
+	case common.PRESENT, common.REMOVED, common.UNINSTALLED:
+		return currentState == common.RUNNING
+	}
+	return false
 }
